@@ -14,6 +14,22 @@ add_compile_options(/W4 /permissive- /utf-8 /EHsc /Zc:__cplusplus /MP)
 add_compile_definitions(UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00 WINVER=0x0A00)
 
 # ---------------------------------------------------------------------------
+# The app (MVP): single exe, also runs as its own watchdog (--watchdog <pid>)
+# ---------------------------------------------------------------------------
+add_executable(WindowPiles WIN32
+    src/app/main.cpp
+    src/app/app.cpp
+    src/app/app_icon.cpp
+    src/common/win_util.cpp
+    src/common/canvas.cpp
+    src/recovery/journal.cpp
+    src/preview/snapshot.cpp
+    src/surface/pile_window.cpp
+    src/interaction/drag_watcher.cpp)
+target_include_directories(WindowPiles PRIVATE src)
+target_link_libraries(WindowPiles PRIVATE user32 gdi32 dwmapi shell32 shcore advapi32 d3d11 dxgi windowsapp)
+
+# ---------------------------------------------------------------------------
 # P0 PoC helpers (screen sampling, window lookup, timing, OS info)
 # ---------------------------------------------------------------------------
 add_library(poc_common STATIC poc/common/poc_common.cpp)
@@ -23,6 +39,10 @@ target_link_libraries(poc_common PUBLIC user32 gdi32 dwmapi psapi shell32 advapi
 # Test window generator used by every PoC and later by integration tests.
 add_executable(TestWindows tests/harness/TestWindows.cpp)
 target_link_libraries(TestWindows PRIVATE poc_common)
+
+# End-to-end check of WindowPiles.exe with injected mouse input.
+add_executable(e2e_piles tests/e2e/e2e_piles.cpp)
+target_link_libraries(e2e_piles PRIVATE poc_common)
 
 # PoC-01/02: DWM thumbnails of other windows, incl. hidden/minimized sources.
 add_executable(poc_dwm poc/poc01_dwm_thumbnail.cpp)
