@@ -13,19 +13,26 @@
 #include "interaction/drag_watcher.h"
 #include "preview/snapshot.h"
 #include "surface/pile_window.h"
+#include "ui/guide_window.h"
+#include "ui/work_frame.h"
 
 namespace wp {
+
+// Posted to the running instance's main window by a second launch: show the guide.
+constexpr UINT WM_APP_SHOW_GUIDE = WM_APP + 10;
+constexpr wchar_t kMainWindowClass[] = L"WindowPilesMain";
 
 class App : public PileHost, public DragHost {
 public:
     App();
     ~App() override;
-    int Run(int recoveredAtStart);
+    int Run();
 
-    // PileHost
+    // PileHost (cards and the top tab)
     void OnPileClick(Pile& pile) override;
     void OnPileMoved(Pile& pile) override;
     void OnPileMenu(Pile& pile, POINT pt) override;
+    void OnMissingClick(Pile& pile, int index) override;
 
     // DragHost
     bool CanPile(HWND hwnd) override;
@@ -42,16 +49,29 @@ private:
     // pile operations
     Pile* PileAt(POINT pt);
     Pile* PileOf(HWND hwnd);
+    Pile* FindPile(int id);
+    Pile* ActivePile();
     Pile& CreatePile(POINT nearPt);
     void RemovePile(Pile& pile);
     void HideMembers(Pile& pile, const std::vector<HWND>& hwnds, bool readPlacement);
     void Fold(Pile& pile);
-    void Expand(Pile& pile, bool bringToFront);
+    void Activate(Pile& pile);                 // open and mark as "being worked on"
+    void Expand(Pile& pile, bool makeActive);  // bring hidden windows back
     void Dissolve(Pile& pile);
     void RestoreAll();
-    void Refresh(Pile& pile);  // rename + redraw
+    void EditStyle(Pile& pile, POINT anchor);
+    void Refresh(Pile& pile);  // rename + redraw card / frame
     void VerifyHidden();
-    void SaveJournal();
+    void SaveJournal();  // recovery journal (hidden windows) + schedules a pile-state save
+
+    // persistence across restarts, updates and reboots
+    int RestoreSavedPiles();  // returns how many leftover hidden windows were recovered
+    void PersistSoon();
+    void PersistNow();
+    void AddMissing(Pile& pile, const Member& m);
+    void ClaimMissing(Pile& pile, const Member& m);
+    static bool AutostartEnabled();
+    static void SetAutostart(bool on);
 
     void OnMemberGone(HWND hwnd);
     void OnMemberShown(HWND hwnd);
@@ -59,6 +79,7 @@ private:
     // shell
     void AddTrayIcon();
     void ShowTrayMenu();
+    void ShowGuide();
     void Notify(const std::wstring& title, const std::wstring& text);
     POINT NextSlot(POINT nearPt);
     std::wstring AutoName(const Pile& pile) const;
@@ -71,11 +92,15 @@ private:
     HWINEVENTHOOK objectHook_ = nullptr;
 
     std::vector<std::unique_ptr<Pile>> piles_;
+    std::unique_ptr<WorkFrame> frame_;  // for the active pile
+    std::unique_ptr<GuideWindow> guide_;
     int nextId_ = 1;
     int colorIndex_ = 0;
     SnapshotEngine snapshots_;
     std::unique_ptr<DragWatcher> drag_;
     bool quitting_ = false;
+    bool stateFrozen_ = false;  // shutting down: keep the saved piles as they were
+    std::vector<HWND> pendingGone_;  // destroy events seen before the window was fully gone
 
     static App* instance_;
 };

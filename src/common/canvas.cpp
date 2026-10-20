@@ -100,6 +100,38 @@ void Canvas::StrokeRoundRect(const RECT& r, int radius, int t, COLORREF color, B
     }
 }
 
+void Canvas::DashedRoundRect(const RECT& r, int radius, int t, int dash, int gap, COLORREF color, BYTE alpha) {
+    RECT inner{r.left + t, r.top + t, r.right - t, r.bottom - t};
+    int period = std::max(1, dash + gap);
+    int x0 = std::max<int>(0, r.left), y0 = std::max<int>(0, r.top);
+    int x1 = std::min<int>(w_, r.right), y1 = std::min<int>(h_, r.bottom);
+    for (int y = y0; y < y1; ++y) {
+        uint32_t* row = px_ + (size_t)y * w_;
+        for (int x = x0; x < x1; ++x) {
+            float outer = RoundRectCoverage(x + 0.5f, y + 0.5f, r, (float)radius);
+            float in = RoundRectCoverage(x + 0.5f, y + 0.5f, inner, (float)std::max(0, radius - t));
+            float cov = outer - in;
+            if (cov <= 0) continue;
+            bool horizontalEdge = x >= r.left + radius && x < r.right - radius;
+            bool verticalEdge = y >= r.top + radius && y < r.bottom - radius;
+            if (horizontalEdge && ((x - r.left) % period) >= dash) continue;
+            if (verticalEdge && ((y - r.top) % period) >= dash) continue;
+            row[x] = Over(Premul(color, (int)(alpha * cov + 0.5f)), row[x]);
+        }
+    }
+}
+
+void Canvas::Shadow(const RECT& r, int radius, int blur, int offsetY, BYTE alpha) {
+    // Concentric rounded rects with falling alpha approximate a gaussian blur well enough at UI sizes.
+    blur = std::max(1, blur);
+    for (int i = blur; i >= 1; --i) {
+        RECT s{r.left - i, r.top - i + offsetY, r.right + i, r.bottom + i + offsetY};
+        double f = 1.0 - (double)i / (blur + 1);
+        int a = (int)(alpha * f * f * 2.2 / blur + 0.5);
+        if (a > 0) FillRoundRect(s, radius + i, RGB(0, 0, 0), (BYTE)std::min(255, a));
+    }
+}
+
 void Canvas::DrawImage(const Image& img, const RECT& dst, int radius) {
     if (img.empty()) return;
     int dw = dst.right - dst.left, dh = dst.bottom - dst.top;
@@ -157,10 +189,30 @@ void Canvas::ProtectAlpha(const RECT& rIn, F&& draw) {
     }
 }
 
+HFONT CreateUiFont(int sizePx, bool bold) {
+    return CreateFontW(-sizePx, 0, 0, 0, bold ? FW_BOLD : FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY,
+                       0, L"Malgun Gothic");
+}
+
+SIZE MeasureUiText(const std::wstring& text, int sizePx, bool bold, int wrapWidth) {
+    HDC dc = CreateCompatibleDC(nullptr);
+    HFONT font = CreateUiFont(sizePx, bold);
+    HGDIOBJ old = SelectObject(dc, font);
+    RECT r{0, 0, wrapWidth > 0 ? wrapWidth : 100000, 0};
+    DrawTextW(dc, text.c_str(), -1, &r, DT_CALCRECT | DT_NOPREFIX | (wrapWidth > 0 ? DT_WORDBREAK : DT_SINGLELINE));
+    SelectObject(dc, old);
+    DeleteObject(font);
+    DeleteDC(dc);
+    return {r.right - r.left, r.bottom - r.top};
+}
+
+SIZE Canvas::MeasureText(const std::wstring& text, int sizePx, bool bold, int wrapWidth) const {
+    return MeasureUiText(text, sizePx, bold, wrapWidth);
+}
+
 void Canvas::Text(const std::wstring& text, const RECT& r, COLORREF color, int sizePx, bool bold, UINT format) {
     ProtectAlpha(r, [&] {
-        HFONT font = CreateFontW(-sizePx, 0, 0, 0, bold ? FW_BOLD : FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
-                                 CLEARTYPE_QUALITY, 0, L"Malgun Gothic");
+        HFONT font = CreateUiFont(sizePx, bold);
         HGDIOBJ old = SelectObject(dc_, font);
         SetBkMode(dc_, TRANSPARENT);
         SetTextColor(dc_, color);

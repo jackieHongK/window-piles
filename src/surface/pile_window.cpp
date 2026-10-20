@@ -1,11 +1,12 @@
 #include "pile_window.h"
 
-#include <windowsx.h>
+#include <shellapi.h>
 
 #include <algorithm>
 #include <string>
 
 #include "common/win_util.h"
+#include "ui/theme.h"
 
 namespace wp {
 
@@ -14,21 +15,20 @@ namespace {
 constexpr wchar_t kClass[] = L"WindowPilesPile";
 
 // Layout in DIPs.
-constexpr int kPad = 8;
+constexpr int kMargin = 12;  // transparent room for the shadow
+constexpr int kHeaderH = 36;
+constexpr int kPad = 10;
 constexpr int kThumbW = 240, kThumbH = 135;
-constexpr int kStep = 10;  // overlap offset between stacked previews (spec: 12~16px at 100%)
-constexpr int kLabelH = 32;
-constexpr int kChipW = 270, kChipH = 48;
-
-constexpr COLORREF kCardBg = RGB(250, 250, 252);
-constexpr COLORREF kThumbBg = RGB(40, 42, 48);
-constexpr COLORREF kHot = RGB(30, 115, 240);
+constexpr int kStep = 10;  // overlap offset between stacked previews
+constexpr int kCardW = kPad * 2 + kThumbW + kStep * 2;
+constexpr int kThumbsH = kPad * 2 + kThumbH + kStep * 2;
+constexpr int kMissingTitleH = 26, kMissingRowH = 28, kMissingMoreH = 22, kMissingMaxRows = 4;
 
 void RegisterOnce() {
     static bool done = false;
     if (done) return;
     WNDCLASSW wc{};
-    wc.lpfnWndProc = DefWindowProcW;  // replaced per instance via GWLP_USERDATA dispatch below
+    wc.lpfnWndProc = DefWindowProcW;  // replaced per instance (GWLP_WNDPROC) after creation
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.hCursor = LoadCursorW(nullptr, IDC_HAND);
     wc.lpszClassName = kClass;
@@ -38,17 +38,23 @@ void RegisterOnce() {
 
 std::wstring CountText(const Pile& p) {
     int n = (int)p.members.size(), hidden = p.HiddenCount();
-    if (p.folded) {
-        if (hidden == n) return L"창 " + std::to_wstring(n) + L"개";
-        return std::to_wstring(n) + L"개 중 " + std::to_wstring(n - hidden) + L"개 열림";
-    }
-    return std::to_wstring(n - hidden) + L"개 열림";
+    if (hidden == n) return std::to_wstring(n);
+    return std::to_wstring(n - hidden) + L"/" + std::to_wstring(n) + L" 열림";
+}
+
+int MissingSectionH(const Pile& p) {
+    if (p.missing.empty()) return 0;
+    int rows = std::min<int>((int)p.missing.size(), kMissingMaxRows);
+    int h = kMissingTitleH + rows * kMissingRowH + kPad;
+    if ((int)p.missing.size() > kMissingMaxRows) h += kMissingMoreH;
+    if (p.members.empty()) h += kPad;
+    return h;
 }
 
 }  // namespace
 
-SIZE PileWindow::CardSize(UINT dpi) {
-    return {Scale(kPad * 2 + kThumbW + kStep * 2, dpi), Scale(kPad * 3 + kThumbH + kStep * 2 + kLabelH, dpi)};
+SIZE PileWindow::WindowSize(UINT dpi) {
+    return {Scale(kCardW + kMargin * 2, dpi), Scale(kHeaderH + kThumbsH + kMargin * 2, dpi)};
 }
 
 PileWindow::PileWindow(Pile& pile, PileHost& host) : pile_(pile), host_(host) {
@@ -66,98 +72,179 @@ PileWindow::~PileWindow() {
         SetWindowLongPtrW(hwnd_, GWLP_USERDATA, 0);
         DestroyWindow(hwnd_);
     }
+    for (auto& [path, icon] : icons_)
+        if (icon) DestroyIcon(icon);
 }
 
 RECT PileWindow::ScreenRect() const { return {pile_.pos.x, pile_.pos.y, pile_.pos.x + size_.cx, pile_.pos.y + size_.cy}; }
 
+RECT PileWindow::CardRect() const {
+    return {pile_.pos.x + margin_, pile_.pos.y + margin_, pile_.pos.x + size_.cx - margin_,
+            pile_.pos.y + size_.cy - margin_};
+}
+
 void PileWindow::SetHot(bool hot) {
     if (hot == hot_) return;
     hot_ = hot;
-    Render();
+    if (visible_) Render();
+}
+
+void PileWindow::SetVisible(bool visible) {
+    if (visible == visible_) return;
+    visible_ = visible;
+    if (visible) {
+        Render();
+        SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    } else {
+        ShowWindow(hwnd_, SW_HIDE);
+    }
+}
+
+HICON PileWindow::IconFor(const std::wstring& exePath) {
+    for (auto& [path, icon] : icons_)
+        if (path == exePath) return icon;
+    HICON icon = nullptr;
+    SHFILEINFOW sfi{};
+    if (!exePath.empty() && SHGetFileInfoW(exePath.c_str(), 0, &sfi, sizeof(sfi), SHGFI_ICON | SHGFI_SMALLICON))
+        icon = sfi.hIcon;
+    icons_.push_back({exePath, icon});
+    return icon;
+}
+
+int PileWindow::MissingAt(POINT client) const {
+    for (size_t i = 0; i < missingRects_.size(); ++i)
+        if (PtInRect(&missingRects_[i], client)) return (int)i;
+    return -1;
 }
 
 void PileWindow::SnapToWorkArea(bool magnet) {
     RECT r = ScreenRect();
     RECT work = WorkAreaForRect(r);
     UINT dpi = DpiForPoint(pile_.pos);
-    int margin = Scale(8, dpi), pull = Scale(20, dpi);
+    int pull = Scale(20, dpi);
     int w = size_.cx, h = size_.cy;
     int x = pile_.pos.x, y = pile_.pos.y;
+    // The shadow margin may hang off the work area; the card itself stays inside.
+    int m = margin_;
     if (magnet) {
-        if (x - work.left < pull) x = work.left + margin;
-        if (work.right - (x + w) < pull) x = work.right - w - margin;
-        if (y - work.top < pull) y = work.top + margin;
-        if (work.bottom - (y + h) < pull) y = work.bottom - h - margin;
+        if (x + m - work.left < pull) x = work.left - m + Scale(6, dpi);
+        if (work.right - (x + w - m) < pull) x = work.right - w + m - Scale(6, dpi);
+        if (y + m - work.top < pull) y = work.top - m + Scale(6, dpi);
+        if (work.bottom - (y + h - m) < pull) y = work.bottom - h + m - Scale(6, dpi);
     }
-    x = std::clamp<int>(x, work.left, std::max<int>(work.left, work.right - w));
-    y = std::clamp<int>(y, work.top, std::max<int>(work.top, work.bottom - h));
+    x = std::clamp<int>(x, work.left - m, std::max<int>(work.left - m, work.right - w + m));
+    y = std::clamp<int>(y, work.top - m, std::max<int>(work.top - m, work.bottom - h + m));
     pile_.pos = {x, y};
 }
 
 void PileWindow::Render() {
+    using namespace theme;
     UINT dpi = DpiForPoint(pile_.pos);
     auto S = [dpi](int v) { return Scale(v, dpi); };
-    const int textPx = S(14);
+    bool hasMembers = !pile_.members.empty();
+    int cardH = kHeaderH + (hasMembers ? kThumbsH : 0) + MissingSectionH(pile_);
+    margin_ = S(kMargin);
+    size_ = {S(kCardW) + 2 * margin_, S(cardH) + 2 * margin_};
+    SnapToWorkArea(false);
+    if (!visible_) return;
 
-    if (pile_.folded) {
-        size_ = CardSize(dpi);
-        SnapToWorkArea(false);
-        Canvas c(size_.cx, size_.cy);
-        RECT card{S(2), S(2), size_.cx - S(2), size_.cy - S(2)};
-        RECT shadow = card;
-        OffsetRect(&shadow, 0, S(2));
-        c.FillRoundRect(shadow, S(14), RGB(0, 0, 0), 40);
-        c.FillRoundRect(card, S(14), kCardBg, 250);
-        c.StrokeRoundRect(card, S(14), 1, RGB(0, 0, 0), 30);
+    Canvas c(size_.cx, size_.cy);
+    RECT card{margin_, margin_, size_.cx - margin_, size_.cy - margin_};
+    int radius = S(kRadiusLg);
+    c.Shadow(card, radius, S(10), S(3), hot_ ? 70 : 45);
+    c.FillRoundRect(card, radius, kBackground);
 
-        // Up to 3 most recently added windows; the newest is in front (bottom-left).
+    // Title bar in the pile's color (rounded top, straight bottom).
+    RECT header{card.left, card.top, card.right, card.top + S(kHeaderH)};
+    c.FillRoundRect({header.left, header.top, header.right, header.bottom + radius}, radius, pile_.color);
+    c.FillRoundRect({header.left, header.bottom, header.right, header.bottom + radius}, 0, kBackground);
+    COLORREF onColor = ContrastText(pile_.color);
+    std::wstring count = hasMembers ? CountText(pile_) : L"닫힌 창 " + std::to_wstring(pile_.missing.size());
+    SIZE cs = c.MeasureText(count, S(12), true);
+    RECT pill{header.right - S(12) - cs.cx - S(16), header.top + S(8), header.right - S(12), header.bottom - S(8)};
+    c.FillRoundRect(pill, S(10), onColor == kForeground ? RGB(0, 0, 0) : RGB(255, 255, 255), 40);
+    c.Text(count, pill, onColor, S(12), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    RECT nameR{header.left + S(14), header.top, pill.left - S(8), header.bottom};
+    c.Text(pile_.name, nameR, onColor, S(14), true, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+    int y = header.bottom;
+    if (hasMembers) {
+        // Up to 3 most recently added windows, the newest in front (bottom-left).
         int n = (int)pile_.members.size();
         int shown = std::min(n, 3);
-        for (int k = shown - 1; k >= 0; --k) {  // back to front
+        int bodyTop = y + S(kPad);
+        for (int k = shown - 1; k >= 0; --k) {
             const Member& m = pile_.members[n - 1 - k];
-            int depth = k;  // 0 = front
-            int x = S(kPad + kStep * depth), y = S(kPad + kStep * (2 - depth));
-            RECT box{x, y, x + S(kThumbW), y + S(kThumbH)};
-            c.FillRoundRect(box, S(6), kThumbBg);
-            if (!m.snapshot.empty()) c.DrawImage(m.snapshot, FitRect(m.snapshot.w, m.snapshot.h, box), S(6));
-            c.StrokeRoundRect(box, S(6), 1, RGB(255, 255, 255), 200);
-            if (!m.hidden) c.FillRoundRect(box, S(6), RGB(255, 255, 255), 110);  // this one is open
+            int x = card.left + S(kPad + kStep * k), ty = bodyTop + S(kStep * (2 - k));
+            RECT box{x, ty, x + S(kThumbW), ty + S(kThumbH)};
+            c.Shadow(box, S(kRadiusSm), S(4), S(1), 30);
+            c.FillRoundRect(box, S(kRadiusSm), kMuted);
+            if (!m.snapshot.empty()) c.DrawImage(m.snapshot, FitRect(m.snapshot.w, m.snapshot.h, box), S(kRadiusSm));
+            c.StrokeRoundRect(box, S(kRadiusSm), 1, kBorder);
+            if (!m.hidden && pile_.folded) c.FillRoundRect(box, S(kRadiusSm), kBackground, 150);  // this one is out
         }
         if (n > 3) {
-            RECT badge{size_.cx - S(kPad + 52), S(kPad + 4), size_.cx - S(kPad + 4), S(kPad + 28)};
-            c.FillRoundRect(badge, S(12), RGB(20, 20, 24), 230);
-            c.Text(L"+" + std::to_wstring(n - 3), badge, RGB(255, 255, 255), S(13), true,
-                   DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            std::wstring more = L"+" + std::to_wstring(n - 3);
+            SIZE ms = c.MeasureText(more, S(12), true);
+            RECT badge{card.right - S(kPad) - ms.cx - S(14), bodyTop + S(4), card.right - S(kPad) - S(4), bodyTop + S(26)};
+            c.FillRoundRect(badge, S(11), kPrimary, 235);
+            c.Text(more, badge, kPrimaryFg, S(12), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
-
-        RECT label{S(kPad), size_.cy - S(kPad + kLabelH), size_.cx - S(kPad), size_.cy - S(kPad)};
-        c.FillRoundRect(label, S(10), pile_.color);
-        RECT nameR{label.left + S(10), label.top, label.right - S(110), label.bottom};
-        c.Text(pile_.name, nameR, RGB(255, 255, 255), textPx, true,
-               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        RECT countR{label.right - S(110), label.top, label.right - S(10), label.bottom};
-        c.Text(CountText(pile_), countR, RGB(255, 255, 255), S(13), false, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
-
-        if (hot_) c.StrokeRoundRect(card, S(14), S(3), kHot);
-        c.Present(hwnd_, pile_.pos);
-    } else {
-        size_ = {S(kChipW), S(kChipH)};
-        SnapToWorkArea(false);
-        Canvas c(size_.cx, size_.cy);
-        RECT chip{S(2), S(2), size_.cx - S(2), size_.cy - S(2)};
-        RECT shadow = chip;
-        OffsetRect(&shadow, 0, S(2));
-        c.FillRoundRect(shadow, S(22), RGB(0, 0, 0), 40);
-        c.FillRoundRect(chip, S(22), pile_.color);
-        RECT nameR{chip.left + S(16), chip.top, chip.right - S(96), chip.bottom};
-        c.Text(pile_.name, nameR, RGB(255, 255, 255), textPx, true,
-               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        RECT right{chip.right - S(96), chip.top, chip.right - S(14), chip.bottom};
-        c.Text(CountText(pile_) + L" ▲", right, RGB(255, 255, 255), S(12), false,
-               DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
-        if (hot_) c.StrokeRoundRect(chip, S(22), S(3), kHot);
-        c.Present(hwnd_, pile_.pos);
+        // Open but not the active pile (e.g. after "모든 창 꺼내기"): say so, click folds it.
+        if (!pile_.folded) {
+            RECT body{card.left, y, card.right, y + S(kThumbsH)};
+            if (pile_.missing.empty()) body.bottom = card.bottom;
+            c.FillRoundRect(body, pile_.missing.empty() ? radius : 0, kBackground, 170);
+            std::wstring t = L"펼쳐져 있어요 · 누르면 접혀요";
+            SIZE ts = c.MeasureText(t, S(12), true);
+            int cx = (body.left + body.right) / 2, cy = (body.top + body.bottom) / 2;
+            RECT chip{cx - ts.cx / 2 - S(12), cy - S(14), cx + ts.cx / 2 + S(12), cy + S(14)};
+            c.FillRoundRect(chip, S(14), kBackground);
+            c.StrokeRoundRect(chip, S(14), 1, kBorder);
+            c.Text(t, chip, kSubtleFg, S(12), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
+        y += S(kThumbsH);
     }
+
+    // Windows that were in this pile but are gone (app closed / PC restarted): reopen list.
+    missingRects_.clear();
+    if (!pile_.missing.empty()) {
+        if (hasMembers) c.FillRoundRect({card.left + S(kPad), y, card.right - S(kPad), y + 1}, 0, kBorder);
+        else y += S(kPad);
+        RECT title{card.left + S(14), y, card.right - S(14), y + S(kMissingTitleH)};
+        c.Text(L"다시 열어야 할 창 " + std::to_wstring(pile_.missing.size()) + L"개", title, kMutedFg, S(12), true,
+               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        y += S(kMissingTitleH);
+        int rows = std::min<int>((int)pile_.missing.size(), kMissingMaxRows);
+        for (int i = 0; i < rows; ++i) {
+            const MissingWindow& mw = pile_.missing[i];
+            RECT row{card.left + S(6), y, card.right - S(6), y + S(kMissingRowH)};
+            missingRects_.push_back(row);  // canvas coords == client coords
+            bool canOpen = !mw.exePath.empty();
+            if (i == hoverMissing_ && canOpen) c.FillRoundRect(row, S(kRadiusSm), kMuted);
+            int ix = row.left + S(8), iy = row.top + (S(kMissingRowH) - S(16)) / 2;
+            c.FillRoundRect({ix, iy, ix + S(16), iy + S(16)}, S(3), i == hoverMissing_ && canOpen ? kMuted : kBackground);
+            c.DrawIcon(IconFor(mw.exePath), ix, iy, S(16));
+            std::wstring text = mw.appName + (mw.title.empty() ? L"" : L" · " + mw.title);
+            int right = row.right - S(8) - (i == hoverMissing_ && canOpen ? S(44) : 0);
+            c.Text(text, {ix + S(24), row.top, right, row.bottom}, kSubtleFg, S(12), false,
+                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            if (i == hoverMissing_ && canOpen)
+                c.Text(L"열기 ↗", {right, row.top, row.right - S(8), row.bottom}, kForeground, S(12), true,
+                       DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+            y += S(kMissingRowH);
+        }
+        if ((int)pile_.missing.size() > kMissingMaxRows) {
+            RECT more{card.left + S(14), y, card.right - S(14), y + S(kMissingMoreH)};
+            c.Text(L"외 " + std::to_wstring(pile_.missing.size() - kMissingMaxRows) + L"개 더", more, kMutedFg, S(12),
+                   false, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        }
+    }
+
+    if (hot_) c.StrokeRoundRect(card, radius, S(2), kPrimary);
+    else if (hover_) c.StrokeRoundRect(card, radius, 1, kBorderStrong);
+    else c.StrokeRoundRect(card, radius, 1, kBorder);
+    c.Present(hwnd_, pile_.pos);
 }
 
 LRESULT CALLBACK PileWindow::WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
@@ -179,6 +266,20 @@ LRESULT PileWindow::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         case WM_MOUSEMOVE: {
+            bool needRender = false;
+            if (!hover_) {
+                hover_ = true;
+                TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, hwnd_, 0};
+                TrackMouseEvent(&tme);
+                needRender = true;
+            }
+            POINT client{(short)LOWORD(lp), (short)HIWORD(lp)};
+            int hm = pressed_ ? -1 : MissingAt(client);
+            if (hm != hoverMissing_) {
+                hoverMissing_ = hm;
+                needRender = true;
+            }
+            if (needRender && !dragging_) Render();
             if (!pressed_) return 0;
             POINT c;
             GetCursorPos(&c);
@@ -191,6 +292,11 @@ LRESULT PileWindow::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             }
             return 0;
         }
+        case WM_MOUSELEAVE:
+            hover_ = false;
+            hoverMissing_ = -1;
+            Render();
+            return 0;
         case WM_LBUTTONUP: {
             if (!pressed_) return 0;
             pressed_ = false;
@@ -200,13 +306,19 @@ LRESULT PileWindow::Handle(UINT msg, WPARAM wp, LPARAM lp) {
                 SnapToWorkArea(true);
                 Render();  // DPI may differ on the new monitor
                 host_.OnPileMoved(pile_);
-            } else {
-                // A double click is two clicks: treat it as one toggle (plan §1.1).
-                DWORD now = GetTickCount();
-                if (now - lastClickTick_ > GetDoubleClickTime()) {
-                    lastClickTick_ = now;
-                    host_.OnPileClick(pile_);
-                }
+                return 0;
+            }
+            POINT client{(short)LOWORD(lp), (short)HIWORD(lp)};
+            int mi = MissingAt(client);
+            if (mi >= 0) {
+                host_.OnMissingClick(pile_, mi);
+                return 0;
+            }
+            // A double click is two clicks: treat it as one toggle.
+            DWORD now = GetTickCount();
+            if (now - lastClickTick_ > GetDoubleClickTime()) {
+                lastClickTick_ = now;
+                host_.OnPileClick(pile_);
             }
             return 0;
         }

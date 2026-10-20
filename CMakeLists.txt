@@ -22,12 +22,19 @@ add_executable(WindowPiles WIN32
     src/app/app_icon.cpp
     src/common/win_util.cpp
     src/common/canvas.cpp
+    src/common/json.cpp
     src/recovery/journal.cpp
+    src/groups/pile_store.cpp
     src/preview/snapshot.cpp
     src/surface/pile_window.cpp
-    src/interaction/drag_watcher.cpp)
+    src/interaction/drag_watcher.cpp
+    src/ui/popup_base.cpp
+    src/ui/menu.cpp
+    src/ui/guide_window.cpp
+    src/ui/pile_editor.cpp
+    src/ui/work_frame.cpp)
 target_include_directories(WindowPiles PRIVATE src)
-target_link_libraries(WindowPiles PRIVATE user32 gdi32 dwmapi shell32 shcore advapi32 d3d11 dxgi windowsapp)
+target_link_libraries(WindowPiles PRIVATE user32 gdi32 dwmapi shell32 shcore advapi32 comdlg32 d3d11 dxgi windowsapp)
 
 # ---------------------------------------------------------------------------
 # P0 PoC helpers (screen sampling, window lookup, timing, OS info)

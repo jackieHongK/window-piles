@@ -34,6 +34,10 @@ public:
     // Anti-aliased rounded rectangle, source-over with `alpha` (0..255).
     void FillRoundRect(const RECT& r, int radius, COLORREF color, BYTE alpha = 255);
     void StrokeRoundRect(const RECT& r, int radius, int thickness, COLORREF color, BYTE alpha = 255);
+    // Dashed outline; straight edges are dashed, corners solid.
+    void DashedRoundRect(const RECT& r, int radius, int thickness, int dash, int gap, COLORREF color, BYTE alpha = 255);
+    // Soft drop shadow under a rounded rect (layered approximation of a blur).
+    void Shadow(const RECT& r, int radius, int blur, int offsetY, BYTE alpha);
     // Scales `img` into `dst` (box filter down, nearest up), clipped to the rounded rect `radius`.
     void DrawImage(const Image& img, const RECT& dst, int radius = 0);
     // GDI text. Only pixels that were already opaque keep the text, so text must sit on an opaque fill.
@@ -41,8 +45,13 @@ public:
     void DrawIcon(HICON icon, int x, int y, int size);  // icon must sit on an opaque fill
     Image ToImage() const;                               // forces alpha 255
 
+    // Text measurement with the same font Text() uses.
+    SIZE MeasureText(const std::wstring& text, int sizePx, bool bold, int wrapWidth = 0) const;
+
     // Pushes the canvas to a layered window at screen position `pt`.
     void Present(HWND hwnd, POINT pt) const;
+    // Copies the canvas into a normal (non-layered) window's DC; the canvas must be opaque.
+    void Blit(HDC dst) const { BitBlt(dst, 0, 0, w_, h_, dc_, 0, 0, SRCCOPY); }
 
 private:
     int w_, h_;
@@ -57,5 +66,10 @@ private:
 
 // Fits an image of size (w,h) into box, preserving aspect ratio (centered).
 RECT FitRect(int w, int h, const RECT& box);
+
+// UI font (Malgun Gothic) at a pixel size; caller deletes.
+HFONT CreateUiFont(int sizePx, bool bold);
+// Measures text without a Canvas (e.g. to size a window before drawing it).
+SIZE MeasureUiText(const std::wstring& text, int sizePx, bool bold, int wrapWidth = 0);
 
 }  // namespace wp

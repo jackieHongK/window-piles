@@ -20,19 +20,33 @@ struct Member {
     DWORD pid = 0;
     uint64_t createTime = 0;
     std::wstring className;
+    std::wstring exePath;  // to tell the user which app to reopen if the window is gone later
     std::wstring title;
     WINDOWPLACEMENT placement{sizeof(WINDOWPLACEMENT)};  // where to bring it back
+    RECT lastRect{};  // screen rect when last visible (for the gather animation)
     bool hidden = false;
-    Image snapshot;  // shown in the folded card (snapshot or icon card)
+    Image snapshot;  // shown in the folded card (snapshot or icon card); never written to disk
+};
+
+// A window that belonged to the pile but no longer exists (its app was closed, or the PC
+// restarted). Listed in the card so the user can reopen it; removed when that app's window
+// is put back into the pile.
+struct MissingWindow {
+    std::wstring exePath;
+    std::wstring appName;
+    std::wstring title;
 };
 
 struct Pile {
     int id = 0;
     std::wstring name;
-    COLORREF color = RGB(66, 133, 244);
-    bool folded = true;  // folded = card with previews; open = small chip
-    POINT pos{};         // top-left of the pile surface, screen px
+    bool customName = false;  // the user renamed it: stop auto-naming
+    COLORREF color = RGB(51, 126, 169);
+    bool folded = true;   // folded = windows put away in the card
+    bool active = false;  // open and "being worked on": card hidden, screen frame + top tab shown
+    POINT pos{};          // top-left of the pile card window, screen px (stays put while open)
     std::vector<Member> members;
+    std::vector<MissingWindow> missing;
     std::unique_ptr<PileWindow> view;
 
     int HiddenCount() const {
@@ -40,6 +54,7 @@ struct Pile {
         for (auto& m : members) n += m.hidden;
         return n;
     }
+    bool Empty() const { return members.empty() && missing.empty(); }
     Member* Find(HWND h) {
         for (auto& m : members)
             if (m.hwnd == h) return &m;

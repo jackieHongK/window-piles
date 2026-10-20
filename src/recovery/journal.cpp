@@ -183,17 +183,7 @@ bool Parse(const std::string& text, Journal& j, std::string& err) {
 
 std::wstring JournalPath() { return AppDataDir() + L"\\recovery.json"; }
 
-bool WriteJournal(const Journal& j) {
-    std::wstring path = JournalPath(), tmp = path + L".tmp";
-    std::string text = Serialize(j);
-    HANDLE f = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (f == INVALID_HANDLE_VALUE) return false;
-    DWORD written = 0;
-    bool ok = WriteFile(f, text.data(), (DWORD)text.size(), &written, nullptr) && written == text.size();
-    CloseHandle(f);
-    if (!ok) return false;
-    return MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING) != FALSE;
-}
+bool WriteJournal(const Journal& j) { return WriteFileReplacing(JournalPath(), Serialize(j), false); }
 
 bool ReadJournal(Journal& j, std::string& err) {
     HANDLE f = CreateFileW(JournalPath().c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
