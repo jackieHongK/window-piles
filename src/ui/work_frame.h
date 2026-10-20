@@ -23,6 +23,8 @@ public:
     void Update();  // re-read monitors, name, color, count
     bool HitTab(POINT pt) const;
     void SetHot(bool hot);
+    // While a window is being dragged the tab grows into an obvious "drop here to add" target.
+    void SetDropMode(bool on);
     Pile& pile() { return pile_; }
 
 private:
@@ -47,6 +49,7 @@ private:
     std::vector<Part> parts_;
     bool hot_ = false;
     bool hover_ = false;
+    bool dropMode_ = false;
     DWORD lastClickTick_ = 0;
 };
 

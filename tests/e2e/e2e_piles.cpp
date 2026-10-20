@@ -307,7 +307,37 @@ int wmain(int argc, wchar_t** argv) {
         }
         SaveShot(L"3_frame_corner", {mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.left + S(200), mi.rcMonitor.top + S(120)});
 
+        // 3b) drag a member of the open pile: "빼기" zone next to "새 더미", tab grows into a target
+        POINT newBar{(work.left + work.right) / 2, work.top + S(48 + 34)};
+        POINT removeBar{newBar.x + S(160) + S(12) + S(130), newBar.y};
+        Drag(w2, removeBar, [&] {
+            auto bars = VisibleOfClass(L"WindowPilesDropBar");
+            char b2[96];
+            snprintf(b2, sizeof(b2), "3b) 더미 소속 창을 끌면 '새 더미'+'빼기' 영역 표시 (%zu/%d)", bars.size(),
+                     2 * MonitorCount());
+            Check((int)bars.size() == 2 * MonitorCount(), b2);
+            auto t = VisibleOfClass(L"WindowPilesFrameTab");
+            RECT big = t.empty() ? RECT{} : Rect(t[0]);
+            Check(!t.empty() && (big.bottom - big.top) >= (tr.bottom - tr.top) + S(6) && (big.right - big.left) > (tr.right - tr.left),
+                  "3b) 끄는 동안 맨 위 이름표가 커져서 넣는 자리로 바뀜");
+            SaveShot(L"3b_drag_targets", {work.left + (work.right - work.left) / 2 - S(420), work.top,
+                                          work.left + (work.right - work.left) / 2 + S(500), work.top + S(130)});
+        });
+        PumpFor(800);
+        Check(IsWindowVisible(w2) && SameRect(Rect(w2), r2), "3b) '빼기'에 놓으면 창은 원래 자리에 그대로 남음");
+        Check(!FileHas(L"piles.json", "\"hwnd\":\"" + std::to_string((uint64_t)(uintptr_t)w2) + "\""),
+              "3b) 더미에서 빠짐 (piles.json)");
+        // ...and back in by dropping it on the enlarged tab
+        Drag(w2, {(tr.left + tr.right) / 2, tr.top + S(20)});
+        PumpFor(800);
+        Check(FileHas(L"piles.json", "\"hwnd\":\"" + std::to_string((uint64_t)(uintptr_t)w2) + "\""),
+              "3b) 커진 이름표에 놓으면 다시 더미에 들어감");
+        Check(IsWindowVisible(w2) && SameRect(Rect(w2), r2), "3b) 펼친 더미에 넣은 창은 원래 자리에 열린 채로 있음");
+        tabs = VisibleOfClass(L"WindowPilesFrameTab");
+        if (!tabs.empty()) tr = Rect(tabs[0]);
+
         // 4) click the tab → fold back into the card at the same place
+        PumpFor(GetDoubleClickTime());
         Click({(tr.left + tr.right) / 2, tr.top + S(15)});
         Check(!IsWindowVisible(w1) && !IsWindowVisible(w2), "4) 이름표 클릭 → 두 창 다시 접힘");
         PumpUntil([&] { return IsWindowVisible(card) != FALSE; }, 1000);
@@ -316,6 +346,30 @@ int wmain(int argc, wchar_t** argv) {
               IsWindowVisible(card));
         Check(VisibleOfClass(L"WindowPilesFrameTab").empty() && VisibleOfClass(L"WindowPilesFrameEdge").empty(),
               "4) 테두리와 이름표가 사라짐");
+    }
+
+    // 4b) quick rename: hover the title → pencil; click → inline input
+    PumpFor(GetDoubleClickTime());
+    {
+        RECT cr = Rect(card);
+        POINT title{cr.left + S(12) + S(14) + S(20), cr.top + S(12) + S(18)};  // margin + padding + into the text
+        MoveMouse(title.x - S(5), title.y);
+        PumpFor(150);
+        MoveMouse(title.x, title.y);
+        PumpFor(400);
+        SaveShot(L"4b_title_hover", {cr.left, cr.top, cr.right, cr.top + S(70)});
+        Click(title);
+        auto rn = VisibleOfClass(L"WindowPilesRename");
+        Check(rn.size() == 1, "4b) 타이틀 이름 클릭 → 그 자리에 이름 입력창");
+        Check(IsWindowVisible(card) && !IsWindowVisible(w1), "4b) 이름을 눌러도 더미가 펼쳐지지 않음");
+        if (!rn.empty()) {
+            TypeText(L"빠른 이름");
+            PumpFor(200);
+            SaveShot(L"4b_inline", Inflate(Rect(rn[0]), S(12)));
+            Key(VK_RETURN);
+            PumpFor(1200);
+            Check(FileHas(L"piles.json", Utf8(L"\"빠른 이름\"")), "4b) Enter → 새 이름 저장");
+        }
     }
 
     // 5) rename via the menu + editor

@@ -43,6 +43,8 @@ public:
     // GDI text. Only pixels that were already opaque keep the text, so text must sit on an opaque fill.
     void Text(const std::wstring& text, const RECT& r, COLORREF color, int sizePx, bool bold, UINT format);
     void DrawIcon(HICON icon, int x, int y, int size);  // icon must sit on an opaque fill
+    // A Segoe Fluent/MDL2 icon glyph (e.g. 0xE70F = Edit) centered in `r`; must sit on an opaque fill.
+    void Glyph(wchar_t glyph, const RECT& r, COLORREF color, int sizePx);
     Image ToImage() const;                               // forces alpha 255
 
     // Text measurement with the same font Text() uses.

@@ -78,6 +78,11 @@ PileWindow::~PileWindow() {
 
 RECT PileWindow::ScreenRect() const { return {pile_.pos.x, pile_.pos.y, pile_.pos.x + size_.cx, pile_.pos.y + size_.cy}; }
 
+RECT PileWindow::RenameRect() const {
+    return {pile_.pos.x + renameRect_.left, pile_.pos.y + renameRect_.top, pile_.pos.x + renameRect_.right,
+            pile_.pos.y + renameRect_.bottom};
+}
+
 RECT PileWindow::CardRect() const {
     return {pile_.pos.x + margin_, pile_.pos.y + margin_, pile_.pos.x + size_.cx - margin_,
             pile_.pos.y + size_.cy - margin_};
@@ -164,7 +169,20 @@ void PileWindow::Render() {
     RECT pill{header.right - S(12) - cs.cx - S(16), header.top + S(8), header.right - S(12), header.bottom - S(8)};
     c.FillRoundRect(pill, S(10), onColor == kForeground ? RGB(0, 0, 0) : RGB(255, 255, 255), 40);
     c.Text(count, pill, onColor, S(12), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    RECT nameR{header.left + S(14), header.top, pill.left - S(8), header.bottom};
+    // Title text; hovering it shows a pencil and a soft highlight: click to rename in place.
+    int pencil = S(22);
+    int nameLeft = header.left + S(14), nameMax = pill.left - S(10) - pencil - S(4) - nameLeft;
+    int nameW = std::min<int>(c.MeasureText(pile_.name, S(14), true).cx, std::max(0, nameMax));
+    RECT nameR{nameLeft, header.top, nameLeft + nameW, header.bottom};
+    pencilRect_ = {nameR.right + S(4), header.top + (S(kHeaderH) - pencil) / 2, nameR.right + S(4) + pencil,
+                   header.top + (S(kHeaderH) - pencil) / 2 + pencil};
+    nameZone_ = {nameR.left - S(6), header.top + S(5), pencilRect_.right + S(2), header.bottom - S(5)};
+    renameRect_ = {header.left + S(6), header.top + S(4), pill.left - S(8), header.bottom - S(4)};
+    if (hoverName_) {
+        COLORREF tint = onColor == kForeground ? RGB(0, 0, 0) : RGB(255, 255, 255);
+        c.FillRoundRect(nameZone_, S(kRadiusSm), tint, 36);
+        c.Glyph(0xE70F, pencilRect_, onColor, S(13));  // Edit
+    }
     c.Text(pile_.name, nameR, onColor, S(14), true, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
     int y = header.bottom;
@@ -279,6 +297,11 @@ LRESULT PileWindow::Handle(UINT msg, WPARAM wp, LPARAM lp) {
                 hoverMissing_ = hm;
                 needRender = true;
             }
+            bool hn = !pressed_ && PtInRect(&nameZone_, client);
+            if (hn != hoverName_) {
+                hoverName_ = hn;
+                needRender = true;
+            }
             if (needRender && !dragging_) Render();
             if (!pressed_) return 0;
             POINT c;
@@ -294,9 +317,14 @@ LRESULT PileWindow::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         }
         case WM_MOUSELEAVE:
             hover_ = false;
+            hoverName_ = false;
             hoverMissing_ = -1;
             Render();
             return 0;
+        case WM_SETCURSOR:
+            // I-beam over the title says "you can type here"; the rest of the card is a button.
+            SetCursor(LoadCursorW(nullptr, hoverName_ ? IDC_IBEAM : IDC_HAND));
+            return TRUE;
         case WM_LBUTTONUP: {
             if (!pressed_) return 0;
             pressed_ = false;
@@ -312,6 +340,12 @@ LRESULT PileWindow::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             int mi = MissingAt(client);
             if (mi >= 0) {
                 host_.OnMissingClick(pile_, mi);
+                return 0;
+            }
+            if (PtInRect(&nameZone_, client)) {
+                hoverName_ = false;
+                Render();
+                host_.OnPileRename(pile_);
                 return 0;
             }
             // A double click is two clicks: treat it as one toggle.

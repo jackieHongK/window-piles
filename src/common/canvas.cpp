@@ -223,6 +223,35 @@ void Canvas::Text(const std::wstring& text, const RECT& r, COLORREF color, int s
     });
 }
 
+void Canvas::Glyph(wchar_t glyph, const RECT& r, COLORREF color, int sizePx) {
+    static const wchar_t* face = [] {
+        // Windows 11 ships Segoe Fluent Icons; Windows 10 has Segoe MDL2 Assets (same code points).
+        LOGFONTW lf{};
+        lf.lfCharSet = DEFAULT_CHARSET;
+        wcscpy_s(lf.lfFaceName, L"Segoe Fluent Icons");
+        bool found = false;
+        HDC dc = GetDC(nullptr);
+        EnumFontFamiliesExW(dc, &lf, [](const LOGFONTW*, const TEXTMETRICW*, DWORD, LPARAM p) -> int {
+            *(bool*)p = true;
+            return 0;
+        }, (LPARAM)&found, 0);
+        ReleaseDC(nullptr, dc);
+        return found ? L"Segoe Fluent Icons" : L"Segoe MDL2 Assets";
+    }();
+    ProtectAlpha(r, [&] {
+        HFONT font = CreateFontW(-sizePx, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, 0,
+                                 face);
+        HGDIOBJ old = SelectObject(dc_, font);
+        SetBkMode(dc_, TRANSPARENT);
+        SetTextColor(dc_, color);
+        RECT tr = r;
+        wchar_t s[2] = {glyph, 0};
+        DrawTextW(dc_, s, 1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        SelectObject(dc_, old);
+        DeleteObject(font);
+    });
+}
+
 void Canvas::DrawIcon(HICON icon, int x, int y, int size) {
     if (!icon) return;
     RECT r{x, y, x + size, y + size};

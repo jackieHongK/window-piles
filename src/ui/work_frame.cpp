@@ -156,6 +156,39 @@ void WorkFrame::Update() {
 void WorkFrame::RenderTab(Part& p) {
     using namespace theme;
     auto S = [&](int v) { return Scale(v, p.dpi); };
+    if (dropMode_) {
+        // Bigger, explicit drop target: "drop the window here to add it to this pile".
+        int open = 0;
+        for (auto& m : pile_.members) open += !m.hidden;
+        // One line, so it stays clear of the "새 더미" bar below (bars start 48 DIP down).
+        std::wstring title = hot_ ? L"놓으면 '" + pile_.name + L"'에 들어가요" : L"＋  여기에 놓아 '" + pile_.name + L"'에 넣기";
+        std::wstring sub = L"창 " + std::to_wstring(open) + L"개 작업 중";
+        int titleW = std::min<int>(MeasureUiText(title, S(14), true).cx, S(460));
+        int subW = MeasureUiText(sub, S(12), false).cx;
+        int w = std::max(S(360), titleW + S(14) + subW + S(44));
+        int h = S(kTabH + 8), m = S(kTabMargin);
+        Canvas c(w + 2 * m, h + m);
+        int radius = S(12);
+        RECT tab{m, -radius, m + w, h};
+        COLORREF bg = hot_ ? Mix(pile_.color, RGB(0, 0, 0), 0.18) : pile_.color;
+        c.Shadow({tab.left, 0, tab.right, tab.bottom}, radius, S(10), S(3), hot_ ? 110 : 80);
+        c.FillRoundRect(tab, radius, bg);
+        COLORREF fg = ContrastText(pile_.color);
+        RECT inner{tab.left + S(6), S(4), tab.right - S(6), h - S(5)};
+        if (hot_) c.StrokeRoundRect(inner, S(9), S(2), fg, 230);
+        else c.DashedRoundRect(inner, S(9), std::max(1, S(1) + S(1) / 2), S(6), S(4), fg, 170);
+        int x = (tab.left + tab.right - (titleW + S(14) + subW)) / 2;
+        c.Text(title, {x, inner.top, x + titleW, inner.bottom}, fg, S(14), true,
+               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        c.Text(sub, {x + titleW + S(14), inner.top, x + titleW + S(14) + subW, inner.bottom}, fg, S(12), false,
+               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        const RECT& r = p.monitorRect;
+        int tx = (r.left + r.right - w) / 2;
+        p.tabRect = {tx, r.top, tx + w, r.top + h};
+        p.tabPos = {tx - m, r.top};
+        c.Present(p.tab, p.tabPos);
+        return;
+    }
     int open = 0;
     for (auto& m : pile_.members) open += !m.hidden;
     std::wstring name = pile_.name;
@@ -203,6 +236,13 @@ bool WorkFrame::HitTab(POINT pt) const {
 void WorkFrame::SetHot(bool hot) {
     if (hot == hot_) return;
     hot_ = hot;
+    for (auto& p : parts_) RenderTab(p);
+}
+
+void WorkFrame::SetDropMode(bool on) {
+    if (on == dropMode_) return;
+    dropMode_ = on;
+    if (!on) hot_ = false;
     for (auto& p : parts_) RenderTab(p);
 }
 

@@ -10,6 +10,7 @@
 #include "common/win_util.h"
 #include "groups/pile_store.h"
 #include "recovery/journal.h"
+#include "ui/inline_rename.h"
 #include "ui/menu.h"
 #include "ui/pile_editor.h"
 #include "ui/theme.h"
@@ -355,6 +356,15 @@ bool App::CanPile(HWND h) {
     return true;
 }
 
+std::wstring App::PileNameOf(HWND hwnd) {
+    Pile* p = PileOf(hwnd);
+    return p ? p->name : std::wstring();
+}
+
+void App::OnDragTargetsShown(HWND) {
+    if (frame_) frame_->SetDropMode(true);  // the top tab grows into a "drop here to add" target
+}
+
 void App::OnDragHover(HWND, POINT cursor) {
     Pile* over = PileAt(cursor);
     for (auto& p : piles_) p->view->SetHot(p.get() == over && !p->active);
@@ -363,10 +373,33 @@ void App::OnDragHover(HWND, POINT cursor) {
 
 void App::OnDragEnd() {
     for (auto& p : piles_) p->view->SetHot(false);
-    if (frame_) frame_->SetHot(false);
+    if (frame_) frame_->SetDropMode(false);
 }
 
-void App::OnDragDrop(HWND hwnd, const WINDOWPLACEMENT& before, POINT cursor, bool onBar) {
+void App::TakeOut(HWND hwnd, const WINDOWPLACEMENT& before) {
+    Pile* p = PileOf(hwnd);
+    if (!p) return;
+    auto& ms = p->members;
+    ms.erase(std::remove_if(ms.begin(), ms.end(), [&](const Member& m) { return m.hwnd == hwnd; }), ms.end());
+    RestoreWindow(hwnd, before, false);  // the window stays open, back where it was before the drag
+    if (p->members.empty() && p->active) {
+        p->active = false;
+        p->folded = true;
+        frame_.reset();
+        p->view->SetVisible(true);
+    }
+    if (p->Empty()) RemovePile(*p);
+    else Refresh(*p);
+    SaveJournal();
+}
+
+void App::OnDragDrop(HWND hwnd, const WINDOWPLACEMENT& before, POINT cursor, DropZone zone) {
+    if (zone == DropZone::RemoveFromPile) {
+        TakeOut(hwnd, before);
+        return;
+    }
+    if (!CanPile(hwnd)) return;
+    bool onBar = zone == DropZone::NewPile;
     Pile* target = onBar ? nullptr : PileAt(cursor);
     if (!onBar && !target) return;  // an ordinary window move
     Pile* owner = PileOf(hwnd);
@@ -466,6 +499,31 @@ void App::OnPileMenu(Pile& pile, POINT pt) {
         case kMenuHelp: ShowGuide(); break;
         case kMenuQuit: Quit(); break;
     }
+}
+
+void App::OnPileRename(Pile& pile) {
+    int pileId = pile.id;
+    std::wstring before = pile.name;
+    bool wasCustom = pile.customName;
+    auto preview = [this, pileId](const std::wstring& name) {
+        if (Pile* p = FindPile(pileId)) {
+            p->name = name;
+            p->view->Render();
+        }
+    };
+    std::wstring result;
+    bool saved = InlineRename(pile.view->RenameRect(), pile.name, DpiForPoint(pile.pos), preview, result);
+    Pile* p = FindPile(pileId);
+    if (!p) return;
+    if (saved) {
+        p->customName = !result.empty();  // an empty name goes back to the automatic one
+        if (p->customName) p->name = result;
+    } else {
+        p->name = before;
+        p->customName = wasCustom;
+    }
+    Refresh(*p);
+    PersistSoon();
 }
 
 void App::EditStyle(Pile& pile, POINT anchor) {

@@ -33,11 +33,14 @@ public:
     void OnPileMoved(Pile& pile) override;
     void OnPileMenu(Pile& pile, POINT pt) override;
     void OnMissingClick(Pile& pile, int index) override;
+    void OnPileRename(Pile& pile) override;
 
     // DragHost
     bool CanPile(HWND hwnd) override;
+    std::wstring PileNameOf(HWND hwnd) override;
+    void OnDragTargetsShown(HWND dragged) override;
     void OnDragHover(HWND dragged, POINT cursor) override;
-    void OnDragDrop(HWND dragged, const WINDOWPLACEMENT& before, POINT cursor, bool onBar) override;
+    void OnDragDrop(HWND dragged, const WINDOWPLACEMENT& before, POINT cursor, DropZone zone) override;
     void OnDragEnd() override;
 
 private:
@@ -58,6 +61,7 @@ private:
     void Activate(Pile& pile);                 // open and mark as "being worked on"
     void Expand(Pile& pile, bool makeActive);  // bring hidden windows back
     void Dissolve(Pile& pile);
+    void TakeOut(HWND hwnd, const WINDOWPLACEMENT& before);  // remove one window from its pile
     void RestoreAll();
     void EditStyle(Pile& pile, POINT anchor);
     void Refresh(Pile& pile);  // rename + redraw card / frame

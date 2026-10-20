@@ -32,6 +32,7 @@ add_executable(WindowPiles WIN32
     src/ui/menu.cpp
     src/ui/guide_window.cpp
     src/ui/pile_editor.cpp
+    src/ui/inline_rename.cpp
     src/ui/work_frame.cpp)
 target_include_directories(WindowPiles PRIVATE src)
 target_link_libraries(WindowPiles PRIVATE user32 gdi32 dwmapi shell32 shcore advapi32 comdlg32 d3d11 dxgi windowsapp)
