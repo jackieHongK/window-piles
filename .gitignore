@@ -1,0 +1,5 @@
+/build/
+/out/
+/.vs/
+*.user
+docs/poc-raw/*.log
