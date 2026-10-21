@@ -82,6 +82,8 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 
 결과물: `build\bin\Release\`
 
+배포 zip 만들기 (빌드 포함): `powershell -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 0.1.1` → `build\dist\WindowPiles-0.1.1-win-x64.zip`. 확인 후 `gh release create v0.1.1 <zip>`로 올립니다.
+
 ## 구성
 
 | 경로 | 내용 |
