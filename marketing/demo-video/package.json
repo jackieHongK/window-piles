@@ -1,0 +1,24 @@
+{
+  "name": "window-piles-demo-video",
+  "private": true,
+  "version": "0.1.0",
+  "description": "20-second motion-graphics demo drafts for Window Piles (one per role)",
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render:all": "node render-all.mjs",
+    "stills": "node render-all.mjs --stills"
+  },
+  "dependencies": {
+    "@remotion/bundler": "^4.0.537",
+    "@remotion/cli": "^4.0.537",
+    "@remotion/fonts": "^4.0.537",
+    "@remotion/renderer": "^4.0.537",
+    "@types/react": "^19.3.0",
+    "pretendard": "^1.3.9",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "remotion": "^4.0.537",
+    "typescript": "^7.0.2"
+  }
+}
