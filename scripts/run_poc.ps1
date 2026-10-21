@@ -1,4 +1,4 @@
-# Runs every P0 PoC and writes raw results to docs\poc-raw\<COMPUTERNAME>-*.md
+# Runs every P0 PoC and writes raw results to docs\poc-raw\auto-*.md (no machine name, so results can be shared)
 # Usage (from the repo root):
 #   powershell -ExecutionPolicy Bypass -File scripts\run_poc.ps1 [-SkipBuild] [-SkipDrag]
 #
@@ -11,7 +11,7 @@ if (-not $SkipBuild) { & "$root\build.ps1" -Config Release }
 $bin = "$root\build\bin\Release"
 $rawDir = "$root\docs\poc-raw"
 New-Item -ItemType Directory -Force $rawDir | Out-Null
-$tag = $env:COMPUTERNAME
+$tag = "auto"
 
 function Start-Harness([string[]]$harnessArgs) {
     $p = Start-Process -FilePath "$bin\TestWindows.exe" -ArgumentList ($harnessArgs + @('--seconds', '180')) -PassThru -WindowStyle Minimized
