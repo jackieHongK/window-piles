@@ -3,6 +3,9 @@
 #include <shellscalingapi.h>
 #include <shlobj.h>
 
+#include <cstdarg>
+#include <cstdio>
+
 namespace wp {
 
 std::string Utf8(const std::wstring& s) {
@@ -72,7 +75,19 @@ uint64_t ProcessCreateTime(DWORD pid) {
     return t;
 }
 
+bool UsingTestDataDir() {
+    wchar_t buf[8];
+    return GetEnvironmentVariableW(L"WINDOWPILES_DATA_DIR", buf, 8) > 0;
+}
+
 std::wstring AppDataDir() {
+    // Tests point the app at their own folder so they never read or overwrite the user's piles.
+    wchar_t over[MAX_PATH] = {};
+    DWORD n = GetEnvironmentVariableW(L"WINDOWPILES_DATA_DIR", over, MAX_PATH);
+    if (n > 0 && n < MAX_PATH) {
+        CreateDirectoryW(over, nullptr);
+        return over;
+    }
     PWSTR base = nullptr;
     std::wstring dir;
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &base))) {
@@ -96,14 +111,43 @@ bool WriteWhole(const std::wstring& path, const std::string& data, bool flush) {
 }
 }  // namespace
 
+void Log(const char* fmt, ...) {
+    static std::wstring path = AppDataDir() + L"\\app.log";
+    char msg[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    char line[1200];
+    int n = snprintf(line, sizeof(line), "%04d-%02d-%02d %02d:%02d:%02d.%03d [%lu] %s\r\n", t.wYear, t.wMonth, t.wDay,
+                     t.wHour, t.wMinute, t.wSecond, t.wMilliseconds, GetCurrentProcessId(), msg);
+    HANDLE f = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return;
+    LARGE_INTEGER size{};
+    if (GetFileSizeEx(f, &size) && size.QuadPart > 256 * 1024) {  // keep it small: start over
+        CloseHandle(f);
+        f = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (f == INVALID_HANDLE_VALUE) return;
+    }
+    DWORD written = 0;
+    WriteFile(f, line, (DWORD)n, &written, nullptr);
+    CloseHandle(f);
+}
+
 bool WriteFileReplacing(const std::wstring& path, const std::string& data, bool flush) {
     std::wstring tmp = path + L".tmp";
     if (WriteWhole(tmp, data, flush)) {
         DWORD flags = MOVEFILE_REPLACE_EXISTING | (flush ? MOVEFILE_WRITE_THROUGH : 0);
         for (int attempt = 0; attempt < 6; ++attempt) {
             if (MoveFileExW(tmp.c_str(), path.c_str(), flags)) return true;
+            Log("rename %s failed (attempt %d): error %lu", Utf8(path).c_str(), attempt + 1, GetLastError());
             Sleep(15 * (attempt + 1));
         }
+    } else {
+        Log("write %s.tmp failed: error %lu", Utf8(path).c_str(), GetLastError());
     }
     // Rename keeps failing: a direct write is less atomic but far better than losing the data.
     bool ok = false;

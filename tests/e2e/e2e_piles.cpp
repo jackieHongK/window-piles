@@ -186,10 +186,11 @@ std::string ReadFileUtf8(const std::wstring& path) {
     s.resize(n);
     return s;
 }
+// The app under test uses this folder instead of %LOCALAPPDATA%\WindowPiles (set in wmain).
 std::wstring DataDir() {
-    wchar_t buf[MAX_PATH];
-    GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
-    return std::wstring(buf) + L"\\WindowPiles";
+    wchar_t buf[MAX_PATH] = {};
+    GetEnvironmentVariableW(L"WINDOWPILES_DATA_DIR", buf, MAX_PATH);
+    return buf;
 }
 bool FileHas(const wchar_t* file, const std::string& needle) {
     return ReadFileUtf8(DataDir() + L"\\" + file).find(needle) != std::string::npos;
@@ -221,12 +222,18 @@ int MonitorCount() {
 
 int wmain(int argc, wchar_t** argv) {
     InitProcess();
+    SetEnvironmentVariableW(L"WINDOWPILES_NO_RELAUNCH", L"1");  // keep the app under test as our child
     for (int i = 1; i < argc; ++i)
         if (std::wstring(argv[i]) == L"--shots" && i + 1 < argc) g_shots = argv[++i];
     wchar_t self[MAX_PATH];
     GetModuleFileNameW(nullptr, self, MAX_PATH);
     g_bin = self;
     g_bin = g_bin.substr(0, g_bin.find_last_of(L'\\'));
+    // Isolated data folder: never touch the user's real piles.
+    SetEnvironmentVariableW(L"WINDOWPILES_DATA_DIR", (g_bin + L"\\e2e-data").c_str());
+    CreateDirectoryW((g_bin + L"\\e2e-data").c_str(), nullptr);
+    // Not a first run: the first-run guide would cover the test windows (step 6 checks the guide).
+    CloseHandle(CreateFileW((g_bin + L"\\e2e-data\\firstrun.done").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr));
     std::wstring appExe = g_bin + L"\\WindowPiles.exe";
     g_dpi = GetDpiForSystem();
 

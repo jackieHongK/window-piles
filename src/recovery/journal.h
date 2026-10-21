@@ -34,12 +34,16 @@ bool ReadJournal(Journal& j, std::string& err);
 std::string ValidateIdentity(const JournalEntry& e);
 
 // Shows a window again with its saved placement, without stealing focus unless asked.
+// Non-blocking: the cross-process call runs on a pool thread (a frozen app can't freeze us).
 void RestoreWindow(HWND hwnd, const WINDOWPLACEMENT& wp, bool activate);
+// Waits (bounded) until queued RestoreWindow calls finished. Call before the process exits.
+bool WaitForRestores(DWORD timeoutMs);
 
 // Restores every validated entry; returns how many were restored.
 int RecoverFromJournal(const Journal& j, int* skipped);
 
-// Watchdog process body: waits on the manager handle (no CPU), then recovers if needed.
+// Watchdog process body: waits on the manager handle (no CPU). After a crash it relaunches the app
+// (piles come back as they were); otherwise, or if that fails, it shows the hidden windows.
 int RunWatchdog(DWORD managerPid);
 
 }  // namespace wp

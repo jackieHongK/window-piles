@@ -1,5 +1,6 @@
 #include "journal.h"
 
+#include <atomic>
 #include <cctype>
 #include <cstdio>
 
@@ -214,6 +215,25 @@ std::string ValidateIdentity(const JournalEntry& e) {
     return {};
 }
 
+namespace {
+
+std::atomic<int> g_pendingRestores{0};
+
+struct RestoreJob {
+    HWND hwnd;
+    WINDOWPLACEMENT wp;
+};
+
+void CALLBACK RunRestore(PTP_CALLBACK_INSTANCE, void* param) {
+    auto* job = (RestoreJob*)param;
+    SetWindowPlacement(job->hwnd, &job->wp);
+    if (!IsWindowVisible(job->hwnd)) ShowWindowAsync(job->hwnd, SW_SHOWNA);
+    delete job;
+    --g_pendingRestores;
+}
+
+}  // namespace
+
 void RestoreWindow(HWND hwnd, const WINDOWPLACEMENT& saved, bool activate) {
     if (IsHungAppWindow(hwnd)) {
         // Never block on a hung app: async show only.
@@ -224,8 +244,26 @@ void RestoreWindow(HWND hwnd, const WINDOWPLACEMENT& saved, bool activate) {
     wp.length = sizeof(wp);
     if (wp.showCmd == SW_SHOWMINIMIZED || wp.showCmd == SW_MINIMIZE) wp.showCmd = SW_SHOWMINNOACTIVE;
     else if (wp.showCmd != SW_SHOWMAXIMIZED) wp.showCmd = activate ? SW_SHOWNORMAL : SW_SHOWNOACTIVATE;
-    SetWindowPlacement(hwnd, &wp);
-    if (!IsWindowVisible(hwnd)) ShowWindowAsync(hwnd, SW_SHOWNA);
+    // SetWindowPlacement on another process's window is a synchronous round trip. If that app is
+    // frozen (suspended in Modern Standby, busy at logoff) but not yet flagged as hung, the call can
+    // block for a long time — it once froze the whole app until Windows killed it. Run it on a pool
+    // thread so the caller never waits; WaitForRestores() bounds the wait at exit.
+    auto* job = new RestoreJob{hwnd, wp};
+    ++g_pendingRestores;
+    if (!TrySubmitThreadpoolCallback(RunRestore, job, nullptr)) {
+        delete job;
+        --g_pendingRestores;
+        ShowWindowAsync(hwnd, SW_SHOWNA);
+    }
+}
+
+bool WaitForRestores(DWORD timeoutMs) {
+    DWORD start = GetTickCount();
+    while (g_pendingRestores > 0) {
+        if (GetTickCount() - start > timeoutMs) return false;
+        Sleep(10);
+    }
+    return true;
 }
 
 int RecoverFromJournal(const Journal& j, int* skipped) {
@@ -239,19 +277,67 @@ int RecoverFromJournal(const Journal& j, int* skipped) {
         if (!IsWindowVisible(h)) RestoreWindow(h, e.wp, false);
         ++restored;
     }
+    // Last resort for any window whose app is too frozen to answer in time: queue a plain show.
+    if (!WaitForRestores(3000))
+        for (const JournalEntry& e : j.entries)
+            if (ValidateIdentity(e).empty()) ShowWindowAsync((HWND)(uintptr_t)e.hwnd, SW_SHOWNA);
     if (skipped) *skipped = skip;
     return restored;
 }
 
+namespace {
+
+// A crash (access violation, stack overflow…) or a hang kill — not "End task" (exit code 1) or a
+// normal exit. Only then is bringing the app straight back what the user wants.
+bool LooksLikeCrash(DWORD code) { return code >= 0xC0000000u || code == 0xCFFFFFFFu; }
+
+bool RelaunchManager() {
+    wchar_t exe[MAX_PATH];
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    std::wstring cmd = L"\"" + std::wstring(exe) + L"\" --autostart --restarted";
+    STARTUPINFOW si{sizeof(si)};
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) return false;
+    CloseHandle(pi.hThread);
+    // Ready = the new manager has written its own journal (it claims the hidden windows first).
+    DWORD newPid = pi.dwProcessId;
+    bool ready = false;
+    for (int i = 0; i < 50 && !ready; ++i) {
+        if (WaitForSingleObject(pi.hProcess, 200) == WAIT_OBJECT_0) break;  // died again
+        Journal j;
+        std::string err;
+        ready = ReadJournal(j, err) && j.managerPid == newPid;
+    }
+    CloseHandle(pi.hProcess);
+    return ready;
+}
+
+}  // namespace
+
 int RunWatchdog(DWORD managerPid) {
-    HANDLE mgr = OpenProcess(SYNCHRONIZE, FALSE, managerPid);
+    HANDLE mgr = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, managerPid);
     if (!mgr) return 1;
     WaitForSingleObject(mgr, INFINITE);  // zero CPU until the manager exits
+    DWORD code = 0;
+    GetExitCodeProcess(mgr, &code);
+    FILETIME created{}, exited{}, k{}, u{};
+    GetProcessTimes(mgr, &created, &exited, &k, &u);
     CloseHandle(mgr);
+    auto ticks = [](FILETIME f) { return ((uint64_t)f.dwHighDateTime << 32) | f.dwLowDateTime; };
+    double uptimeSec = (double)(ticks(exited) - ticks(created)) / 1e7;
 
     Journal j;
     std::string err;
-    if (!ReadJournal(j, err) || j.clean || j.managerPid != managerPid) return 0;
+    bool read = ReadJournal(j, err);
+    Log("watchdog: manager %lu exited code=0x%08lX uptime=%.0fs journal=%s clean=%d",
+        managerPid, code, uptimeSec, read ? "ok" : err.c_str(), read ? j.clean : -1);
+    if (!read || j.clean || j.managerPid != managerPid) return 0;
+
+    // The app crashed or hung: start it again so its piles come back folded exactly as they were
+    // (the new instance re-claims the hidden windows from piles.json). If it ran only briefly
+    // (a crash loop) or can't come up, fall back to showing every hidden window.
+    if (LooksLikeCrash(code) && uptimeSec > 20 && RelaunchManager()) return 0;
+
     RecoverFromJournal(j, nullptr);
     j.entries.clear();
     j.clean = true;

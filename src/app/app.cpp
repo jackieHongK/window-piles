@@ -1,6 +1,7 @@
 #include "app.h"
 
 #include <dwmapi.h>
+#include <wtsapi32.h>
 
 #include <algorithm>
 #include <cwctype>
@@ -26,6 +27,11 @@ constexpr UINT_PTR kTimerVerify = 1;
 constexpr UINT_PTR kTimerIdle = 2;
 constexpr UINT_PTR kTimerPersist = 3;
 constexpr UINT_PTR kTimerGoneRetry = 4;
+constexpr UINT_PTR kTimerToFront = 5;
+constexpr UINT_PTR kTimerReclaimNote = 6;
+constexpr UINT WM_APP_RECLAIM = WM_APP + 4;
+// How long after start-up windows reopened by their apps are put back into their piles.
+constexpr double kReclaimWindowMs = 15 * 60 * 1000;
 constexpr UINT kTrayId = 1;
 constexpr int kAnimMs = 220;
 constexpr wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -146,6 +152,7 @@ App::App() { instance_ = this; }
 
 App::~App() {
     if (objectHook_) UnhookWinEvent(objectHook_);
+    if (nameHook_) UnhookWinEvent(nameHook_);
     drag_.reset();
     frame_.reset();
     guide_.reset();
@@ -167,21 +174,28 @@ int App::Run() {
                             wc.hInstance, nullptr);
     taskbarCreatedMsg_ = RegisterWindowMessageW(L"TaskbarCreated");
     icon_ = MakeAppIcon(GetSystemMetrics(SM_CXSMICON) * 2);
+    Log("run: main window %p", main_);
     AddTrayIcon();
+    Log("run: tray icon added");
     guide_ = std::make_unique<GuideWindow>();
 
     // Start with Windows unless the user turned it off; refresh the path (the exe may have moved
     // with an update).
-    if (!FlagExists(L"autostart.off")) SetAutostart(true);
+    if (!FlagExists(L"autostart.off") && !UsingTestDataDir()) SetAutostart(true);
 
+    startedMs_ = NowMs();
     int recovered = RestoreSavedPiles();
+    Log("run: %zu piles restored, %d leftover windows recovered", piles_.size(), recovered);
 
     drag_ = std::make_unique<DragWatcher>(*this);
     // Member windows closing or showing themselves. Out-of-context: no injection.
     objectHook_ = SetWinEventHook(EVENT_OBJECT_DESTROY, EVENT_OBJECT_SHOW, nullptr, OnObjectEvent, 0, 0,
                                   WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     SetTimer(main_, kTimerIdle, 10000, nullptr);
+    // Resume from sleep / unlock: re-check the piles (event-driven, no polling).
+    WTSRegisterSessionNotification(main_, NOTIFY_FOR_THIS_SESSION);
     SaveJournal();
+    UpdateReclaim();
 
     if (recovered > 0)
         Notify(L"창을 되찾았어요", L"지난번에 숨겨져 있던 창 " + std::to_wstring(recovered) + L"개를 다시 보이게 했어요.");
@@ -204,7 +218,8 @@ int App::Run() {
 
 int App::RestoreSavedPiles() {
     std::vector<SavedPile> saved;
-    LoadPileState(saved);
+    bool loaded = LoadPileState(saved);
+    Log("restore: piles.json %s, %zu piles", loaded ? "loaded" : "missing/unreadable", saved.size());
     std::vector<uint64_t> claimed;
     for (const SavedPile& sp : saved) {
         auto p = std::make_unique<Pile>();
@@ -243,17 +258,31 @@ int App::RestoreSavedPiles() {
         p->folded = sp.folded || p->members.empty();
         p->view = std::make_unique<PileWindow>(*p, *this);
         piles_.push_back(std::move(p));
-        Pile& pile = *piles_.back();
-        if (pile.folded) {
-            // After an app restart/update the windows are visible again: put them back in.
-            std::vector<HWND> visible;
-            for (auto& m : pile.members)
-                if (!m.hidden) visible.push_back(m.hwnd);
-            HideMembers(pile, visible, false);
-        } else {
-            Refresh(pile);
-        }
     }
+
+    // After an app restart/update the windows of folded piles are visible again: put them all back
+    // in one go — one parallel capture for every window, journal once, no per-pile animation.
+    std::vector<HWND> toFold;
+    for (auto& p : piles_)
+        if (p->folded)
+            for (auto& m : p->members)
+                if (!m.hidden && IsWindowVisible(m.hwnd)) toFold.push_back(m.hwnd);
+    if (!toFold.empty()) {
+        UINT dpi = GetDpiForSystem();
+        std::vector<Image> shots = snapshots_.Capture(toFold, Scale(240, dpi));
+        for (size_t i = 0; i < toFold.size(); ++i) {
+            Pile* p = PileOf(toFold[i]);
+            Member* m = p->Find(toFold[i]);
+            if (!shots[i].empty()) m->snapshot = std::move(shots[i]);
+            else if (m->snapshot.empty()) m->snapshot = MakeIconCard(toFold[i], Scale(240, dpi), Scale(135, dpi));
+            GetWindowRect(toFold[i], &m->lastRect);
+            m->hidden = true;
+        }
+        SaveJournal();  // journal before hiding
+        for (HWND h : toFold) ShowWindowAsync(h, SW_HIDE);
+        SetTimer(main_, kTimerVerify, 500, nullptr);
+    }
+    for (auto& p : piles_) Refresh(*p);
 
     // Anything the last run hid that no pile claims (e.g. both processes were killed): show it.
     int recovered = 0;
@@ -398,9 +427,12 @@ void App::OnDragDrop(HWND hwnd, const WINDOWPLACEMENT& before, POINT cursor, Dro
         TakeOut(hwnd, before);
         return;
     }
-    if (!CanPile(hwnd)) return;
+    bool canPile = CanPile(hwnd);
     bool onBar = zone == DropZone::NewPile;
     Pile* target = onBar ? nullptr : PileAt(cursor);
+    Log("drop: zone=%d can=%d cursor=%ld,%ld target=%d frame=%d", (int)zone, canPile, cursor.x, cursor.y,
+        target ? target->id : -1, frame_ ? 1 : 0);
+    if (!canPile) return;
     if (!onBar && !target) return;  // an ordinary window move
     Pile* owner = PileOf(hwnd);
     if (owner && owner == target) {
@@ -731,10 +763,10 @@ void App::Expand(Pile& pile, bool makeActive) {
     pile.folded = false;
     pile.active = makeActive;
     if (makeActive) {
-        for (HWND h : shown)
-            SetWindowPos(h, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
-        // We just received the click, so the foreground lock allows this. Best effort only.
-        if (!shown.empty() && !IsIconic(shown.back())) SetForegroundWindow(shown.back());
+        // Restores run asynchronously; raise the windows and refresh the frame's monitors once
+        // they have landed.
+        toFront_ = shown;
+        SetTimer(main_, kTimerToFront, 250, nullptr);
         if (!pile.customName) pile.name = AutoName(pile);
         frame_ = std::make_unique<WorkFrame>(pile, *this);
     } else {
@@ -843,10 +875,16 @@ void App::OnMemberShown(HWND hwnd) {
 
 void CALLBACK App::OnObjectEvent(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD, DWORD) {
     if (!instance_ || idObject != OBJID_WINDOW || idChild != CHILDID_SELF || !hwnd) return;
-    // Cheap filter; the real work is deferred so it never runs in the middle of another operation.
-    if (!instance_->PileOf(hwnd)) return;
-    PostMessageW(instance_->main_, event == EVENT_OBJECT_DESTROY ? WM_APP_MEMBER_GONE : WM_APP_MEMBER_SHOWN,
-                 (WPARAM)hwnd, 0);
+    // Cheap filters; the real work is deferred so it never runs in the middle of another operation.
+    if (instance_->PileOf(hwnd)) {
+        if (event == EVENT_OBJECT_NAMECHANGE) return;
+        PostMessageW(instance_->main_, event == EVENT_OBJECT_DESTROY ? WM_APP_MEMBER_GONE : WM_APP_MEMBER_SHOWN,
+                     (WPARAM)hwnd, 0);
+        return;
+    }
+    if (instance_->reclaimActive_ && (event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_NAMECHANGE) &&
+        GetAncestor(hwnd, GA_ROOT) == hwnd)
+        PostMessageW(instance_->main_, WM_APP_RECLAIM, (WPARAM)hwnd, 0);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -929,6 +967,7 @@ void App::Quit() {
     PersistNow();
     stateFrozen_ = true;
     RestoreAll();
+    if (!WaitForRestores(3000)) ShowStillHidden();  // bounded: a frozen app can't keep us alive
     frame_.reset();
     piles_.clear();
     Journal j;
@@ -936,6 +975,94 @@ void App::Quit() {
     j.clean = true;
     WriteJournal(j);  // the watchdog sees a clean exit and does nothing
     PostQuitMessage(0);
+}
+
+void App::EndSessionNow() {
+    Log("end session: frozen=%d", stateFrozen_);
+    // Logoff, shutdown, restart or an installer closing us (Restart Manager). The piles were saved
+    // in WM_QUERYENDSESSION and every window was handed back; finish within Windows' time limit and
+    // skip any cleanup that talks to other processes (Explorer may already be gone or frozen).
+    if (!stateFrozen_) {  // WM_QUERYENDSESSION never came: do its work now
+        PersistNow();
+        stateFrozen_ = true;
+        RestoreAll();
+    }
+    if (!WaitForRestores(2000)) ShowStillHidden();
+    Journal j;
+    j.managerPid = GetCurrentProcessId();
+    j.clean = true;
+    WriteJournal(j);
+    ExitProcess(0);
+}
+
+void App::ShowStillHidden() {
+    // A restore still stuck on a frozen app dies with our process. A posted show request does not:
+    // the app handles it as soon as it runs again, so no window is ever left hidden.
+    for (auto& p : piles_)
+        for (auto& m : p->members)
+            if (IsWindow(m.hwnd) && !IsWindowVisible(m.hwnd)) ShowWindowAsync(m.hwnd, SW_SHOWNA);
+}
+
+void App::Revalidate() {
+    std::vector<HWND> dead;
+    for (auto& p : piles_)
+        for (auto& m : p->members)
+            if (!IsWindow(m.hwnd)) dead.push_back(m.hwnd);
+    for (HWND h : dead) OnMemberGone(h);
+    for (auto& p : piles_) p->view->Render();
+    if (frame_) frame_->Update();
+}
+
+void App::UpdateReclaim() {
+    bool anyMissing = false;
+    for (auto& p : piles_) anyMissing |= !p->missing.empty();
+    bool want = anyMissing && NowMs() - startedMs_ < kReclaimWindowMs;
+    if (want == reclaimActive_) return;
+    reclaimActive_ = want;
+    if (want) {
+        // Apps often show a window first and set its real title a moment later (a browser loading
+        // its tabs), so also listen to title changes — but only during this short window.
+        nameHook_ = SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE, nullptr, OnObjectEvent, 0, 0,
+                                    WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    } else if (nameHook_) {
+        UnhookWinEvent(nameHook_);
+        nameHook_ = nullptr;
+    }
+}
+
+void App::TryReclaim(HWND hwnd) {
+    if (!reclaimActive_ || !IsWindow(hwnd) || PileOf(hwnd) || !CanPile(hwnd)) return;
+    std::wstring title = WindowTitle(hwnd);
+    if (title.empty()) return;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    std::wstring exe = Lower(ProcessExePath(pid));
+    for (auto& p : piles_) {
+        auto it = std::find_if(p->missing.begin(), p->missing.end(), [&](const MissingWindow& w) {
+            return !w.exePath.empty() && Lower(w.exePath) == exe && w.title == title;
+        });
+        if (it == p->missing.end()) continue;
+        // Same app, same window title as before the restart: it belongs in this pile.
+        p->missing.erase(it);
+        Member m;
+        m.hwnd = hwnd;
+        m.pid = pid;
+        m.createTime = ProcessCreateTime(pid);
+        m.className = WindowClass(hwnd);
+        m.exePath = ProcessExePath(pid);
+        m.title = title;
+        GetWindowPlacement(hwnd, &m.placement);
+        p->members.push_back(std::move(m));
+        ++reclaimed_;
+        SetTimer(main_, kTimerReclaimNote, 2500, nullptr);  // one note for a burst of windows
+        if (p->folded) HideMembers(*p, {hwnd}, false);
+        else {
+            Refresh(*p);
+            SaveJournal();
+        }
+        UpdateReclaim();
+        return;
+    }
 }
 
 LRESULT CALLBACK App::MainProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
@@ -961,6 +1088,7 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_APP_SHOW_GUIDE: ShowGuide(); return 0;
         case WM_APP_MEMBER_GONE: OnMemberGone((HWND)wp); return 0;
         case WM_APP_MEMBER_SHOWN: OnMemberShown((HWND)wp); return 0;
+        case WM_APP_RECLAIM: TryReclaim((HWND)wp); return 0;
         case WM_TIMER:
             if (wp == kTimerVerify) VerifyHidden();
             else if (wp == kTimerIdle) {
@@ -971,6 +1099,22 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
                     for (auto& m : p->members)
                         if (!IsWindow(m.hwnd)) dead.push_back(m.hwnd);
                 for (HWND h : dead) OnMemberGone(h);
+                UpdateReclaim();  // ends the after-restart window when its time is up
+            } else if (wp == kTimerToFront) {
+                KillTimer(main_, kTimerToFront);
+                for (HWND h : toFront_)
+                    if (IsWindow(h))
+                        SetWindowPos(h, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+                // We received the click moments ago, so the foreground lock allows this. Best effort.
+                if (!toFront_.empty() && IsWindow(toFront_.back()) && !IsIconic(toFront_.back()))
+                    SetForegroundWindow(toFront_.back());
+                toFront_.clear();
+                if (frame_) frame_->Update();  // monitors of the now-visible windows
+            } else if (wp == kTimerReclaimNote) {
+                KillTimer(main_, kTimerReclaimNote);
+                if (reclaimed_ > 0)
+                    Notify(L"더미를 다시 묶었어요", L"다시 열린 창 " + std::to_wstring(reclaimed_) + L"개를 원래 더미로 돌려놨어요.");
+                reclaimed_ = 0;
             } else if (wp == kTimerPersist) PersistNow();
             else if (wp == kTimerGoneRetry) {
                 KillTimer(main_, kTimerGoneRetry);
@@ -980,18 +1124,24 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
             }
             return 0;
         case WM_DISPLAYCHANGE:
-            for (auto& p : piles_) p->view->Render();
-            if (frame_) frame_->Update();
+            Revalidate();
+            return 0;
+        case WM_POWERBROADCAST:
+            if (wp == PBT_APMRESUMEAUTOMATIC || wp == PBT_APMRESUMESUSPEND) Revalidate();
+            return TRUE;
+        case WM_WTSSESSION_CHANGE:
+            if (wp == WTS_SESSION_UNLOCK || wp == WTS_REMOTE_CONNECT || wp == WTS_CONSOLE_CONNECT) Revalidate();
             return 0;
         case WM_QUERYENDSESSION:
-            // Shutting down/logging off: save the piles as they are (they come back after the
-            // restart), then bring every window back so its "save changes?" prompt is visible.
+            // Logoff, shutdown, restart, or an installer/updater closing us: save the piles as they
+            // are (they come back at the next start), then hand every window back (non-blocking) so
+            // its "save changes?" prompt is visible.
             PersistNow();
             stateFrozen_ = true;
             RestoreAll();
             return TRUE;
         case WM_ENDSESSION:
-            if (wp) Quit();
+            if (wp) EndSessionNow();
             else stateFrozen_ = false;  // shutdown was cancelled
             return 0;
     }

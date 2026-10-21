@@ -79,6 +79,12 @@ private:
 
     void OnMemberGone(HWND hwnd);
     void OnMemberShown(HWND hwnd);
+    void Revalidate();                 // after resume/unlock/display change: drop dead members, redraw
+    void EndSessionNow();              // logoff/shutdown/update: state already saved; exit without blocking
+    void ShowStillHidden();            // fallback when a restore is stuck on a frozen app
+    // After a restart, windows that apps reopen with the same app + title go back into their pile.
+    void UpdateReclaim();
+    void TryReclaim(HWND hwnd);
 
     // shell
     void AddTrayIcon();
@@ -105,6 +111,11 @@ private:
     bool quitting_ = false;
     bool stateFrozen_ = false;  // shutting down: keep the saved piles as they were
     std::vector<HWND> pendingGone_;  // destroy events seen before the window was fully gone
+    std::vector<HWND> toFront_;      // windows to raise once their async restore has landed
+    double startedMs_ = 0;
+    bool reclaimActive_ = false;
+    HWINEVENTHOOK nameHook_ = nullptr;  // only while reclaiming (title changes are frequent)
+    int reclaimed_ = 0;
 
     static App* instance_;
 };

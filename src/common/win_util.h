@@ -18,12 +18,16 @@ std::wstring ProcessExeName(DWORD pid);
 std::wstring ProcessExePath(DWORD pid);
 uint64_t ProcessCreateTime(DWORD pid);  // FILETIME as uint64, 0 if unknown
 
-// %LOCALAPPDATA%\WindowPiles (created on demand)
+// %LOCALAPPDATA%\WindowPiles (created on demand), or WINDOWPILES_DATA_DIR when tests set it.
 std::wstring AppDataDir();
+bool UsingTestDataDir();
 
 // Writes `data` to a temp file and renames it over `path`. Retries the rename (antivirus scanners
 // briefly lock freshly written files) and, as a last resort, writes `path` directly.
 bool WriteFileReplacing(const std::wstring& path, const std::string& data, bool flush);
+
+// Small diagnostic log: %LOCALAPPDATA%\WindowPiles\app.log (kept under ~256 KB, no window content).
+void Log(const char* fmt, ...);
 
 inline int Scale(int dip, UINT dpi) { return MulDiv(dip, (int)dpi, 96); }
 UINT DpiForPoint(POINT pt);

@@ -35,7 +35,7 @@ add_executable(WindowPiles WIN32
     src/ui/inline_rename.cpp
     src/ui/work_frame.cpp)
 target_include_directories(WindowPiles PRIVATE src)
-target_link_libraries(WindowPiles PRIVATE user32 gdi32 dwmapi shell32 shcore advapi32 comdlg32 d3d11 dxgi windowsapp)
+target_link_libraries(WindowPiles PRIVATE user32 gdi32 dwmapi shell32 shcore advapi32 comdlg32 wtsapi32 kernel32 d3d11 dxgi windowsapp)
 
 # ---------------------------------------------------------------------------
 # P0 PoC helpers (screen sampling, window lookup, timing, OS info)
@@ -51,6 +51,10 @@ target_link_libraries(TestWindows PRIVATE poc_common)
 # End-to-end check of WindowPiles.exe with injected mouse input.
 add_executable(e2e_piles tests/e2e/e2e_piles.cpp)
 target_link_libraries(e2e_piles PRIVATE poc_common)
+
+# Restart / crash / logoff-with-frozen-app / reboot lifecycle check (no mouse input).
+add_executable(e2e_lifecycle tests/e2e/e2e_lifecycle.cpp)
+target_link_libraries(e2e_lifecycle PRIVATE poc_common)
 
 # PoC-01/02: DWM thumbnails of other windows, incl. hidden/minimized sources.
 add_executable(poc_dwm poc/poc01_dwm_thumbnail.cpp)
