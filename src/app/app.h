@@ -5,6 +5,7 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -85,6 +86,12 @@ private:
     // After a restart, windows that apps reopen with the same app + title go back into their pile.
     void UpdateReclaim();
     void TryReclaim(HWND hwnd);
+    // Notification badges for hidden windows (their taskbar buttons are gone).
+    void UpdateTitleHooks();          // watch title changes only in processes that own hidden windows
+    void OnTitleChanged(HWND hwnd);   // unread count in the title
+    void OnAttention(HWND hwnd);      // the app flashed its (hidden) taskbar button
+    static void CALLBACK OnTitleEvent(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD,
+                                      DWORD);
 
     // shell
     void AddTrayIcon();
@@ -116,6 +123,8 @@ private:
     bool reclaimActive_ = false;
     HWINEVENTHOOK nameHook_ = nullptr;  // only while reclaiming (title changes are frequent)
     int reclaimed_ = 0;
+    UINT shellHookMsg_ = 0;                        // HSHELL_* notifications from Explorer
+    std::map<DWORD, HWINEVENTHOOK> titleHooks_;    // pid → title-change hook scoped to that process
 
     static App* instance_;
 };

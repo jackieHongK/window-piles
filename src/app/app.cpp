@@ -11,6 +11,7 @@
 #include "common/win_util.h"
 #include "groups/pile_store.h"
 #include "recovery/journal.h"
+#include "groups/unread.h"
 #include "ui/inline_rename.h"
 #include "ui/menu.h"
 #include "ui/pile_editor.h"
@@ -30,6 +31,7 @@ constexpr UINT_PTR kTimerGoneRetry = 4;
 constexpr UINT_PTR kTimerToFront = 5;
 constexpr UINT_PTR kTimerReclaimNote = 6;
 constexpr UINT WM_APP_RECLAIM = WM_APP + 4;
+constexpr UINT WM_APP_TITLE = WM_APP + 5;
 // How long after start-up windows reopened by their apps are put back into their piles.
 constexpr double kReclaimWindowMs = 15 * 60 * 1000;
 constexpr UINT kTrayId = 1;
@@ -153,6 +155,8 @@ App::App() { instance_ = this; }
 App::~App() {
     if (objectHook_) UnhookWinEvent(objectHook_);
     if (nameHook_) UnhookWinEvent(nameHook_);
+    for (auto& [pid, hook] : titleHooks_) UnhookWinEvent(hook);
+    if (main_) DeregisterShellHookWindow(main_);
     drag_.reset();
     frame_.reset();
     guide_.reset();
@@ -173,6 +177,10 @@ int App::Run() {
     main_ = CreateWindowExW(WS_EX_TOOLWINDOW, wc.lpszClassName, L"Window Piles", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr,
                             wc.hInstance, nullptr);
     taskbarCreatedMsg_ = RegisterWindowMessageW(L"TaskbarCreated");
+    // Explorer tells shell-hook windows when an app flashes its taskbar button (new message…).
+    // It's pushed to us; nothing is polled.
+    shellHookMsg_ = RegisterWindowMessageW(L"SHELLHOOK");
+    RegisterShellHookWindow(main_);
     icon_ = MakeAppIcon(GetSystemMetrics(SM_CXSMICON) * 2);
     Log("run: main window %p", main_);
     AddTrayIcon();
@@ -277,6 +285,8 @@ int App::RestoreSavedPiles() {
             else if (m->snapshot.empty()) m->snapshot = MakeIconCard(toFold[i], Scale(240, dpi), Scale(135, dpi));
             GetWindowRect(toFold[i], &m->lastRect);
             m->hidden = true;
+            m->attention = false;
+            m->unread = ParseUnread(WindowTitle(toFold[i])).count;
         }
         SaveJournal();  // journal before hiding
         for (HWND h : toFold) ShowWindowAsync(h, SW_HIDE);
@@ -684,6 +694,9 @@ void App::HideMembers(Pile& pile, const std::vector<HWND>& hwnds, bool readPlace
                 from.push_back(m->lastRect);
             }
             m->hidden = true;
+            // Unread already shown in the title counts (like an app icon badge); a new flash raises "!".
+            m->attention = false;
+            m->unread = ParseUnread(m->title).count;
         }
         // 2) journal before hiding (spec §4.4 step 4 → 6)
         SaveJournal();
@@ -757,6 +770,7 @@ void App::Expand(Pile& pile, bool makeActive) {
     std::vector<HWND> shown;
     for (Member* m : toShow) {
         m->hidden = false;
+        m->attention = false;  // the user is looking at it now
         RestoreWindow(m->hwnd, m->placement, false);
         shown.push_back(m->hwnd);
     }
@@ -828,6 +842,63 @@ void App::SaveJournal() {
     j.clean = j.entries.empty();
     WriteJournal(j);
     PersistSoon();
+    UpdateTitleHooks();  // the set of hidden windows may have changed
+}
+
+void App::UpdateTitleHooks() {
+    // One hook per process that owns a hidden window, scoped to that process: Windows only delivers
+    // that process's title changes, so the rest of the system costs us nothing.
+    std::vector<DWORD> want;
+    for (auto& p : piles_)
+        for (auto& m : p->members)
+            if (m.hidden && std::find(want.begin(), want.end(), m.pid) == want.end()) want.push_back(m.pid);
+    for (auto it = titleHooks_.begin(); it != titleHooks_.end();) {
+        if (std::find(want.begin(), want.end(), it->first) == want.end()) {
+            UnhookWinEvent(it->second);
+            it = titleHooks_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (DWORD pid : want)
+        if (!titleHooks_.count(pid))
+            if (HWINEVENTHOOK h = SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE, nullptr, OnTitleEvent,
+                                                  pid, 0, WINEVENT_OUTOFCONTEXT))
+                titleHooks_[pid] = h;
+}
+
+void CALLBACK App::OnTitleEvent(HWINEVENTHOOK, DWORD, HWND hwnd, LONG idObject, LONG idChild, DWORD, DWORD) {
+    if (!instance_ || idObject != OBJID_WINDOW || idChild != CHILDID_SELF || !hwnd) return;
+    Pile* p = instance_->PileOf(hwnd);
+    if (!p) return;
+    Member* m = p->Find(hwnd);
+    if (m && m->hidden) PostMessageW(instance_->main_, WM_APP_TITLE, (WPARAM)hwnd, 0);
+}
+
+void App::OnTitleChanged(HWND hwnd) {
+    Pile* p = PileOf(hwnd);
+    if (!p) return;
+    Member* m = p->Find(hwnd);
+    if (!m || !m->hidden) return;
+    std::wstring title = WindowTitle(hwnd);
+    UnreadInfo u = ParseUnread(title);
+    bool attention = m->attention || (u.marker && title != m->title);
+    if (u.count == m->unread && attention == m->attention) return;
+    Log("badge: unread %d -> %d, attention %d (pile %d)", m->unread, u.count, attention, p->id);
+    m->unread = u.count;
+    m->attention = attention;
+    m->title = title;
+    p->view->Render();
+}
+
+void App::OnAttention(HWND hwnd) {
+    Pile* p = PileOf(GetAncestor(hwnd, GA_ROOT));
+    if (!p) return;
+    Member* m = p->Find(GetAncestor(hwnd, GA_ROOT));
+    if (!m || !m->hidden || m->attention) return;
+    Log("badge: flash from a hidden window (pile %d)", p->id);
+    m->attention = true;
+    p->view->Render();
 }
 
 void App::OnMemberGone(HWND hwnd) {
@@ -869,6 +940,7 @@ void App::OnMemberShown(HWND hwnd) {
     Member* m = p->Find(hwnd);
     if (!m->hidden || !IsWindowVisible(hwnd)) return;
     m->hidden = false;  // the app brought itself back (e.g. a messenger): respect that
+    m->attention = false;
     Refresh(*p);
     SaveJournal();
 }
@@ -1073,6 +1145,11 @@ LRESULT CALLBACK App::MainProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == taskbarCreatedMsg_ && taskbarCreatedMsg_) {  // Explorer restarted
         AddTrayIcon();
+        RegisterShellHookWindow(main_);
+        return 0;
+    }
+    if (msg == shellHookMsg_ && shellHookMsg_) {
+        if (wp == (HSHELL_REDRAW | HSHELL_HIGHBIT)) OnAttention((HWND)lp);  // HSHELL_FLASH
         return 0;
     }
     switch (msg) {
@@ -1089,6 +1166,7 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_APP_MEMBER_GONE: OnMemberGone((HWND)wp); return 0;
         case WM_APP_MEMBER_SHOWN: OnMemberShown((HWND)wp); return 0;
         case WM_APP_RECLAIM: TryReclaim((HWND)wp); return 0;
+        case WM_APP_TITLE: OnTitleChanged((HWND)wp); return 0;
         case WM_TIMER:
             if (wp == kTimerVerify) VerifyHidden();
             else if (wp == kTimerIdle) {

@@ -25,6 +25,9 @@ struct Member {
     WINDOWPLACEMENT placement{sizeof(WINDOWPLACEMENT)};  // where to bring it back
     RECT lastRect{};  // screen rect when last visible (for the gather animation)
     bool hidden = false;
+    // Notifications while put away (its taskbar button is gone, so the pile has to show them):
+    int unread = 0;          // unread count read from the window title
+    bool attention = false;  // the app flashed its taskbar button / marked the title
     Image snapshot;  // shown in the folded card (snapshot or icon card); never written to disk
 };
 
@@ -55,6 +58,17 @@ struct Pile {
         return n;
     }
     bool Empty() const { return members.empty() && missing.empty(); }
+    // Badge for the card: unread total and "something needs attention" over hidden windows.
+    int BadgeCount() const {
+        int n = 0;
+        for (auto& m : members) n += m.hidden ? m.unread : 0;
+        return n;
+    }
+    bool BadgeAttention() const {
+        for (auto& m : members)
+            if (m.hidden && m.attention) return true;
+        return false;
+    }
     Member* Find(HWND h) {
         for (auto& m : members)
             if (m.hwnd == h) return &m;

@@ -25,6 +25,7 @@ add_executable(WindowPiles WIN32
     src/common/json.cpp
     src/recovery/journal.cpp
     src/groups/pile_store.cpp
+    src/groups/unread.cpp
     src/preview/snapshot.cpp
     src/surface/pile_window.cpp
     src/interaction/drag_watcher.cpp
@@ -51,6 +52,14 @@ target_link_libraries(TestWindows PRIVATE poc_common)
 # End-to-end check of WindowPiles.exe with injected mouse input.
 add_executable(e2e_piles tests/e2e/e2e_piles.cpp)
 target_link_libraries(e2e_piles PRIVATE poc_common)
+
+# Notification badges on pile cards (no mouse input).
+add_executable(e2e_badges tests/e2e/e2e_badges.cpp)
+target_link_libraries(e2e_badges PRIVATE poc_common)
+
+# Unit test: unread counts in window titles.
+add_executable(unread_test tests/unit/unread_test.cpp src/groups/unread.cpp)
+target_include_directories(unread_test PRIVATE src)
 
 # Restart / crash / logoff-with-frozen-app / reboot lifecycle check (no mouse input).
 add_executable(e2e_lifecycle tests/e2e/e2e_lifecycle.cpp)

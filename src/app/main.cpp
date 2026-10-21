@@ -15,6 +15,35 @@
 
 namespace {
 
+// True when our AppData writes are silently redirected into some MSIX package's private copy
+// (%LOCALAPPDATA%\Packages\<pkg>\LocalCache\Local\…). That happens to programs started from inside a
+// packaged app even when they have no package identity of their own, so GetCurrentPackageFullName
+// alone can't tell. Probe: create a temp file and look for it in the packages' private copies.
+bool AppDataIsVirtualized() {
+    wchar_t local[MAX_PATH] = {};
+    if (!GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH)) return false;
+    std::wstring dir = wp::AppDataDir();
+    std::wstring name = L".vprobe-" + std::to_wstring(GetCurrentProcessId());
+    HANDLE probe = CreateFileW((dir + L"\\" + name).c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
+                               CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+    if (probe == INVALID_HANDLE_VALUE) return false;
+    std::wstring packages = std::wstring(local) + L"\\Packages\\";
+    bool redirected = false;
+    WIN32_FIND_DATAW fd;
+    HANDLE find = FindFirstFileExW((packages + L"*").c_str(), FindExInfoBasic, &fd, FindExSearchLimitToDirectories,
+                                   nullptr, FIND_FIRST_EX_LARGE_FETCH);
+    if (find != INVALID_HANDLE_VALUE) {
+        do {
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || fd.cFileName[0] == L'.') continue;
+            std::wstring copy = packages + fd.cFileName + L"\\LocalCache\\Local\\WindowPiles\\" + name;
+            if (GetFileAttributesW(copy.c_str()) != INVALID_FILE_ATTRIBUTES) redirected = true;
+        } while (!redirected && FindNextFileW(find, &fd));
+        FindClose(find);
+    }
+    CloseHandle(probe);  // deleted on close
+    return redirected;
+}
+
 void SpawnWatchdog() {
     wchar_t exe[MAX_PATH];
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
@@ -56,9 +85,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     // while the autostart instance reads the real one — and we'd die whenever that app updates.
     // Re-launch through the shell so the app always runs as a plain desktop app.
     UINT32 pkgLen = 0;
-    bool inPackage = GetCurrentPackageFullName(&pkgLen, nullptr) != APPMODEL_ERROR_NO_PACKAGE;
     wchar_t noRelaunch[8] = {};
-    if (inPackage && !GetEnvironmentVariableW(L"WINDOWPILES_NO_RELAUNCH", noRelaunch, 8)) {
+    bool mayRelaunch = !GetEnvironmentVariableW(L"WINDOWPILES_NO_RELAUNCH", noRelaunch, 8) && !wp::UsingTestDataDir();
+    bool inPackage = mayRelaunch && (GetCurrentPackageFullName(&pkgLen, nullptr) != APPMODEL_ERROR_NO_PACKAGE ||
+                                     AppDataIsVirtualized());
+    if (inPackage) {
         HANDLE once = CreateEventW(nullptr, TRUE, FALSE, L"Local\\WindowPiles.ShellRelaunch");
         bool already = GetLastError() == ERROR_ALREADY_EXISTS;  // guard against a relaunch loop
         if (!already) {

@@ -6,7 +6,11 @@
 // Each window runs on its own thread, so the "hung" window never blocks the others.
 //
 // Usage: TestWindows [--normal N] [--fixed] [--owned] [--reshow] [--nocapture] [--hung]
-//                    [--maximized] [--all] [--origin X Y] [--seconds S]
+//                    [--maximized] [--notify] [--flash] [--notify-after MS] [--all]
+//                    [--origin X Y] [--seconds S]
+//   --notify : after MS (default 6000) the title becomes "(3) TW-Notify-N" and the window flashes,
+//              like a messenger/mail app with 3 unread items
+//   --flash  : after MS the window only flashes its taskbar button (no count in the title)
 // Quit:  signal the named event "Local\TestWindowsQuit" or close all windows.
 #include "poc_common.h"
 
@@ -17,10 +21,12 @@
 
 namespace {
 
-enum class Kind { Normal, Fixed, Owned, Reshow, NoCapture, Hung, Maximized };
+enum class Kind { Normal, Fixed, Owned, Reshow, NoCapture, Hung, Maximized, Notify, Flash };
 
 const wchar_t* KindName(Kind k) {
     switch (k) {
+        case Kind::Notify: return L"Notify";
+        case Kind::Flash: return L"Flash";
         case Kind::Normal: return L"Normal";
         case Kind::Fixed: return L"Fixed";
         case Kind::Owned: return L"Owned";
@@ -42,8 +48,10 @@ struct WinState {
 constexpr UINT_PTR kTimerToggle = 1;
 constexpr UINT_PTR kTimerHang = 2;
 constexpr UINT_PTR kTimerReshow = 3;
+constexpr UINT_PTR kTimerNotify = 4;
 constexpr int kReshowDelayMs = 3000;
 constexpr int kHangMs = 20000;
+int g_notifyMs = 6000;
 
 std::atomic<int> g_alive{0};
 std::vector<HWND> g_windows;
@@ -69,6 +77,17 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             } else if (wp == kTimerReshow) {
                 KillTimer(hwnd, kTimerReshow);
                 ShowWindow(hwnd, SW_SHOWNOACTIVATE);  // the app "brings itself back" like a messenger
+            } else if (wp == kTimerNotify) {
+                KillTimer(hwnd, kTimerNotify);
+                // A new message arrived: unread count in the title (web/mail apps) and/or a flashing
+                // taskbar button (desktop messengers) — whether or not the window is visible.
+                if (st->kind == Kind::Notify) {
+                    std::wstring t = L"(3) TW-Notify-" + std::to_wstring(st->index);
+                    SetWindowTextW(hwnd, t.c_str());
+                }
+                FLASHWINFO fi{sizeof(fi), hwnd, FLASHW_ALL | FLASHW_TIMERNOFG, 0, 0};
+                FlashWindowEx(&fi);
+                poc::Print("NOTIFIED %s\n", poc::Hex((uint64_t)(uintptr_t)hwnd).c_str());
             }
             return 0;
         case WM_SHOWWINDOW:
@@ -150,6 +169,7 @@ void RunWindowThread(Kind kind, int index, Placement pl) {
     }
     SetTimer(hwnd, kTimerToggle, 500, nullptr);
     if (kind == Kind::Hung) SetTimer(hwnd, kTimerHang, 3000, nullptr);
+    if (kind == Kind::Notify || kind == Kind::Flash) SetTimer(hwnd, kTimerNotify, g_notifyMs, nullptr);
 
     ShowWindow(hwnd, kind == Kind::Maximized ? SW_SHOWMAXIMIZED : SW_SHOWNOACTIVATE);
     if (owned) ShowWindow(owned, SW_SHOWNOACTIVATE);
@@ -175,10 +195,14 @@ int wmain(int argc, wchar_t** argv) {
 
     int normal = 0, seconds = 0;
     bool fixed = false, owned = false, reshow = false, nocapture = false, hung = false, maximized = false;
+    bool notify = false, flash = false;
     int ox = -1, oy = -1;
     for (int i = 1; i < argc; ++i) {
         std::wstring a = argv[i];
-        if (a == L"--normal" && i + 1 < argc) normal = _wtoi(argv[++i]);
+        if (a == L"--notify") notify = true;
+        else if (a == L"--flash") flash = true;
+        else if (a == L"--notify-after" && i + 1 < argc) g_notifyMs = _wtoi(argv[++i]);
+        else if (a == L"--normal" && i + 1 < argc) normal = _wtoi(argv[++i]);
         else if (a == L"--fixed") fixed = true;
         else if (a == L"--owned") owned = true;
         else if (a == L"--reshow") reshow = true;
@@ -189,7 +213,7 @@ int wmain(int argc, wchar_t** argv) {
         else if (a == L"--origin" && i + 2 < argc) { ox = _wtoi(argv[++i]); oy = _wtoi(argv[++i]); }
         else if (a == L"--seconds" && i + 1 < argc) seconds = _wtoi(argv[++i]);
     }
-    if (!normal && !fixed && !owned && !reshow && !nocapture && !hung && !maximized) normal = 3;
+    if (!normal && !fixed && !owned && !reshow && !nocapture && !hung && !maximized && !notify && !flash) normal = 3;
 
     WNDCLASSW wc{};
     wc.lpfnWndProc = WndProc;
@@ -216,6 +240,8 @@ int wmain(int argc, wchar_t** argv) {
     if (nocapture) plan.push_back({Kind::NoCapture, index++});
     if (hung) plan.push_back({Kind::Hung, index++});
     if (maximized) plan.push_back({Kind::Maximized, index++});
+    if (notify) plan.push_back({Kind::Notify, index++});
+    if (flash) plan.push_back({Kind::Flash, index++});
 
     int cols = std::max(1, (int)((work.right - ox) / (w + gap)));
     std::vector<std::thread> threads;

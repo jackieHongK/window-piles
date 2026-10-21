@@ -23,6 +23,7 @@ constexpr int kStep = 10;  // overlap offset between stacked previews
 constexpr int kCardW = kPad * 2 + kThumbW + kStep * 2;
 constexpr int kThumbsH = kPad * 2 + kThumbH + kStep * 2;
 constexpr int kMissingTitleH = 26, kMissingRowH = 28, kMissingMoreH = 22, kMissingMaxRows = 4;
+constexpr COLORREF kBadge = RGB(239, 68, 68);  // notification red (shadcn red-500)
 
 void RegisterOnce() {
     static bool done = false;
@@ -262,6 +263,22 @@ void PileWindow::Render() {
     if (hot_) c.StrokeRoundRect(card, radius, S(2), kPrimary);
     else if (hover_) c.StrokeRoundRect(card, radius, 1, kBorderStrong);
     else c.StrokeRoundRect(card, radius, 1, kBorder);
+
+    // Notification badge on the top-right corner (like an app icon badge): the unread total of the
+    // hidden windows, or a dot when an app only flashed for attention.
+    int badge = pile_.BadgeCount();
+    if (badge > 0 || pile_.BadgeAttention()) {
+        std::wstring txt = badge > 99 ? L"99+" : badge > 0 ? std::to_wstring(badge) : L"";
+        int h = txt.empty() ? S(18) : S(26);
+        int w = txt.empty() ? h : std::max(h, (int)c.MeasureText(txt, S(14), true).cx + S(16));
+        int cx = card.right - std::max(S(6), w / 2 - S(10)), cy = card.top + S(6);
+        RECT b{cx - w / 2, cy - h / 2, cx - w / 2 + w, cy - h / 2 + h};
+        RECT ring{b.left - S(2), b.top - S(2), b.right + S(2), b.bottom + S(2)};
+        c.Shadow(ring, h / 2 + S(2), S(4), S(1), 70);
+        c.FillRoundRect(ring, h / 2 + S(2), RGB(255, 255, 255));
+        c.FillRoundRect(b, h / 2, kBadge);
+        if (!txt.empty()) c.Text(txt, b, RGB(255, 255, 255), S(14), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
     c.Present(hwnd_, pile_.pos);
 }
 
