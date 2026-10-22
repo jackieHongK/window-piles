@@ -1,4 +1,4 @@
-창 더미 (Window Piles) {VERSION} 미리 보기
+Stack Neverflow {VERSION} 미리 보기 (창 더미, 이전 이름 Window Piles)
 
 설치
 1. 이 폴더의 WindowPiles.exe를 계속 둘 곳에 옮깁니다.
