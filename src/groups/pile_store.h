@@ -31,8 +31,9 @@ struct SavedPile {
 };
 
 std::wstring PileStatePath();
-// Durable write (flushed): this file must survive a forced power-off.
-bool SavePileState(const std::vector<SavedPile>& piles);
+// Durable write (flushed): this file must survive a forced power-off. `background`: queue the write
+// on a pool thread (newest state wins); otherwise write now, replacing anything still queued.
+bool SavePileState(const std::vector<SavedPile>& piles, bool background = false);
 bool LoadPileState(std::vector<SavedPile>& piles);
 
 }  // namespace wp

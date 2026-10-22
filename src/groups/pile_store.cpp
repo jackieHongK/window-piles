@@ -31,7 +31,39 @@ MissingWindow ReadMissing(const json::Value& v) {
 
 std::wstring PileStatePath() { return AppDataDir() + L"\\piles.json"; }
 
-bool SavePileState(const std::vector<SavedPile>& piles) {
+namespace {
+
+// Background writes: the flushed write takes tens of ms on a hard disk, so it runs on a pool
+// thread. Only the newest state matters; one writer at a time keeps the replace atomic.
+SRWLOCK g_writeLock = SRWLOCK_INIT;    // held while a file write is in progress
+SRWLOCK g_pendingLock = SRWLOCK_INIT;  // guards the two below
+std::string g_pending;
+bool g_hasPending = false, g_writerQueued = false;
+
+bool WriteState(const std::string& s) { return WriteFileReplacing(PileStatePath(), s, true); }
+
+void CALLBACK WriteLatest(PTP_CALLBACK_INSTANCE, void*) {
+    for (;;) {
+        AcquireSRWLockExclusive(&g_writeLock);
+        AcquireSRWLockExclusive(&g_pendingLock);
+        if (!g_hasPending) {
+            g_writerQueued = false;
+            ReleaseSRWLockExclusive(&g_pendingLock);
+            ReleaseSRWLockExclusive(&g_writeLock);
+            return;
+        }
+        std::string s;
+        s.swap(g_pending);
+        g_hasPending = false;
+        ReleaseSRWLockExclusive(&g_pendingLock);
+        WriteState(s);
+        ReleaseSRWLockExclusive(&g_writeLock);
+    }
+}
+
+}  // namespace
+
+bool SavePileState(const std::vector<SavedPile>& piles, bool background) {
     std::string s = "{\"schema\":" + std::to_string(kSchema) + ",\"piles\":[";
     for (size_t i = 0; i < piles.size(); ++i) {
         const SavedPile& p = piles[i];
@@ -59,7 +91,25 @@ bool SavePileState(const std::vector<SavedPile>& piles) {
     }
     s += "]}";
 
-    return WriteFileReplacing(PileStatePath(), s, true);
+    if (background) {
+        AcquireSRWLockExclusive(&g_pendingLock);
+        g_pending.swap(s);
+        g_hasPending = true;
+        bool queue = !g_writerQueued;
+        g_writerQueued = true;
+        ReleaseSRWLockExclusive(&g_pendingLock);
+        if (queue && !TrySubmitThreadpoolCallback(WriteLatest, nullptr, nullptr)) WriteLatest(nullptr, nullptr);
+        return true;
+    }
+    // Synchronous (exit, logoff): this state supersedes anything still queued.
+    AcquireSRWLockExclusive(&g_writeLock);
+    AcquireSRWLockExclusive(&g_pendingLock);
+    g_pending.clear();
+    g_hasPending = false;
+    ReleaseSRWLockExclusive(&g_pendingLock);
+    bool ok = WriteState(s);
+    ReleaseSRWLockExclusive(&g_writeLock);
+    return ok;
 }
 
 bool LoadPileState(std::vector<SavedPile>& piles) {

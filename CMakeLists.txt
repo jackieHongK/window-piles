@@ -26,6 +26,7 @@ add_executable(WindowPiles WIN32
     src/recovery/journal.cpp
     src/groups/pile_store.cpp
     src/groups/unread.cpp
+    src/activity/activity_log.cpp
     src/preview/snapshot.cpp
     src/surface/pile_window.cpp
     src/interaction/drag_watcher.cpp
@@ -34,6 +35,7 @@ add_executable(WindowPiles WIN32
     src/ui/guide_window.cpp
     src/ui/pile_editor.cpp
     src/ui/inline_rename.cpp
+    src/ui/stats_window.cpp
     src/ui/work_frame.cpp)
 target_include_directories(WindowPiles PRIVATE src)
 target_link_libraries(WindowPiles PRIVATE user32 gdi32 dwmapi shell32 shcore advapi32 comdlg32 wtsapi32 kernel32 d3d11 dxgi windowsapp)
@@ -57,9 +59,23 @@ target_link_libraries(e2e_piles PRIVATE poc_common)
 add_executable(e2e_badges tests/e2e/e2e_badges.cpp)
 target_link_libraries(e2e_badges PRIVATE poc_common)
 
+# Load measurement: many big windows in one pile (no mouse input).
+add_executable(e2e_perf tests/e2e/e2e_perf.cpp)
+target_link_libraries(e2e_perf PRIVATE poc_common)
+
 # Unit test: unread counts in window titles.
 add_executable(unread_test tests/unit/unread_test.cpp src/groups/unread.cpp)
 target_include_directories(unread_test PRIVATE src)
+
+# Unit test: Canvas fast paths draw exactly what the plain per-pixel loops draw.
+add_executable(canvas_test tests/unit/canvas_test.cpp src/common/canvas.cpp)
+target_include_directories(canvas_test PRIVATE src)
+target_link_libraries(canvas_test PRIVATE user32 gdi32)
+
+# Unit test: activity log parsing and time-per-pile computation.
+add_executable(activity_test tests/unit/activity_test.cpp src/activity/activity_log.cpp src/common/win_util.cpp)
+target_include_directories(activity_test PRIVATE src)
+target_link_libraries(activity_test PRIVATE shell32 shcore user32 advapi32)
 
 # Restart / crash / logoff-with-frozen-app / reboot lifecycle check (no mouse input).
 add_executable(e2e_lifecycle tests/e2e/e2e_lifecycle.cpp)

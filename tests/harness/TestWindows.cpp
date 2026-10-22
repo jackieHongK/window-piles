@@ -7,7 +7,7 @@
 //
 // Usage: TestWindows [--normal N] [--fixed] [--owned] [--reshow] [--nocapture] [--hung]
 //                    [--maximized] [--notify] [--flash] [--notify-after MS] [--all]
-//                    [--origin X Y] [--seconds S]
+//                    [--origin X Y] [--size W H] [--static] [--seconds S]
 //   --notify : after MS (default 6000) the title becomes "(3) TW-Notify-N" and the window flashes,
 //              like a messenger/mail app with 3 unread items
 //   --flash  : after MS the window only flashes its taskbar button (no count in the title)
@@ -52,6 +52,7 @@ constexpr UINT_PTR kTimerNotify = 4;
 constexpr int kReshowDelayMs = 3000;
 constexpr int kHangMs = 20000;
 int g_notifyMs = 6000;
+bool g_static = false;  // --static: no periodic repaint (load tests: like idle app windows)
 
 std::atomic<int> g_alive{0};
 std::vector<HWND> g_windows;
@@ -167,7 +168,7 @@ void RunWindowThread(Kind kind, int index, Placement pl) {
         if (!SetWindowDisplayAffinity(hwnd, 0x00000011 /*WDA_EXCLUDEFROMCAPTURE*/))
             SetWindowDisplayAffinity(hwnd, WDA_MONITOR);
     }
-    SetTimer(hwnd, kTimerToggle, 500, nullptr);
+    if (!g_static) SetTimer(hwnd, kTimerToggle, 500, nullptr);
     if (kind == Kind::Hung) SetTimer(hwnd, kTimerHang, 3000, nullptr);
     if (kind == Kind::Notify || kind == Kind::Flash) SetTimer(hwnd, kTimerNotify, g_notifyMs, nullptr);
 
@@ -196,7 +197,7 @@ int wmain(int argc, wchar_t** argv) {
     int normal = 0, seconds = 0;
     bool fixed = false, owned = false, reshow = false, nocapture = false, hung = false, maximized = false;
     bool notify = false, flash = false;
-    int ox = -1, oy = -1;
+    int ox = -1, oy = -1, sizeW = 0, sizeH = 0;
     for (int i = 1; i < argc; ++i) {
         std::wstring a = argv[i];
         if (a == L"--notify") notify = true;
@@ -212,6 +213,8 @@ int wmain(int argc, wchar_t** argv) {
         else if (a == L"--all") { normal = std::max(normal, 3); fixed = owned = reshow = nocapture = true; }
         else if (a == L"--origin" && i + 2 < argc) { ox = _wtoi(argv[++i]); oy = _wtoi(argv[++i]); }
         else if (a == L"--seconds" && i + 1 < argc) seconds = _wtoi(argv[++i]);
+        else if (a == L"--size" && i + 2 < argc) { sizeW = _wtoi(argv[++i]); sizeH = _wtoi(argv[++i]); }
+        else if (a == L"--static") g_static = true;
     }
     if (!normal && !fixed && !owned && !reshow && !nocapture && !hung && !maximized && !notify && !flash) normal = 3;
 
@@ -243,10 +246,19 @@ int wmain(int argc, wchar_t** argv) {
     if (notify) plan.push_back({Kind::Notify, index++});
     if (flash) plan.push_back({Kind::Flash, index++});
 
+    // --size W H (DIP): big windows, cascaded so they all stay on screen (load tests).
+    bool cascade = sizeW > 0 && sizeH > 0;
+    if (cascade) {
+        w = MulDiv(sizeW, dpi, 96);
+        h = MulDiv(sizeH, dpi, 96);
+        ox = work.left + MulDiv(40, dpi, 96);
+    }
     int cols = std::max(1, (int)((work.right - ox) / (w + gap)));
     std::vector<std::thread> threads;
     for (size_t i = 0; i < plan.size(); ++i) {
-        Placement pl{ox + (int)(i % cols) * (w + gap), oy + (int)(i / cols) * (h + gap), w, h};
+        int step = MulDiv(24, dpi, 96) * (int)(i % 12);
+        Placement pl = cascade ? Placement{ox + step, oy + step, w, h}
+                               : Placement{ox + (int)(i % cols) * (w + gap), oy + (int)(i / cols) * (h + gap), w, h};
         ++g_alive;
         threads.emplace_back(RunWindowThread, plan[i].first, plan[i].second, pl);
     }

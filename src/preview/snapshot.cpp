@@ -25,6 +25,26 @@ namespace {
 
 // Budget after the last capture session has started; a frame normally arrives within ~20 ms.
 constexpr int kFrameTimeoutMs = 150;
+// Starting a session is a round trip to the capture service (100–300 ms on a busy PC), so sessions
+// start in parallel; one that takes longer than this is given up.
+constexpr int kStartTimeoutMs = 1500;
+
+// "Capture without the yellow border" consent. Asking takes most of a second, so it is asked once,
+// off the UI thread; captures before the answer is in simply keep the border.
+std::atomic<int> g_borderlessAsked{0};
+std::atomic<bool> g_borderless{false};
+
+void CALLBACK AskBorderless(PTP_CALLBACK_INSTANCE, void*) {
+    HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    try {
+        auto status = wgc::GraphicsCaptureAccess::RequestAccessAsync(wgc::GraphicsCaptureAccessKind::Borderless).get();
+        g_borderless = status ==
+                       winrt::Windows::Security::Authorization::AppCapabilityAccess::AppCapabilityAccessStatus::Allowed;
+    } catch (...) {
+        g_borderless = false;  // Windows 10: the yellow capture border is shown briefly
+    }
+    if (SUCCEEDED(co)) CoUninitialize();
+}
 
 struct Device {
     com_ptr<ID3D11Device> d3d;
@@ -131,8 +151,13 @@ struct Job {
     wgc::GraphicsCaptureSession session{nullptr};
     winrt::event_token token{};
     HANDLE done = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    HANDLE started = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     std::atomic<bool> handled{false};
-    ~Job() { CloseHandle(done); }
+    std::atomic<int> startState{0};  // 0 starting, 1 started, 2 given up (the starter cleans up)
+    ~Job() {
+        CloseHandle(done);
+        CloseHandle(started);
+    }
 };
 
 }  // namespace
@@ -140,35 +165,46 @@ struct Job {
 struct SnapshotEngine::Impl {
     Device dev;
     bool haveDevice = false;
-    bool borderless = false;
-    bool borderlessAsked = false;
+    int supported = -1;  // GraphicsCaptureSession::IsSupported(), asked once (it is not cheap)
+    com_ptr<IGraphicsCaptureItemInterop> interop;
     double lastUse = 0;
+
+    bool Supported() {
+        if (supported < 0) supported = wgc::GraphicsCaptureSession::IsSupported() ? 1 : 0;
+        return supported == 1;
+    }
 
     bool EnsureDevice() {
         if (haveDevice) return true;
         // WARP first: same latency as the GPU for one-shot captures but ~1.5 MB instead of ~43 MB
         // (PoC-03), and independent of GPU driver quality on low-end PCs.
         haveDevice = CreateDevice(D3D_DRIVER_TYPE_WARP, dev) || CreateDevice(D3D_DRIVER_TYPE_HARDWARE, dev);
-        return haveDevice;
+        if (haveDevice && !interop) {
+            try {
+                interop = winrt::get_activation_factory<wgc::GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
+            } catch (...) {
+            }
+        }
+        return haveDevice && interop;
     }
 
-    void AskBorderless() {
-        if (borderlessAsked) return;
-        borderlessAsked = true;
-        try {
-            auto status =
-                wgc::GraphicsCaptureAccess::RequestAccessAsync(wgc::GraphicsCaptureAccessKind::Borderless).get();
-            borderless = status ==
-                         winrt::Windows::Security::Authorization::AppCapabilityAccess::AppCapabilityAccessStatus::Allowed;
-        } catch (...) {
-            borderless = false;  // Windows 10: the yellow capture border is shown briefly
-        }
+    struct StartCall {
+        Impl* impl;
+        std::shared_ptr<Job> job;
+    };
+    static void CALLBACK StartOnPool(PTP_CALLBACK_INSTANCE, void* p) {
+        auto* call = (StartCall*)p;
+        HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        call->impl->Start(call->job);
+        if (call->job->startState.exchange(1) == 2) Close(*call->job);  // the caller stopped waiting
+        SetEvent(call->job->started);
+        if (SUCCEEDED(co)) CoUninitialize();
+        delete call;
     }
 
     void Start(const std::shared_ptr<Job>& jobPtr) {
         Job& job = *jobPtr;
         try {
-            auto interop = winrt::get_activation_factory<wgc::GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
             if (FAILED(interop->CreateForWindow(job.hwnd, winrt::guid_of<wgc::GraphicsCaptureItem>(),
                                                 winrt::put_abi(job.item))) ||
                 !job.item) {
@@ -187,7 +223,7 @@ struct SnapshotEngine::Impl {
                 job.session.IsCursorCaptureEnabled(false);
             } catch (...) {
             }
-            if (borderless) {
+            if (g_borderless) {
                 try {
                     job.session.IsBorderRequired(false);
                 } catch (...) {
@@ -241,17 +277,30 @@ std::vector<Image> SnapshotEngine::Capture(const std::vector<HWND>& windows, int
     bool any = false;
     for (HWND h : windows)
         if (IsWindowVisible(h) && !IsIconic(h)) any = true;
-    if (!any || !wgc::GraphicsCaptureSession::IsSupported()) return result;
-    impl_->AskBorderless();
+    double t0 = NowMs();
+    if (!any || !impl_->Supported()) return result;
+    int expected = 0;
+    if (g_borderlessAsked.compare_exchange_strong(expected, 1)) TrySubmitThreadpoolCallback(AskBorderless, nullptr, nullptr);
+    double t1 = NowMs();
     if (!impl_->EnsureDevice()) return result;
+    double t2 = NowMs();
 
     for (size_t i = 0; i < windows.size(); ++i) {
         if (!IsWindowVisible(windows[i]) || IsIconic(windows[i])) continue;  // no frame would arrive
         jobs[i] = std::make_shared<Job>();
         jobs[i]->hwnd = windows[i];
         jobs[i]->targetW = targetWidth;
-        impl_->Start(jobs[i]);
+        auto* call = new Impl::StartCall{impl_.get(), jobs[i]};
+        if (!TrySubmitThreadpoolCallback(Impl::StartOnPool, call, nullptr)) Impl::StartOnPool(nullptr, call);
     }
+    double startDeadline = NowMs() + kStartTimeoutMs;
+    for (auto& job : jobs) {
+        if (!job) continue;
+        DWORD left = (DWORD)std::max(0.0, startDeadline - NowMs());
+        if (WaitForSingleObject(job->started, left) != WAIT_OBJECT_0 && job->startState.exchange(2) == 0)
+            job = nullptr;  // still starting: the pool thread closes it when it is done
+    }
+    double t3 = NowMs();
     double deadline = NowMs() + kFrameTimeoutMs;
     for (size_t i = 0; i < jobs.size(); ++i) {
         if (!jobs[i]) continue;
@@ -264,6 +313,9 @@ std::vector<Image> SnapshotEngine::Capture(const std::vector<HWND>& windows, int
         if (got) result[i] = std::move(jobs[i]->image);
     }
     impl_->lastUse = NowMs();
+    if (impl_->lastUse - t0 > 400)  // a slow capture blocks the UI thread: leave a trace
+        Log("capture: %zu windows took %.0f ms (access %.0f, device %.0f, start %.0f, frames %.0f)", windows.size(),
+            impl_->lastUse - t0, t1 - t0, t2 - t1, t3 - t2, impl_->lastUse - t3);
     return result;
 }
 

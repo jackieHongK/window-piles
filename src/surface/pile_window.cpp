@@ -190,7 +190,7 @@ void PileWindow::Render() {
     if (hasMembers) {
         // Up to 3 most recently added windows, the newest in front (bottom-left).
         int n = (int)pile_.members.size();
-        int shown = std::min(n, 3);
+        int shown = std::min(n, Pile::kPreviews);
         int bodyTop = y + S(kPad);
         for (int k = shown - 1; k >= 0; --k) {
             const Member& m = pile_.members[n - 1 - k];
@@ -202,8 +202,8 @@ void PileWindow::Render() {
             c.StrokeRoundRect(box, S(kRadiusSm), 1, kBorder);
             if (!m.hidden && pile_.folded) c.FillRoundRect(box, S(kRadiusSm), kBackground, 150);  // this one is out
         }
-        if (n > 3) {
-            std::wstring more = L"+" + std::to_wstring(n - 3);
+        if (n > Pile::kPreviews) {
+            std::wstring more = L"+" + std::to_wstring(n - Pile::kPreviews);
             SIZE ms = c.MeasureText(more, S(12), true);
             RECT badge{card.right - S(kPad) - ms.cx - S(14), bodyTop + S(4), card.right - S(kPad) - S(4), bodyTop + S(26)};
             c.FillRoundRect(badge, S(11), kPrimary, 235);

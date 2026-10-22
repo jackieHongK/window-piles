@@ -28,6 +28,7 @@ struct Member {
     // Notifications while put away (its taskbar button is gone, so the pile has to show them):
     int unread = 0;          // unread count read from the window title
     bool attention = false;  // the app flashed its taskbar button / marked the title
+    DWORD hiddenAt = 0;      // GetTickCount() when put away (a flash right then is not news)
     Image snapshot;  // shown in the folded card (snapshot or icon card); never written to disk
 };
 
@@ -73,6 +74,13 @@ struct Pile {
         for (auto& m : members)
             if (m.hwnd == h) return &m;
         return nullptr;
+    }
+    // The card shows the last kPreviews members (newest in front). Only those need a preview image,
+    // a capture or an animation ghost, so a pile of 50 windows costs the same as one of 3.
+    static constexpr int kPreviews = 3;
+    bool ShowsPreview(const Member& m) const {
+        size_t i = (size_t)(&m - members.data());
+        return i < members.size() && i + kPreviews >= members.size();
     }
 };
 

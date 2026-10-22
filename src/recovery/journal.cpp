@@ -3,7 +3,9 @@
 #include <atomic>
 #include <cctype>
 #include <cstdio>
+#include <deque>
 
+#include "activity/activity_log.h"
 #include "common/win_util.h"
 
 namespace wp {
@@ -222,19 +224,43 @@ std::atomic<int> g_pendingRestores{0};
 struct RestoreJob {
     HWND hwnd;
     WINDOWPLACEMENT wp;
+    DWORD queuedAt;
 };
 
-void CALLBACK RunRestore(PTP_CALLBACK_INSTANCE, void* param) {
-    auto* job = (RestoreJob*)param;
-    SetWindowPlacement(job->hwnd, &job->wp);
-    if (!IsWindowVisible(job->hwnd)) ShowWindowAsync(job->hwnd, SW_SHOWNA);
-    delete job;
-    --g_pendingRestores;
+// Opening a pile of 40 windows used to fire 40 restores at once: the apps (and the disk, for
+// windows paged out while hidden) all woke up together. A few workers drain a queue instead, in the
+// order the windows were handed over. A worker stuck on a frozen app is not allowed to stall the
+// rest: when the oldest queued job has waited a second, another worker joins.
+constexpr int kParallelRestores = 4;
+constexpr DWORD kStuckMs = 1000;
+SRWLOCK g_queueLock = SRWLOCK_INIT;
+std::deque<RestoreJob> g_queue;
+int g_workers = 0;  // guarded by g_queueLock
+
+void CALLBACK RunRestores(PTP_CALLBACK_INSTANCE, void*) {
+    for (;;) {
+        AcquireSRWLockExclusive(&g_queueLock);
+        if (g_queue.empty()) {
+            --g_workers;
+            ReleaseSRWLockExclusive(&g_queueLock);
+            return;
+        }
+        RestoreJob job = g_queue.front();
+        g_queue.pop_front();
+        ReleaseSRWLockExclusive(&g_queueLock);
+        // An app that doesn't answer within a moment (frozen, busy) gets an asynchronous show instead:
+        // the window comes back where it was hidden, and no worker sits blocked behind it.
+        DWORD_PTR r = 0;
+        if (SendMessageTimeoutW(job.hwnd, WM_NULL, 0, 0, SMTO_ABORTIFHUNG, 200, &r))
+            SetWindowPlacement(job.hwnd, &job.wp);
+        if (!IsWindowVisible(job.hwnd)) ShowWindowAsync(job.hwnd, SW_SHOWNA);
+        --g_pendingRestores;
+    }
 }
 
 }  // namespace
 
-void RestoreWindow(HWND hwnd, const WINDOWPLACEMENT& saved, bool activate) {
+void RestoreWindow(HWND hwnd, const WINDOWPLACEMENT& saved, bool activate, bool urgent) {
     if (IsHungAppWindow(hwnd)) {
         // Never block on a hung app: async show only.
         ShowWindowAsync(hwnd, activate ? SW_SHOW : SW_SHOWNA);
@@ -248,12 +274,23 @@ void RestoreWindow(HWND hwnd, const WINDOWPLACEMENT& saved, bool activate) {
     // frozen (suspended in Modern Standby, busy at logoff) but not yet flagged as hung, the call can
     // block for a long time — it once froze the whole app until Windows killed it. Run it on a pool
     // thread so the caller never waits; WaitForRestores() bounds the wait at exit.
-    auto* job = new RestoreJob{hwnd, wp};
     ++g_pendingRestores;
-    if (!TrySubmitThreadpoolCallback(RunRestore, job, nullptr)) {
-        delete job;
-        --g_pendingRestores;
-        ShowWindowAsync(hwnd, SW_SHOWNA);
+    AcquireSRWLockExclusive(&g_queueLock);
+    DWORD now = GetTickCount();
+    g_queue.push_back({hwnd, wp, now});
+    bool spawn = urgent || g_workers < kParallelRestores || now - g_queue.front().queuedAt > kStuckMs;
+    if (spawn) ++g_workers;
+    ReleaseSRWLockExclusive(&g_queueLock);
+    if (spawn && !TrySubmitThreadpoolCallback(RunRestores, nullptr, nullptr)) {
+        // No pool thread: if nobody else is draining the queue, at least show the windows.
+        AcquireSRWLockExclusive(&g_queueLock);
+        std::deque<RestoreJob> orphans;
+        if (--g_workers == 0) orphans.swap(g_queue);
+        ReleaseSRWLockExclusive(&g_queueLock);
+        for (const RestoreJob& j : orphans) {
+            ShowWindowAsync(j.hwnd, SW_SHOWNA);
+            --g_pendingRestores;
+        }
     }
 }
 
@@ -274,7 +311,7 @@ int RecoverFromJournal(const Journal& j, int* skipped) {
             continue;
         }
         HWND h = (HWND)(uintptr_t)e.hwnd;
-        if (!IsWindowVisible(h)) RestoreWindow(h, e.wp, false);
+        if (!IsWindowVisible(h)) RestoreWindow(h, e.wp, false, true);
         ++restored;
     }
     // Last resort for any window whose app is too frozen to answer in time: queue a plain show.
@@ -331,6 +368,8 @@ int RunWatchdog(DWORD managerPid) {
     bool read = ReadJournal(j, err);
     Log("watchdog: manager %lu exited code=0x%08lX uptime=%.0fs journal=%s clean=%d",
         managerPid, code, uptimeSec, read ? "ok" : err.c_str(), read ? j.clean : -1);
+    // Killed or crashed: the app could not note when work stopped, so note it for it.
+    if (code != 0) activity::Append(activity::Kind::Pause, 0, 0, L"exit", ticks(exited));
     if (!read || j.clean || j.managerPid != managerPid) return 0;
 
     // The app crashed or hung: start it again so its piles come back folded exactly as they were

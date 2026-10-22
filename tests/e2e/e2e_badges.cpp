@@ -79,12 +79,14 @@ double BadgeRed(HWND card) {
 
 }  // namespace
 
-int wmain() {
+// e2e_badges [path\to\WindowPiles.exe]   (default: the exe next to this test)
+int wmain(int argc, wchar_t** argv) {
     InitProcess();
     wchar_t self[MAX_PATH];
     GetModuleFileNameW(nullptr, self, MAX_PATH);
     g_bin = self;
     g_bin = g_bin.substr(0, g_bin.find_last_of(L'\\'));
+    std::wstring appExe = argc > 1 ? std::wstring(argv[1]) : g_bin + L"\\WindowPiles.exe";
     g_dpi = GetDpiForSystem();
     SetEnvironmentVariableW(L"WINDOWPILES_NO_RELAUNCH", L"1");
     SetEnvironmentVariableW(L"WINDOWPILES_DATA_DIR", DataDir().c_str());
@@ -118,7 +120,7 @@ int wmain() {
     WriteFile(f, state.data(), (DWORD)state.size(), &n, nullptr);
     CloseHandle(f);
 
-    HANDLE app = Launch(g_bin + L"\\WindowPiles.exe", L"--autostart");
+    HANDLE app = Launch(appExe, L"--autostart");
     bool folded = PumpUntil([&] { return !IsWindowVisible(mail) && !IsWindowVisible(chat); }, 6000);
     PumpFor(600);
     auto cards = Cards();

@@ -7,6 +7,7 @@
 #include <cwctype>
 #include <map>
 
+#include "activity/activity_log.h"
 #include "app/app_icon.h"
 #include "common/win_util.h"
 #include "groups/pile_store.h"
@@ -30,12 +31,18 @@ constexpr UINT_PTR kTimerPersist = 3;
 constexpr UINT_PTR kTimerGoneRetry = 4;
 constexpr UINT_PTR kTimerToFront = 5;
 constexpr UINT_PTR kTimerReclaimNote = 6;
+constexpr UINT_PTR kTimerReclaimFold = 7;
+constexpr UINT_PTR kTimerRevalidate = 8;
+constexpr UINT_PTR kTimerActivity = 9;
 constexpr UINT WM_APP_RECLAIM = WM_APP + 4;
 constexpr UINT WM_APP_TITLE = WM_APP + 5;
+constexpr UINT WM_APP_FLUSH = WM_APP + 6;  // deferred redraws and journal write (one per burst)
 // How long after start-up windows reopened by their apps are put back into their piles.
 constexpr double kReclaimWindowMs = 15 * 60 * 1000;
 constexpr UINT kTrayId = 1;
 constexpr int kAnimMs = 220;
+constexpr DWORD kIdleMs = 5 * 60 * 1000;  // no input for this long: not counted as work time
+constexpr DWORD kFlashGraceMs = 3000;      // flashes this soon after folding are ignored for badges
 constexpr wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 constexpr wchar_t kRunValue[] = L"WindowPiles";
 
@@ -48,6 +55,7 @@ enum MenuId : UINT {
     kMenuAutostart,
     kMenuHelp,
     kMenuQuit,
+    kMenuStats,
 };
 
 std::wstring FileName(const std::wstring& path) {
@@ -135,6 +143,13 @@ JournalEntry EntryOf(const Member& m) {
     return e;
 }
 
+// The "reopen" list keeps the most recent entries only: it would otherwise grow with every reboot.
+constexpr size_t kMaxMissing = 20;
+void TrimMissing(Pile& pile) {
+    if (pile.missing.size() > kMaxMissing)
+        pile.missing.erase(pile.missing.begin(), pile.missing.end() - kMaxMissing);
+}
+
 std::wstring FlagPath(const wchar_t* name) { return AppDataDir() + L"\\" + name; }
 bool FlagExists(const wchar_t* name) { return GetFileAttributesW(FlagPath(name).c_str()) != INVALID_FILE_ATTRIBUTES; }
 void SetFlag(const wchar_t* name, bool on) {
@@ -160,6 +175,7 @@ App::~App() {
     drag_.reset();
     frame_.reset();
     guide_.reset();
+    stats_.reset();
     piles_.clear();
     if (nid_.cbSize) Shell_NotifyIconW(NIM_DELETE, &nid_);
     if (main_) DestroyWindow(main_);
@@ -192,6 +208,7 @@ int App::Run() {
     if (!FlagExists(L"autostart.off") && !UsingTestDataDir()) SetAutostart(true);
 
     startedMs_ = NowMs();
+    activity::Append(activity::Kind::Start);
     int recovered = RestoreSavedPiles();
     Log("run: %zu piles restored, %d leftover windows recovered", piles_.size(), recovered);
 
@@ -202,7 +219,7 @@ int App::Run() {
     SetTimer(main_, kTimerIdle, 10000, nullptr);
     // Resume from sleep / unlock: re-check the piles (event-driven, no polling).
     WTSRegisterSessionNotification(main_, NOTIFY_FOR_THIS_SESSION);
-    SaveJournal();
+    SaveJournalNow();  // also tells a waiting watchdog (relaunch after a crash) that we are up
     UpdateReclaim();
 
     if (recovered > 0)
@@ -228,10 +245,16 @@ int App::RestoreSavedPiles() {
     std::vector<SavedPile> saved;
     bool loaded = LoadPileState(saved);
     Log("restore: piles.json %s, %zu piles", loaded ? "loaded" : "missing/unreadable", saved.size());
+    // What the last run left hidden, read before this run writes its own journal over it.
+    Journal lastRun;
+    std::string journalErr;
+    bool haveLastRun = ReadJournal(lastRun, journalErr);
+    // Pile ids stay the same across restarts (the activity log refers to them).
+    for (const SavedPile& sp : saved) nextId_ = std::max(nextId_, sp.id + 1);
     std::vector<uint64_t> claimed;
     for (const SavedPile& sp : saved) {
         auto p = std::make_unique<Pile>();
-        p->id = nextId_++;
+        p->id = sp.id > 0 && !FindPile(sp.id) ? sp.id : nextId_++;
         p->name = sp.name;
         p->customName = sp.customName;
         p->color = sp.color;
@@ -257,11 +280,11 @@ int App::RestoreSavedPiles() {
             m.title = WindowTitle(m.hwnd);
             m.placement = sm.wp;
             m.placement.length = sizeof(WINDOWPLACEMENT);
-            m.hidden = !IsWindowVisible(m.hwnd);
-            if (m.hidden) m.snapshot = MakeIconCard(m.hwnd, Scale(240, GetDpiForSystem()), Scale(135, GetDpiForSystem()));
+            m.hidden = !IsWindowVisible(m.hwnd);  // previews for the cards in front: Refresh below
             claimed.push_back(sm.hwnd);
             p->members.push_back(std::move(m));
         }
+        TrimMissing(*p);
         if (p->Empty()) continue;
         p->folded = sp.folded || p->members.empty();
         p->view = std::make_unique<PileWindow>(*p, *this);
@@ -269,38 +292,43 @@ int App::RestoreSavedPiles() {
     }
 
     // After an app restart/update the windows of folded piles are visible again: put them all back
-    // in one go — one parallel capture for every window, journal once, no per-pile animation.
-    std::vector<HWND> toFold;
+    // in one go — one capture for the previews in front, journal once, no per-pile animation.
+    double t0 = NowMs();
+    std::vector<HWND> toFold, shoot;
     for (auto& p : piles_)
         if (p->folded)
             for (auto& m : p->members)
-                if (!m.hidden && IsWindowVisible(m.hwnd)) toFold.push_back(m.hwnd);
+                if (!m.hidden && IsWindowVisible(m.hwnd)) {
+                    toFold.push_back(m.hwnd);
+                    if (p->ShowsPreview(m)) shoot.push_back(m.hwnd);
+                }
     if (!toFold.empty()) {
         UINT dpi = GetDpiForSystem();
-        std::vector<Image> shots = snapshots_.Capture(toFold, Scale(240, dpi));
-        for (size_t i = 0; i < toFold.size(); ++i) {
-            Pile* p = PileOf(toFold[i]);
-            Member* m = p->Find(toFold[i]);
-            if (!shots[i].empty()) m->snapshot = std::move(shots[i]);
-            else if (m->snapshot.empty()) m->snapshot = MakeIconCard(toFold[i], Scale(240, dpi), Scale(135, dpi));
-            GetWindowRect(toFold[i], &m->lastRect);
+        std::vector<Image> shots = snapshots_.Capture(shoot, Scale(240, dpi));
+        for (size_t i = 0; i < shoot.size(); ++i)
+            if (!shots[i].empty()) PileOf(shoot[i])->Find(shoot[i])->snapshot = std::move(shots[i]);
+        double t1 = NowMs();
+        for (HWND h : toFold) {
+            Member* m = PileOf(h)->Find(h);
+            GetWindowRect(h, &m->lastRect);
             m->hidden = true;
+            m->hiddenAt = GetTickCount();
             m->attention = false;
-            m->unread = ParseUnread(WindowTitle(toFold[i])).count;
+            m->unread = ParseUnread(WindowTitle(h)).count;
         }
-        SaveJournal();  // journal before hiding
+        SaveJournalNow();  // journal before hiding
         for (HWND h : toFold) ShowWindowAsync(h, SW_HIDE);
         SetTimer(main_, kTimerVerify, 500, nullptr);
+        Log("restore: %zu windows put away again (previews %.0f ms, total %.0f ms)", toFold.size(), t1 - t0,
+            NowMs() - t0);
     }
     for (auto& p : piles_) Refresh(*p);
 
     // Anything the last run hid that no pile claims (e.g. both processes were killed): show it.
     int recovered = 0;
-    Journal j;
-    std::string err;
-    if (ReadJournal(j, err) && !j.clean) {
+    if (haveLastRun && !lastRun.clean) {
         Journal rest;
-        for (auto& e : j.entries)
+        for (auto& e : lastRun.entries)
             if (std::find(claimed.begin(), claimed.end(), e.hwnd) == claimed.end()) rest.entries.push_back(e);
         recovered = RecoverFromJournal(rest, nullptr);
     }
@@ -313,7 +341,7 @@ void App::PersistSoon() {
     SetTimer(main_, kTimerPersist, 400, nullptr);  // coalesce bursts of changes into one write
 }
 
-void App::PersistNow() {
+void App::PersistNow(bool background) {
     if (main_) KillTimer(main_, kTimerPersist);
     if (stateFrozen_) return;
     std::vector<SavedPile> out;
@@ -340,11 +368,12 @@ void App::PersistNow() {
         }
         out.push_back(std::move(sp));
     }
-    SavePileState(out);
+    SavePileState(out, background);
 }
 
 void App::AddMissing(Pile& pile, const Member& m) {
     pile.missing.push_back({m.exePath, FriendlyAppName(FileName(m.exePath)), m.title});
+    TrimMissing(pile);
 }
 
 void App::ClaimMissing(Pile& pile, const Member& m) {
@@ -512,6 +541,7 @@ void App::OnPileMenu(Pile& pile, POINT pt) {
         items.push_back({kMenuClearMissing, L"닫힌 창 목록 지우기", std::to_wstring(pile.missing.size()) + L"개"});
     items.push_back({});
     items.push_back({kMenuRestoreAll, L"모든 창 꺼내기", hidden ? std::to_wstring(hidden) + L"개" : L"", hidden == 0});
+    items.push_back({kMenuStats, L"작업 기록", L"오늘 쓴 시간"});
     items.push_back({kMenuHelp, L"사용법"});
     items.push_back({});
     items.push_back({kMenuQuit, L"종료", L"창을 모두 꺼내요"});
@@ -538,6 +568,7 @@ void App::OnPileMenu(Pile& pile, POINT pt) {
             }
             break;
         case kMenuRestoreAll: RestoreAll(); break;
+        case kMenuStats: ShowStats(); break;
         case kMenuHelp: ShowGuide(); break;
         case kMenuQuit: Quit(); break;
     }
@@ -663,13 +694,32 @@ std::wstring App::AutoName(const Pile& pile) const {
 
 void App::Refresh(Pile& pile) {
     if (!pile.customName) pile.name = AutoName(pile);
+    UpdatePreviews(pile);
     pile.view->Render();
     if (pile.active && frame_) frame_->Update();
 }
 
-void App::HideMembers(Pile& pile, const std::vector<HWND>& hwnds, bool readPlacement) {
+void App::RefreshSoon(Pile& pile) {
+    if (std::find(refreshIds_.begin(), refreshIds_.end(), pile.id) == refreshIds_.end()) refreshIds_.push_back(pile.id);
+    PostFlush();
+}
+
+void App::UpdatePreviews(Pile& pile) {
+    // Keep images only for the cards in front; one that just moved to the front without a snapshot
+    // gets an icon card (cheap, no capture).
     UINT dpi = DpiForPoint(pile.pos);
-    std::vector<HWND> visible;
+    for (auto& m : pile.members) {
+        if (!pile.ShowsPreview(m)) {
+            if (!m.snapshot.empty()) m.snapshot = Image{};
+        } else if (m.snapshot.empty() && IsWindow(m.hwnd)) {
+            m.snapshot = MakeIconCard(m.hwnd, Scale(240, dpi), Scale(135, dpi));
+        }
+    }
+}
+
+void App::HideMembers(Pile& pile, const std::vector<HWND>& hwnds, bool readPlacement, bool animate) {
+    UINT dpi = DpiForPoint(pile.pos);
+    std::vector<HWND> visible, shoot;
     for (HWND h : hwnds) {
         Member* m = pile.Find(h);
         if (!m || m->hidden) continue;
@@ -678,28 +728,30 @@ void App::HideMembers(Pile& pile, const std::vector<HWND>& hwnds, bool readPlace
             GetWindowPlacement(h, &m->placement);
         }
         visible.push_back(h);
+        if (pile.ShowsPreview(*m)) shoot.push_back(h);
     }
     int pileId = pile.id;
     if (!visible.empty()) {
-        // 1) previews while the windows are still visible (spec §4.3)
-        std::vector<Image> shots = snapshots_.Capture(visible, Scale(240, dpi));
+        // 1) previews while the windows are still visible (spec §4.3) — only for the cards in front
+        std::vector<Image> shots = snapshots_.Capture(shoot, Scale(240, dpi));
+        for (size_t i = 0; i < shoot.size(); ++i)
+            if (!shots[i].empty()) pile.Find(shoot[i])->snapshot = std::move(shots[i]);
         std::vector<RECT> from;
-        for (size_t i = 0; i < visible.size(); ++i) {
-            Member* m = pile.Find(visible[i]);
-            if (!shots[i].empty()) m->snapshot = std::move(shots[i]);
-            else if (m->snapshot.empty()) m->snapshot = MakeIconCard(visible[i], Scale(240, dpi), Scale(135, dpi));
-            m->title = WindowTitle(visible[i]);
-            if (IsWindowVisible(visible[i]) && !IsIconic(visible[i])) {
-                GetWindowRect(visible[i], &m->lastRect);
-                from.push_back(m->lastRect);
+        for (HWND h : visible) {
+            Member* m = pile.Find(h);
+            m->title = WindowTitle(h);
+            if (IsWindowVisible(h) && !IsIconic(h)) {
+                GetWindowRect(h, &m->lastRect);
+                if (pile.ShowsPreview(*m)) from.push_back(m->lastRect);  // a few ghosts say it all
             }
             m->hidden = true;
+            m->hiddenAt = GetTickCount();
             // Unread already shown in the title counts (like an app icon badge); a new flash raises "!".
             m->attention = false;
             m->unread = ParseUnread(m->title).count;
         }
         // 2) journal before hiding (spec §4.4 step 4 → 6)
-        SaveJournal();
+        SaveJournalNow();
         // 3) hide the originals (async: a hung app can't block us) and gather them into the card
         for (HWND h : visible) ShowWindowAsync(h, SW_HIDE);
         if (pile.active) {
@@ -709,7 +761,7 @@ void App::HideMembers(Pile& pile, const std::vector<HWND>& hwnds, bool readPlace
         pile.folded = true;
         pile.view->Render();  // computes the card rect at the card's own position
         RECT card = pile.view->CardRect();
-        AnimateRects(from, std::vector<RECT>(from.size(), card), pile.color, kAnimMs);
+        if (animate) AnimateRects(from, std::vector<RECT>(from.size(), card), pile.color, kAnimMs);
         SetTimer(main_, kTimerVerify, 500, nullptr);
     }
     Pile* p = FindPile(pileId);
@@ -754,6 +806,7 @@ void App::Expand(Pile& pile, bool makeActive) {
     std::vector<Member*> toShow;
     for (auto& m : pile.members)
         if (m.hidden) toShow.push_back(&m);
+    double t0 = NowMs(), tAnim = t0, tRestore = t0, tFrame = t0;
 
     if (makeActive) {
         // Spread out of the card, then the card steps aside for the frame + top tab.
@@ -761,21 +814,26 @@ void App::Expand(Pile& pile, bool makeActive) {
         std::vector<RECT> to;
         for (Member* m : toShow) {
             RECT r = RestoreRectOf(*m);
-            if (HasArea(r)) to.push_back(r);
+            if (HasArea(r) && pile.ShowsPreview(*m)) to.push_back(r);
         }
         pile.view->SetVisible(false);
+        tAnim = NowMs();
         AnimateRects(std::vector<RECT>(to.size(), card), to, pile.color, kAnimMs);
     }
+    tRestore = NowMs();
 
+    // Front-most (newest) first: those are the windows the user sees and reaches for first.
     std::vector<HWND> shown;
-    for (Member* m : toShow) {
+    for (auto it = toShow.rbegin(); it != toShow.rend(); ++it) {
+        Member* m = *it;
         m->hidden = false;
         m->attention = false;  // the user is looking at it now
-        RestoreWindow(m->hwnd, m->placement, false);
-        shown.push_back(m->hwnd);
+        RestoreWindow(m->hwnd, m->placement, false, stateFrozen_);  // exiting: all at once, bounded wait
+        shown.insert(shown.begin(), m->hwnd);
     }
     pile.folded = false;
     pile.active = makeActive;
+    tFrame = NowMs();
     if (makeActive) {
         // Restores run asynchronously; raise the windows and refresh the frame's monitors once
         // they have landed.
@@ -786,8 +844,13 @@ void App::Expand(Pile& pile, bool makeActive) {
     } else {
         pile.view->SetVisible(true);
     }
+    double tRefresh = NowMs();
     Refresh(pile);
     SaveJournal();
+    double end = NowMs();
+    if (end - t0 > 400)  // diagnostics: what made opening this pile slow
+        Log("expand: %zu windows took %.0f ms (card %.0f, animation %.0f, restores %.0f, frame %.0f, redraw %.0f)",
+            toShow.size(), end - t0, tAnim - t0, tRestore - tAnim, tFrame - tRestore, tRefresh - tFrame, end - tRefresh);
 }
 
 void App::Dissolve(Pile& pile) {
@@ -834,6 +897,15 @@ void App::VerifyHidden() {
 }
 
 void App::SaveJournal() {
+    // A burst of changes (an app closing 30 hidden windows, "모든 창 꺼내기") ends in one write.
+    // Only showing windows is deferred this way; hiding always writes first (SaveJournalNow), so a
+    // crash can never leave a window hidden that the journal doesn't know about.
+    journalDirty_ = true;
+    PostFlush();
+}
+
+void App::SaveJournalNow() {
+    journalDirty_ = false;
     Journal j;
     j.managerPid = GetCurrentProcessId();
     for (auto& p : piles_)
@@ -843,6 +915,22 @@ void App::SaveJournal() {
     WriteJournal(j);
     PersistSoon();
     UpdateTitleHooks();  // the set of hidden windows may have changed
+    TrackActivity();     // which pile is being worked on may have changed
+}
+
+void App::PostFlush() {
+    if (flushPosted_ || !main_) return;
+    flushPosted_ = true;
+    PostMessageW(main_, WM_APP_FLUSH, 0, 0);
+}
+
+void App::Flush() {
+    flushPosted_ = false;
+    std::vector<int> ids;
+    ids.swap(refreshIds_);
+    for (int id : ids)
+        if (Pile* p = FindPile(id)) Refresh(*p);
+    if (journalDirty_) SaveJournalNow();
 }
 
 void App::UpdateTitleHooks() {
@@ -896,6 +984,9 @@ void App::OnAttention(HWND hwnd) {
     if (!p) return;
     Member* m = p->Find(GetAncestor(hwnd, GA_ROOT));
     if (!m || !m->hidden || m->attention) return;
+    // Windows flashes a taskbar button when a window may not come to the front (e.g. one we just
+    // restored, then folded again). That is not a message from the app.
+    if (GetTickCount() - m->hiddenAt < kFlashGraceMs) return;
     Log("badge: flash from a hidden window (pile %d)", p->id);
     m->attention = true;
     p->view->Render();
@@ -930,7 +1021,7 @@ void App::OnMemberGone(HWND hwnd) {
         frame_.reset();
         p->view->SetVisible(true);
     }
-    Refresh(*p);
+    RefreshSoon(*p);  // an app closing many windows at once: one redraw and one write for all
     SaveJournal();
 }
 
@@ -1017,6 +1108,7 @@ void App::ShowTrayMenu() {
     bool autostart = AutostartEnabled();
     std::vector<MenuItem> items = {
         {kMenuRestoreAll, L"모든 창 꺼내기", hidden ? std::to_wstring(hidden) + L"개" : L"", hidden == 0},
+        {kMenuStats, L"작업 기록", L"오늘 쓴 시간"},
         {kMenuAutostart, L"Windows 시작 시 자동 실행", autostart ? L"켜짐 ✓" : L"꺼짐"},
         {kMenuHelp, L"사용법"},
         {},
@@ -1024,6 +1116,7 @@ void App::ShowTrayMenu() {
     };
     UINT id = ShowMenu(items, pt);
     if (id == kMenuRestoreAll) RestoreAll();
+    else if (id == kMenuStats) ShowStats();
     else if (id == kMenuAutostart) {
         SetAutostart(!autostart);
         SetFlag(L"autostart.off", autostart);  // remember the user's choice across launches
@@ -1033,6 +1126,7 @@ void App::ShowTrayMenu() {
 
 void App::Quit() {
     if (quitting_) return;
+    PauseActivity(L"exit");
     quitting_ = true;
     // Remember the piles exactly as they are (folded stays folded) for the next start/update,
     // then bring every window back so nothing stays hidden while the app is not running.
@@ -1051,6 +1145,7 @@ void App::Quit() {
 
 void App::EndSessionNow() {
     Log("end session: frozen=%d", stateFrozen_);
+    PauseActivity(L"exit");
     // Logoff, shutdown, restart or an installer closing us (Restart Manager). The piles were saved
     // in WM_QUERYENDSESSION and every window was handed back; finish within Windows' time limit and
     // skip any cleanup that talks to other processes (Explorer may already be gone or frozen).
@@ -1099,21 +1194,28 @@ void App::UpdateReclaim() {
     } else if (nameHook_) {
         UnhookWinEvent(nameHook_);
         nameHook_ = nullptr;
+        reclaimExe_.clear();
     }
 }
 
 void App::TryReclaim(HWND hwnd) {
-    if (!reclaimActive_ || !IsWindow(hwnd) || PileOf(hwnd) || !CanPile(hwnd)) return;
+    // Runs for title changes all over the system while reclaiming, so the cheap checks go first and
+    // the process lookups (cached per process) only for windows that could match.
+    if (!reclaimActive_ || !IsWindow(hwnd) || !IsWindowVisible(hwnd) || PileOf(hwnd)) return;
     std::wstring title = WindowTitle(hwnd);
     if (title.empty()) return;
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
-    std::wstring exe = Lower(ProcessExePath(pid));
+    auto cached = reclaimExe_.find(pid);
+    if (cached == reclaimExe_.end()) cached = reclaimExe_.emplace(pid, ProcessExePath(pid)).first;
+    const std::wstring exe = Lower(cached->second);
+    if (exe.empty()) return;
     for (auto& p : piles_) {
         auto it = std::find_if(p->missing.begin(), p->missing.end(), [&](const MissingWindow& w) {
-            return !w.exePath.empty() && Lower(w.exePath) == exe && w.title == title;
+            return w.title == title && Lower(w.exePath) == exe;
         });
         if (it == p->missing.end()) continue;
+        if (!CanPile(hwnd)) return;
         // Same app, same window title as before the restart: it belongs in this pile.
         p->missing.erase(it);
         Member m;
@@ -1121,20 +1223,111 @@ void App::TryReclaim(HWND hwnd) {
         m.pid = pid;
         m.createTime = ProcessCreateTime(pid);
         m.className = WindowClass(hwnd);
-        m.exePath = ProcessExePath(pid);
+        m.exePath = cached->second;
         m.title = title;
         GetWindowPlacement(hwnd, &m.placement);
         p->members.push_back(std::move(m));
         ++reclaimed_;
         SetTimer(main_, kTimerReclaimNote, 2500, nullptr);  // one note for a burst of windows
-        if (p->folded) HideMembers(*p, {hwnd}, false);
+        // A browser restoring its session opens many windows at once: put them away together.
+        reclaimPending_.push_back(hwnd);
+        SetTimer(main_, kTimerReclaimFold, 500, nullptr);
+        UpdateReclaim();
+        return;
+    }
+}
+
+void App::FoldReclaimed() {
+    KillTimer(main_, kTimerReclaimFold);
+    std::vector<HWND> pending;
+    pending.swap(reclaimPending_);
+    for (auto& p : piles_) {
+        std::vector<HWND> mine;
+        for (HWND h : pending)
+            if (p->Find(h)) mine.push_back(h);
+        if (mine.empty()) continue;
+        if (p->folded) HideMembers(*p, mine, false, false);  // no animation: nobody asked for this
         else {
             Refresh(*p);
             SaveJournal();
         }
-        UpdateReclaim();
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Activity log
+// ---------------------------------------------------------------------------------------------
+
+void App::TrackActivity() {
+    if (stateFrozen_ || quitting_) return;
+    Pile* active = ActivePile();
+    int id = active ? active->id : 0;
+    if (id == trackedPile_) return;
+    if (active) {
+        activity::Append(activity::Kind::Open, id, active->color, active->name);
+        idlePaused_ = activityPaused_ = false;  // opening a pile: the user is clearly here
+    } else {
+        activity::Append(activity::Kind::Close, trackedPile_);
+    }
+    trackedPile_ = id;
+    if (id) SetTimer(main_, kTimerActivity, 60 * 1000, nullptr);
+    else KillTimer(main_, kTimerActivity);
+}
+
+void App::CheckIdle() {
+    if (!trackedPile_ || activityPaused_) return;
+    LASTINPUTINFO li{sizeof(li)};
+    if (!GetLastInputInfo(&li)) return;
+    DWORD idleMs = GetTickCount() - li.dwTime;
+    uint64_t lastInput = activity::NowUtc() - (uint64_t)idleMs * 10000;
+    // Away for a while counts from the last key press / mouse move, back from the latest one.
+    if (!idlePaused_ && idleMs >= kIdleMs) {
+        activity::Append(activity::Kind::Pause, 0, 0, L"idle", lastInput);
+        idlePaused_ = true;
+    } else if (idlePaused_ && idleMs < kIdleMs) {
+        activity::Append(activity::Kind::Resume, 0, 0, {}, lastInput);
+        idlePaused_ = false;
+    }
+}
+
+void App::PauseActivity(const wchar_t* reason) {
+    if (!trackedPile_ || activityPaused_) return;
+    CheckIdle();  // an idle stretch before a lock or sleep ends at the last input, not now
+    if (!idlePaused_) activity::Append(activity::Kind::Pause, 0, 0, reason);
+    activityPaused_ = true;
+}
+
+void App::ResumeActivity() {
+    if (!activityPaused_) return;
+    activityPaused_ = idlePaused_ = false;
+    if (trackedPile_) activity::Append(activity::Kind::Resume);
+}
+
+void App::SetActivityEnabled(bool on) {
+    if (!on) {
+        if (trackedPile_ && !activityPaused_ && !idlePaused_) activity::Append(activity::Kind::Pause, 0, 0, L"off");
+        activity::SetEnabled(false);
         return;
     }
+    activity::SetEnabled(true);
+    activity::Append(activity::Kind::Start);  // start over from what is open right now
+    trackedPile_ = 0;
+    idlePaused_ = activityPaused_ = false;
+    TrackActivity();
+}
+
+void App::ShowStats() {
+    if (!stats_)
+        stats_ = std::make_unique<StatsWindow>(
+            [this](int id, std::wstring& name, COLORREF& color) {
+                Pile* p = FindPile(id);
+                if (!p) return false;
+                name = p->name;
+                color = p->color;
+                return true;
+            },
+            [this](bool on) { SetActivityEnabled(on); });
+    stats_->Show();
 }
 
 LRESULT CALLBACK App::MainProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
@@ -1163,10 +1356,12 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
             }
             return 0;
         case WM_APP_SHOW_GUIDE: ShowGuide(); return 0;
+        case WM_APP_SHOW_STATS: ShowStats(); return 0;
         case WM_APP_MEMBER_GONE: OnMemberGone((HWND)wp); return 0;
         case WM_APP_MEMBER_SHOWN: OnMemberShown((HWND)wp); return 0;
         case WM_APP_RECLAIM: TryReclaim((HWND)wp); return 0;
         case WM_APP_TITLE: OnTitleChanged((HWND)wp); return 0;
+        case WM_APP_FLUSH: Flush(); return 0;
         case WM_TIMER:
             if (wp == kTimerVerify) VerifyHidden();
             else if (wp == kTimerIdle) {
@@ -1193,7 +1388,12 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
                 if (reclaimed_ > 0)
                     Notify(L"더미를 다시 묶었어요", L"다시 열린 창 " + std::to_wstring(reclaimed_) + L"개를 원래 더미로 돌려놨어요.");
                 reclaimed_ = 0;
-            } else if (wp == kTimerPersist) PersistNow();
+            } else if (wp == kTimerReclaimFold) FoldReclaimed();
+            else if (wp == kTimerRevalidate) {
+                KillTimer(main_, kTimerRevalidate);
+                Revalidate();
+            } else if (wp == kTimerActivity) CheckIdle();
+            else if (wp == kTimerPersist) PersistNow(true);  // the disk write runs off the UI thread
             else if (wp == kTimerGoneRetry) {
                 KillTimer(main_, kTimerGoneRetry);
                 std::vector<HWND> pending;
@@ -1201,19 +1401,31 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
                 for (HWND h : pending) OnMemberGone(h);  // re-queues itself if still alive
             }
             return 0;
+        // Resume, unlock and a display change often arrive together: re-check once, a moment later.
         case WM_DISPLAYCHANGE:
-            Revalidate();
+            SetTimer(main_, kTimerRevalidate, 300, nullptr);
             return 0;
         case WM_POWERBROADCAST:
-            if (wp == PBT_APMRESUMEAUTOMATIC || wp == PBT_APMRESUMESUSPEND) Revalidate();
+            if (wp == PBT_APMSUSPEND) PauseActivity(L"sleep");
+            if (wp == PBT_APMRESUMESUSPEND && !sessionLocked_) ResumeActivity();  // a user woke it up
+            if (wp == PBT_APMRESUMEAUTOMATIC || wp == PBT_APMRESUMESUSPEND) SetTimer(main_, kTimerRevalidate, 300, nullptr);
             return TRUE;
         case WM_WTSSESSION_CHANGE:
-            if (wp == WTS_SESSION_UNLOCK || wp == WTS_REMOTE_CONNECT || wp == WTS_CONSOLE_CONNECT) Revalidate();
+            if (wp == WTS_SESSION_LOCK) {
+                sessionLocked_ = true;
+                PauseActivity(L"lock");
+            } else if (wp == WTS_SESSION_UNLOCK) {
+                sessionLocked_ = false;
+                ResumeActivity();
+            }
+            if (wp == WTS_SESSION_UNLOCK || wp == WTS_REMOTE_CONNECT || wp == WTS_CONSOLE_CONNECT)
+                SetTimer(main_, kTimerRevalidate, 300, nullptr);
             return 0;
         case WM_QUERYENDSESSION:
             // Logoff, shutdown, restart, or an installer/updater closing us: save the piles as they
             // are (they come back at the next start), then hand every window back (non-blocking) so
             // its "save changes?" prompt is visible.
+            PauseActivity(L"exit");
             PersistNow();
             stateFrozen_ = true;
             RestoreAll();

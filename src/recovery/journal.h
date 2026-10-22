@@ -34,8 +34,9 @@ bool ReadJournal(Journal& j, std::string& err);
 std::string ValidateIdentity(const JournalEntry& e);
 
 // Shows a window again with its saved placement, without stealing focus unless asked.
-// Non-blocking: the cross-process call runs on a pool thread (a frozen app can't freeze us).
-void RestoreWindow(HWND hwnd, const WINDOWPLACEMENT& wp, bool activate);
+// Non-blocking: the cross-process call runs on a pool thread (a frozen app can't freeze us). A few
+// restores run at a time; `urgent` (exit, logoff, crash recovery) runs them all at once instead.
+void RestoreWindow(HWND hwnd, const WINDOWPLACEMENT& wp, bool activate, bool urgent = false);
 // Waits (bounded) until queued RestoreWindow calls finished. Call before the process exits.
 bool WaitForRestores(DWORD timeoutMs);
 

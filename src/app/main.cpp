@@ -1,6 +1,7 @@
 // WindowPiles.exe
 //   (no args) / --autostart   the app: tray icon + piles (--autostart: launched at sign-in)
 //   --watchdog <pid>           recovery watchdog started by the app itself (same exe, no UI)
+//   --stats                    opens "작업 기록" in the running instance
 #include <windows.h>
 #include <appmodel.h>
 #include <shellapi.h>
@@ -74,11 +75,18 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         return wp::RunWatchdog(pid);
     }
     bool automatic = false;  // started by Windows / the watchdog, not by the user
+    bool stats = false;      // open "작업 기록" in the running instance
     for (int i = 1; i < argc; ++i) {
         std::wstring a = argv[i];
         if (a == L"--autostart" || a == L"--restarted") automatic = true;
+        if (a == L"--stats") stats = true;
     }
     LocalFree(argv);
+    if (stats)
+        if (HWND existing = FindWindowW(wp::kMainWindowClass, nullptr)) {
+            PostMessageW(existing, wp::WM_APP_SHOW_STATS, 0, 0);
+            return 0;
+        }
 
     // Started from inside another app's MSIX package (a packaged IDE, terminal or assistant)? Then
     // Windows virtualizes our AppData per package — we'd save the piles into that app's private copy
@@ -87,8 +95,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     UINT32 pkgLen = 0;
     wchar_t noRelaunch[8] = {};
     bool mayRelaunch = !GetEnvironmentVariableW(L"WINDOWPILES_NO_RELAUNCH", noRelaunch, 8) && !wp::UsingTestDataDir();
+    // Automatic launches come from the Run key, Restart Manager or our watchdog — never from inside
+    // another app — so they skip the probe (it walks every package folder: slow on a cold disk at sign-in).
     bool inPackage = mayRelaunch && (GetCurrentPackageFullName(&pkgLen, nullptr) != APPMODEL_ERROR_NO_PACKAGE ||
-                                     AppDataIsVirtualized());
+                                     (!automatic && AppDataIsVirtualized()));
     if (inPackage) {
         HANDLE once = CreateEventW(nullptr, TRUE, FALSE, L"Local\\WindowPiles.ShellRelaunch");
         bool already = GetLastError() == ERROR_ALREADY_EXISTS;  // guard against a relaunch loop

@@ -346,7 +346,8 @@ int wmain(int argc, wchar_t** argv) {
         // 4) click the tab → fold back into the card at the same place
         PumpFor(GetDoubleClickTime());
         Click({(tr.left + tr.right) / 2, tr.top + S(15)});
-        Check(!IsWindowVisible(w1) && !IsWindowVisible(w2), "4) 이름표 클릭 → 두 창 다시 접힘");
+        // Folding waits for the preview capture, which can take a second or more on a busy PC.
+        Check(PumpUntil([&] { return !IsWindowVisible(w1) && !IsWindowVisible(w2); }, 5000), "4) 이름표 클릭 → 두 창 다시 접힘");
         PumpUntil([&] { return IsWindowVisible(card) != FALSE; }, 1000);
         Check(IsWindowVisible(card) && SameRect(Rect(card), cardRect), "4) 카드가 원래 자리로 돌아옴");
         Print("    card before %s, after %s, visible=%d\n", RectStr(cardRect).c_str(), RectStr(Rect(card)).c_str(),
@@ -389,7 +390,8 @@ int wmain(int argc, wchar_t** argv) {
         RECT mr = Rect(menus[0]);
         SaveShot(L"5_menu", Inflate(mr, S(16)));
         Click({mr.left + S(60), mr.top + S(5) + S(34) + S(17)});  // 2nd item: 이름·색 바꾸기…
-        auto eds = VisibleOfClass(L"WindowPilesEditor");
+        std::vector<HWND> eds;
+        PumpUntil([&] { return (eds = VisibleOfClass(L"WindowPilesEditor")).size() == 1; }, 3000);
         Check(eds.size() == 1, "5) 이름·색 바꾸기 팝오버 표시");
         if (!eds.empty()) {
             TypeText(L"프로젝트 A");
@@ -421,7 +423,9 @@ int wmain(int argc, wchar_t** argv) {
     Check(IsWindowVisible(w1) && IsWindowVisible(w2), "7) 종료하면 숨긴 창이 모두 나타남");
     app = Launch(appExe, L"--autostart");
     mainWnd = WaitMain(5000);
-    PumpFor(1500);
+    PumpUntil([&] { return VisibleOfClass(L"WindowPilesPile").size() == 1 && !IsWindowVisible(w1) && !IsWindowVisible(w2); },
+              8000);
+    PumpFor(500);
     cards = VisibleOfClass(L"WindowPilesPile");
     Check(cards.size() == 1, "7) 재실행 → 더미가 복원됨");
     Check(!IsWindowVisible(w1) && !IsWindowVisible(w2), "7) 재실행 → 창들이 다시 더미로 들어감");
@@ -431,7 +435,7 @@ int wmain(int argc, wchar_t** argv) {
 
     // 8) the app behind a hidden member quits → "다시 열어야 할 창"
     PostMessageW(w1, WM_CLOSE, 0, 0);
-    PumpFor(1500);
+    PumpUntil([&] { return FileHas(L"piles.json", "\"missing\":[{") && FileHas(L"piles.json", "TW-Normal-1"); }, 5000);
     Check(FileHas(L"piles.json", "\"missing\":[{") && FileHas(L"piles.json", "TW-Normal-1"),
           "8) 숨겨진 창이 닫히면 '다시 열어야 할 창' 목록에 기록");
     SaveShot(L"8_missing", Inflate(Rect(card), S(4)));
@@ -444,8 +448,8 @@ int wmain(int argc, wchar_t** argv) {
     if (nw) {
         PumpFor(400);
         Drag(nw, Center(Rect(card)));
+        Check(PumpUntil([&] { return !IsWindowVisible(nw); }, 5000), "9) 같은 앱의 새 창을 카드에 넣음");
         PumpFor(800);
-        Check(!IsWindowVisible(nw), "9) 같은 앱의 새 창을 카드에 넣음");
         Check(FileHas(L"piles.json", "\"missing\":[]"), "9) '다시 열어야 할 창' 목록에서 제거됨");
     } else {
         Check(false, "9) 새 TestWindows 창을 찾지 못함");

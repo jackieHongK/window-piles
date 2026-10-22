@@ -15,12 +15,15 @@
 #include "preview/snapshot.h"
 #include "surface/pile_window.h"
 #include "ui/guide_window.h"
+#include "ui/stats_window.h"
 #include "ui/work_frame.h"
 
 namespace wp {
 
 // Posted to the running instance's main window by a second launch: show the guide.
 constexpr UINT WM_APP_SHOW_GUIDE = WM_APP + 10;
+// `WindowPiles.exe --stats`: the running instance opens "작업 기록".
+constexpr UINT WM_APP_SHOW_STATS = WM_APP + 11;
 constexpr wchar_t kMainWindowClass[] = L"WindowPilesMain";
 
 class App : public PileHost, public DragHost {
@@ -57,7 +60,7 @@ private:
     Pile* ActivePile();
     Pile& CreatePile(POINT nearPt);
     void RemovePile(Pile& pile);
-    void HideMembers(Pile& pile, const std::vector<HWND>& hwnds, bool readPlacement);
+    void HideMembers(Pile& pile, const std::vector<HWND>& hwnds, bool readPlacement, bool animate = true);
     void Fold(Pile& pile);
     void Activate(Pile& pile);                 // open and mark as "being worked on"
     void Expand(Pile& pile, bool makeActive);  // bring hidden windows back
@@ -65,14 +68,21 @@ private:
     void TakeOut(HWND hwnd, const WINDOWPLACEMENT& before);  // remove one window from its pile
     void RestoreAll();
     void EditStyle(Pile& pile, POINT anchor);
-    void Refresh(Pile& pile);  // rename + redraw card / frame
+    void Refresh(Pile& pile);      // rename + redraw card / frame
+    void RefreshSoon(Pile& pile);  // same, once per burst of changes
+    void UpdatePreviews(Pile& pile);  // images only for the cards in front
     void VerifyHidden();
-    void SaveJournal();  // recovery journal (hidden windows) + schedules a pile-state save
+    // Recovery journal (hidden windows) + schedules a pile-state save. SaveJournal coalesces a burst
+    // of changes into one write; SaveJournalNow writes at once (always before hiding windows).
+    void SaveJournal();
+    void SaveJournalNow();
+    void PostFlush();
+    void Flush();
 
     // persistence across restarts, updates and reboots
     int RestoreSavedPiles();  // returns how many leftover hidden windows were recovered
     void PersistSoon();
-    void PersistNow();
+    void PersistNow(bool background = false);
     void AddMissing(Pile& pile, const Member& m);
     void ClaimMissing(Pile& pile, const Member& m);
     static bool AutostartEnabled();
@@ -86,6 +96,14 @@ private:
     // After a restart, windows that apps reopen with the same app + title go back into their pile.
     void UpdateReclaim();
     void TryReclaim(HWND hwnd);
+    void FoldReclaimed();  // windows matched in the last moment, put away together
+    // Activity log ("작업 기록"): which pile is open, minus lock/sleep/idle/exit time.
+    void TrackActivity();
+    void PauseActivity(const wchar_t* reason);
+    void ResumeActivity();
+    void CheckIdle();  // runs once a minute, only while a pile is being worked on
+    void SetActivityEnabled(bool on);
+    void ShowStats();
     // Notification badges for hidden windows (their taskbar buttons are gone).
     void UpdateTitleHooks();          // watch title changes only in processes that own hidden windows
     void OnTitleChanged(HWND hwnd);   // unread count in the title
@@ -123,8 +141,19 @@ private:
     bool reclaimActive_ = false;
     HWINEVENTHOOK nameHook_ = nullptr;  // only while reclaiming (title changes are frequent)
     int reclaimed_ = 0;
+    std::map<DWORD, std::wstring> reclaimExe_;  // pid → exe path, while reclaiming
+    std::vector<HWND> reclaimPending_;          // matched, waiting to be folded together
     UINT shellHookMsg_ = 0;                        // HSHELL_* notifications from Explorer
     std::map<DWORD, HWINEVENTHOOK> titleHooks_;    // pid → title-change hook scoped to that process
+    bool journalDirty_ = false;
+    bool flushPosted_ = false;
+    std::vector<int> refreshIds_;  // piles to redraw at the next flush
+
+    std::unique_ptr<StatsWindow> stats_;
+    int trackedPile_ = 0;          // pile last written as open in the activity log (0: none)
+    bool activityPaused_ = false;  // lock / sleep / exit
+    bool idlePaused_ = false;      // no input for a while
+    bool sessionLocked_ = false;
 
     static App* instance_;
 };

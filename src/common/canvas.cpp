@@ -71,12 +71,36 @@ Canvas::~Canvas() {
 
 void Canvas::Clear() { std::fill(px_, px_ + (size_t)w_ * h_, 0u); }
 
+namespace {
+
+// The part of row y that lies fully inside rounded rect r (coverage 1), as [left, right): every
+// pixel at least the corner radius away from the corners. Most of a large shape is in this span, so
+// the distance math only runs near the edges and corners.
+struct Span {
+    int left, right;
+};
+Span SolidSpan(const RECT& r, int radius, int y) {
+    if (y < r.top || y >= r.bottom || r.right <= r.left) return {0, 0};
+    float rad = std::min((float)radius, std::min(r.right - r.left, r.bottom - r.top) * 0.5f);
+    int inset = (int)std::ceil(std::max(0.0f, rad)) + 1;
+    bool straight = y >= r.top + inset && y < r.bottom - inset;
+    return straight ? Span{r.left, r.right} : Span{r.left + inset, r.right - inset};
+}
+
+}  // namespace
+
 void Canvas::FillRoundRect(const RECT& r, int radius, COLORREF color, BYTE alpha) {
     int x0 = std::max<int>(0, r.left), y0 = std::max<int>(0, r.top);
     int x1 = std::min<int>(w_, r.right), y1 = std::min<int>(h_, r.bottom);
+    const uint32_t solid = Premul(color, alpha);
     for (int y = y0; y < y1; ++y) {
         uint32_t* row = px_ + (size_t)y * w_;
+        Span s = SolidSpan(r, radius, y);
         for (int x = x0; x < x1; ++x) {
+            if (x >= s.left && x < s.right) {
+                row[x] = Over(solid, row[x]);
+                continue;
+            }
             float cov = RoundRectCoverage(x + 0.5f, y + 0.5f, r, (float)radius);
             if (cov <= 0) continue;
             row[x] = Over(Premul(color, (int)(alpha * cov + 0.5f)), row[x]);
@@ -90,7 +114,12 @@ void Canvas::StrokeRoundRect(const RECT& r, int radius, int t, COLORREF color, B
     int x1 = std::min<int>(w_, r.right), y1 = std::min<int>(h_, r.bottom);
     for (int y = y0; y < y1; ++y) {
         uint32_t* row = px_ + (size_t)y * w_;
+        Span hole = SolidSpan(inner, std::max(0, radius - t), y);  // fully inside the inner edge: no stroke
         for (int x = x0; x < x1; ++x) {
+            if (x >= hole.left && x < hole.right) {
+                x = hole.right - 1;
+                continue;
+            }
             float outer = RoundRectCoverage(x + 0.5f, y + 0.5f, r, (float)radius);
             float in = RoundRectCoverage(x + 0.5f, y + 0.5f, inner, (float)std::max(0, radius - t));
             float cov = outer - in;
@@ -107,7 +136,12 @@ void Canvas::DashedRoundRect(const RECT& r, int radius, int t, int dash, int gap
     int x1 = std::min<int>(w_, r.right), y1 = std::min<int>(h_, r.bottom);
     for (int y = y0; y < y1; ++y) {
         uint32_t* row = px_ + (size_t)y * w_;
+        Span hole = SolidSpan(inner, std::max(0, radius - t), y);
         for (int x = x0; x < x1; ++x) {
+            if (x >= hole.left && x < hole.right) {
+                x = hole.right - 1;
+                continue;
+            }
             float outer = RoundRectCoverage(x + 0.5f, y + 0.5f, r, (float)radius);
             float in = RoundRectCoverage(x + 0.5f, y + 0.5f, inner, (float)std::max(0, radius - t));
             float cov = outer - in;
