@@ -137,14 +137,17 @@ HICON MakeAppIcon(int size) {
 HICON MakeTrayIcon(int size, bool lightTaskbar) {
     Canvas c(size, size);
     COLORREF fg = lightTaskbar ? RGB(32, 30, 28) : RGB(255, 255, 255);
-    float k = size / 64.0f;
-    // The mark without its tile, slightly enlarged to fill the notification-area square.
+    // The mark without its tile, enlarged so the tray (grid 10..54) fills the notification-area
+    // square, centered vertically on the tray's height (grid 20..49).
+    int vs = (int)std::lround(size * 64.0 / 44.0);
+    float k = vs / 64.0f;
+    int ox = -(int)std::lround(10 * k), oy = (int)std::lround(size / 2.0 - 34.5 * k);
     if (Small(size)) {
-        DrawCards(c, 0, 0, size, {{37, fg, 255}, {26, fg, 115}}, 8);
-        StrokeTray(c, 0, 0, size, std::max(2.0f, 5.0f * k), fg);
+        DrawCards(c, ox, oy, vs, {{37, fg, 255}, {26, fg, 115}}, 8);
+        StrokeTray(c, ox, oy, vs, std::max(2.0f, 4.5f * k), fg);
     } else {
-        DrawCards(c, 0, 0, size, {{40, fg, 255}, {32.5f, fg, 200}, {25, fg, 115}}, 6);
-        StrokeTray(c, 0, 0, size, 5.0f * k, fg);
+        DrawCards(c, ox, oy, vs, {{40, fg, 255}, {32.5f, fg, 200}, {25, fg, 115}}, 6);
+        StrokeTray(c, ox, oy, vs, 4.5f * k, fg);
     }
     return ToIcon(c, size);
 }

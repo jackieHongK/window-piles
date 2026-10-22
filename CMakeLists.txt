@@ -73,6 +73,11 @@ target_link_libraries(e2e_perf PRIVATE poc_common)
 add_executable(unread_test tests/unit/unread_test.cpp src/groups/unread.cpp)
 target_include_directories(unread_test PRIVATE src)
 
+# Tool: renders the app mark and tray icons into one image for review (icon_preview out.bmp).
+add_executable(icon_preview tests/tools/icon_preview.cpp src/app/app_icon.cpp src/common/canvas.cpp)
+target_include_directories(icon_preview PRIVATE src)
+target_link_libraries(icon_preview PRIVATE user32 gdi32 advapi32)
+
 # Unit test: Canvas fast paths draw exactly what the plain per-pixel loops draw.
 add_executable(canvas_test tests/unit/canvas_test.cpp src/common/canvas.cpp)
 target_include_directories(canvas_test PRIVATE src)
