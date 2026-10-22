@@ -235,6 +235,7 @@ App::~App() {
     if (nid_.cbSize) Shell_NotifyIconW(NIM_DELETE, &nid_);
     if (main_) DestroyWindow(main_);
     if (icon_) DestroyIcon(icon_);
+    if (trayIcon_) DestroyIcon(trayIcon_);
     instance_ = nullptr;
 }
 
@@ -245,7 +246,7 @@ int App::Run() {
     wc.lpszClassName = kMainWindowClass;
     RegisterClassW(&wc);
     // A hidden (never shown) top-level window: tray callbacks, menus, deferred work.
-    main_ = CreateWindowExW(WS_EX_TOOLWINDOW, wc.lpszClassName, L"Window Piles", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr,
+    main_ = CreateWindowExW(WS_EX_TOOLWINDOW, wc.lpszClassName, L"Stack Neverflow", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr,
                             wc.hInstance, nullptr);
     taskbarCreatedMsg_ = RegisterWindowMessageW(L"TaskbarCreated");
     // Explorer tells shell-hook windows when an app flashes its taskbar button (new message…).
@@ -253,6 +254,7 @@ int App::Run() {
     shellHookMsg_ = RegisterWindowMessageW(L"SHELLHOOK");
     RegisterShellHookWindow(main_);
     icon_ = MakeAppIcon(GetSystemMetrics(SM_CXSMICON) * 2);
+    trayIcon_ = MakeTrayIcon(GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem()), TaskbarIsLight());
     Log("run: main window %p", main_);
     AddTrayIcon();
     Log("run: tray icon added");
@@ -619,7 +621,7 @@ void App::OnPileMenu(Pile& pile, POINT pt) {
     items.push_back({kMenuStats, L"작업 기록", L"오늘 쓴 시간"});
     items.push_back({kMenuHelp, L"사용법"});
     items.push_back({});
-    items.push_back({kMenuQuit, L"종료", L"창을 모두 꺼내요"});
+    items.push_back({kMenuQuit, L"Neverflow 종료", L"창을 모두 꺼내요"});
 
     int pileId = pile.id;  // the pile may be gone after the menu closes
     UINT id = ShowMenu(items, pt);
@@ -1172,11 +1174,21 @@ void App::AddTrayIcon() {
     nid_.uID = kTrayId;
     nid_.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
     nid_.uCallbackMessage = WM_APP_TRAY;
-    nid_.hIcon = icon_;
-    CopyTrunc(nid_.szTip, ARRAYSIZE(nid_.szTip), L"창 더미 · 누르면 사용법");
+    nid_.hIcon = trayIcon_ ? trayIcon_ : icon_;
+    CopyTrunc(nid_.szTip, ARRAYSIZE(nid_.szTip), L"Stack Neverflow · 누르면 사용법");
     Shell_NotifyIconW(NIM_ADD, &nid_);
     nid_.uVersion = NOTIFYICON_VERSION_4;
     Shell_NotifyIconW(NIM_SETVERSION, &nid_);
+}
+
+void App::UpdateTrayIcon() {
+    HICON old = trayIcon_;
+    trayIcon_ = MakeTrayIcon(GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem()), TaskbarIsLight());
+    nid_.uFlags = NIF_ICON;
+    nid_.hIcon = trayIcon_;
+    Shell_NotifyIconW(NIM_MODIFY, &nid_);
+    nid_.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
+    if (old) DestroyIcon(old);
 }
 
 void App::Notify(const std::wstring& title, const std::wstring& text) {
@@ -1203,7 +1215,7 @@ void App::ShowTrayMenu() {
         {kMenuAutostart, L"Windows 시작 시 자동 실행", autostart ? L"켜짐 ✓" : L"꺼짐"},
         {kMenuHelp, L"사용법"},
         {},
-        {kMenuQuit, L"종료", L"창을 모두 꺼내요"},
+        {kMenuQuit, L"Neverflow 종료", L"창을 모두 꺼내요"},
     };
     UINT id = ShowMenu(items, pt);
     if (id == kMenuRestoreAll) RestoreAll();
@@ -1502,6 +1514,10 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
                 pending.swap(pendingGone_);
                 for (HWND h : pending) OnMemberGone(h);  // re-queues itself if still alive
             }
+            return 0;
+        case WM_SETTINGCHANGE:
+            // Light/dark taskbar switched: the single-color tray icon follows it.
+            if (lp && wcscmp((const wchar_t*)lp, L"ImmersiveColorSet") == 0) UpdateTrayIcon();
             return 0;
         // Resume, unlock and a display change often arrive together: re-check once, a moment later.
         case WM_DISPLAYCHANGE:

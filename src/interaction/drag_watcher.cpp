@@ -221,7 +221,7 @@ void DragWatcher::RenderBar(Bar& b) {
     std::wstring title, sub;
     COLORREF bg, fg, subFg;
     if (b.state == BarState::Hot) {
-        bg = remove ? kDestructive : kPrimary, fg = kPrimaryFg, subFg = remove ? RGB(254, 226, 226) : RGB(212, 212, 216);
+        bg = remove ? kDestructive : kPrimary, fg = kPrimaryFg, subFg = remove ? RGB(254, 226, 226) : kPrimarySubtleFg;
         title = remove ? L"－  여기에 놓아 빼기" : L"＋  여기에 놓기";
         sub = remove ? L"손을 떼면 더미에서 빠져요" : L"손을 떼면 새 더미가 생겨요";
     } else if (b.state == BarState::Blocked) {

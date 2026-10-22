@@ -155,14 +155,33 @@ void Canvas::DashedRoundRect(const RECT& r, int radius, int t, int dash, int gap
     }
 }
 
-void Canvas::Shadow(const RECT& r, int radius, int blur, int offsetY, BYTE alpha) {
+void Canvas::Shadow(const RECT& r, int radius, int blur, int offsetY, BYTE alpha, COLORREF color) {
     // Concentric rounded rects with falling alpha approximate a gaussian blur well enough at UI sizes.
     blur = std::max(1, blur);
     for (int i = blur; i >= 1; --i) {
         RECT s{r.left - i, r.top - i + offsetY, r.right + i, r.bottom + i + offsetY};
         double f = 1.0 - (double)i / (blur + 1);
         int a = (int)(alpha * f * f * 2.2 / blur + 0.5);
-        if (a > 0) FillRoundRect(s, radius + i, RGB(0, 0, 0), (BYTE)std::min(255, a));
+        if (a > 0) FillRoundRect(s, radius + i, color, (BYTE)std::min(255, a));
+    }
+}
+
+void Canvas::FillRoundRectV(const RECT& r, int radius, COLORREF top, COLORREF bottom) {
+    // Vertical gradient: each row is the shape's row in its own color (same coverage as FillRoundRect).
+    int h = std::max<int>(1, r.bottom - r.top - 1);
+    int y0 = std::max<int>(0, r.top), y1 = std::min<int>(h_, r.bottom);
+    int x0 = std::max<int>(0, r.left), x1 = std::min<int>(w_, r.right);
+    for (int y = y0; y < y1; ++y) {
+        double t = (double)(y - r.top) / h;
+        COLORREF c = RGB((int)(GetRValue(top) + (GetRValue(bottom) - GetRValue(top)) * t),
+                         (int)(GetGValue(top) + (GetGValue(bottom) - GetGValue(top)) * t),
+                         (int)(GetBValue(top) + (GetBValue(bottom) - GetBValue(top)) * t));
+        uint32_t* row = px_ + (size_t)y * w_;
+        for (int x = x0; x < x1; ++x) {
+            float cov = RoundRectCoverage(x + 0.5f, y + 0.5f, r, (float)radius);
+            if (cov <= 0) continue;
+            row[x] = Over(Premul(c, (int)(255 * cov + 0.5f)), row[x]);
+        }
     }
 }
 

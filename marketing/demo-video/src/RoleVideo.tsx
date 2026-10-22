@@ -6,7 +6,7 @@ import { roleById, type Role, type WinSpec } from './data/roles';
 import { FONT, STICKER, T, TASKBAR_H, W } from './theme';
 import { AppWindow } from './components/AppWindow';
 import {
-  Caption, cardRect, CARD_H, CARD_W, Cursor, Desktop, easeOut, Ghost, Logo, PileCard, type Rect, Sticker, Toast, WorkFrame,
+  BRAND, Caption, cardRect, CARD_H, CARD_W, Cursor, Desktop, easeOut, Ghost, Logo, PileCard, type Rect, Sticker, Toast, WorkFrame,
 } from './components/Ui';
 
 const clamp = { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' } as const;
@@ -257,7 +257,7 @@ const Solution: React.FC<{ role: Role }> = ({ role }) => {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginTop: 40, opacity: logo, transform: `translateY(${(1 - logo) * 20}px)` }}>
           <Logo size={64} />
-          <div style={{ fontSize: 40, fontWeight: 900, color: T.fg }}>창 더미 <span style={{ color: T.mutedFg, fontWeight: 600, fontSize: 30 }}>Window Piles</span></div>
+          <div style={{ fontSize: 40, fontWeight: 900, color: T.fg }}>{BRAND.name}</div>
         </div>
       </div>
     </Desktop>
@@ -366,13 +366,13 @@ const Outro: React.FC<{ role: Role }> = ({ role }) => {
         }} />;
       })}
       <div style={{ position: 'absolute', left: 0, right: 0, top: 560, textAlign: 'center', fontFamily: FONT }}>
-        <div style={{ fontSize: 92, fontWeight: 900, color: T.fg, opacity: tag, transform: `translateY(${(1 - tag) * 30}px)` }}>
-          일은 쌓아 두되, <span style={{ background: STICKER.yellow, padding: '0 14px', borderRadius: 14 }}>잊지는 않게.</span>
+        <div style={{ fontSize: 84, fontWeight: 900, color: T.fg, opacity: tag, transform: `translateY(${(1 - tag) * 30}px)` }}>
+          Tasks stack up, <span style={{ background: STICKER.yellow, padding: '0 14px', borderRadius: 14 }}>but never overflow.</span>
         </div>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 18, marginTop: 44, opacity: logo, transform: `scale(${0.9 + 0.1 * logo})` }}>
           <Logo size={70} />
-          <div style={{ fontSize: 46, fontWeight: 900, color: T.fg }}>창 더미</div>
-          <div style={{ fontSize: 30, fontWeight: 600, color: T.mutedFg }}>Window Piles · Windows용</div>
+          <div style={{ fontSize: 46, fontWeight: 900, color: T.fg }}>{BRAND.name}</div>
+          <div style={{ fontSize: 30, fontWeight: 600, color: T.mutedFg }}>Windows용</div>
         </div>
       </div>
     </Desktop>

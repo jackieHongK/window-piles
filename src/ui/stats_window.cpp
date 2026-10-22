@@ -16,6 +16,7 @@ namespace {
 
 constexpr int kWidth = 600, kPad = 28, kRowH = 40, kMaxRows = 8, kBarH = 28, kWeekH = 112;
 const wchar_t kTitle[] = L"작업 기록";
+const wchar_t kCaption[] = L"작업 기록 · Stack Neverflow";  // taskbar / Alt+Tab
 const wchar_t kNote[] = L"더미를 펼쳐 둔 시간 · 화면 잠금, 절전, 5분 넘게 자리를 비운 시간은 빼요";
 const wchar_t kHint[] = L"막대에 마우스를 올리면 자세히 보여요";
 const wchar_t* const kWeekdays[] = {L"일", L"월", L"화", L"수", L"목", L"금", L"토"};
@@ -113,7 +114,7 @@ void StatsWindow::Show() {
     Layout();
     int x = center.x - size_.cx / 2, y = std::max<int>(work.top, center.y - size_.cy / 2);
     hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, RegisterPopupClass(L"WindowPilesStats", &StatsWindow::Proc),
-                            kTitle, WS_POPUP, x, y, size_.cx, size_.cy, nullptr, nullptr, GetModuleHandleW(nullptr),
+                            kCaption, WS_POPUP, x, y, size_.cx, size_.cy, nullptr, nullptr, GetModuleHandleW(nullptr),
                             nullptr);
     SetWindowLongPtrW(hwnd_, GWLP_USERDATA, (LONG_PTR)this);
     ApplyRoundedCorners(hwnd_);
@@ -323,7 +324,7 @@ void StatsWindow::Paint(HDC dc) {
         RECT bg = col;
         InflateRect(&bg, -S(3), 0);
         if (sel) c.FillRoundRect(bg, S(kRadius), kMuted);
-        else if (hoverDay_ == (int)i) c.FillRoundRect(bg, S(kRadius), RGB(250, 250, 250));
+        else if (hoverDay_ == (int)i) c.FillRoundRect(bg, S(kRadius), kHover);
         RECT label{col.left, col.bottom - S(26), col.right, col.bottom - S(4)};
         std::wstring dl = std::wstring(kWeekdays[d.date.wDayOfWeek % 7]) + L" " + std::to_wstring(d.date.wDay);
         c.Text(dl, label, sel ? kForeground : kMutedFg, S(12), sel, DT_CENTER | one);
@@ -351,7 +352,7 @@ void StatsWindow::Paint(HDC dc) {
     c.Text(activity::Enabled() ? L"기록 끄기" : L"기록 켜기", toggleRect_, kSubtleFg, S(13), false, DT_CENTER | one);
     if (hot_ == Hot::Folder) c.FillRoundRect(folderRect_, S(kRadiusSm), kMuted);
     c.Text(L"기록 폴더 열기", folderRect_, kSubtleFg, S(13), false, DT_CENTER | one);
-    c.FillRoundRect(buttonRect_, S(kRadius), hot_ == Hot::Button ? RGB(39, 39, 42) : kPrimary);
+    c.FillRoundRect(buttonRect_, S(kRadius), hot_ == Hot::Button ? kPrimaryHover : kPrimary);
     c.Text(L"닫기", buttonRect_, kPrimaryFg, S(14), true, DT_CENTER | one);
     c.Blit(dc);
 }

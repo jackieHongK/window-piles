@@ -3,6 +3,7 @@
 #include <dwmapi.h>
 
 #include "common/win_util.h"
+#include "ui/theme.h"
 
 namespace wp {
 
@@ -29,8 +30,8 @@ void ApplyRoundedCorners(HWND hwnd, bool compact) {
     // DWMWA_WINDOW_CORNER_PREFERENCE = 33; DWMWCP_ROUND = 2, DWMWCP_ROUNDSMALL = 3
     DWORD pref = compact ? 3 : 2;
     DwmSetWindowAttribute(hwnd, 33, &pref, sizeof(pref));
-    // DWMWA_BORDER_COLOR = 34: zinc-200 hairline like shadcn cards
-    COLORREF border = RGB(228, 228, 231);
+    // DWMWA_BORDER_COLOR = 34: the same warm hairline as the cards
+    COLORREF border = theme::kBorder;
     DwmSetWindowAttribute(hwnd, 34, &border, sizeof(border));
 }
 

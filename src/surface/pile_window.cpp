@@ -72,7 +72,7 @@ SIZE PileWindow::WindowSize(UINT dpi) {
 
 PileWindow::PileWindow(Pile& pile, PileHost& host) : pile_(pile), host_(host) {
     RegisterOnce();
-    hwnd_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kClass, L"Window Pile",
+    hwnd_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kClass, L"Stack Neverflow 더미",
                             WS_POPUP, pile.pos.x, pile.pos.y, 1, 1, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     SetWindowLongPtrW(hwnd_, GWLP_USERDATA, (LONG_PTR)this);
     SetWindowLongPtrW(hwnd_, GWLP_WNDPROC, (LONG_PTR)&PileWindow::WndProc);
@@ -169,7 +169,16 @@ void PileWindow::Render() {
     Canvas c(size_.cx, size_.cy);
     RECT card{margin_, margin_, size_.cx - margin_, size_.cy - margin_};
     int radius = S(kRadiusLg);
-    c.Shadow(card, radius, S(10), S(3), hot_ ? 70 : 45);
+    c.Shadow(card, radius, S(10), S(3), hot_ ? 70 : 45, kForeground);  // warm ink, not gray
+    // A paper stack: one or two sheets peek out behind the card (more windows → more sheets). They sit
+    // in the shadow margin, so the card's size, hit area and snapping stay as they were.
+    int sheets = std::min<int>(std::max<int>((int)pile_.members.size() - 1, 0), 2);
+    for (int i = sheets; i >= 1; --i) {
+        RECT sheet = card;
+        OffsetRect(&sheet, S(3 * i), -S(3 * i));
+        c.FillRoundRect(sheet, radius, i == 2 ? kMuted : kBackground);
+        c.StrokeRoundRect(sheet, radius, 1, kBorder);
+    }
     c.FillRoundRect(card, radius, kBackground);
 
     // Title bar in the pile's color (rounded top, straight bottom).
@@ -209,7 +218,7 @@ void PileWindow::Render() {
             const Member& m = *front[k];
             int x = card.left + S(kPad + kStep * k), ty = bodyTop + S(kStepY * (2 - k));
             RECT box{x, ty, x + S(kThumbW), ty + S(kThumbH)};
-            c.Shadow(box, S(kRadiusSm), S(4), S(1), 30);
+            c.Shadow(box, S(kRadiusSm), S(4), S(1), 30, kForeground);
             c.FillRoundRect(box, S(kRadiusSm), kMuted);
             if (!m.snapshot.empty()) {
                 Image strip = TopStrip(m.snapshot);

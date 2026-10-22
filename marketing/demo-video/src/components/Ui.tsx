@@ -184,13 +184,29 @@ export const Toast: React.FC<{ icon: string; from: string; text: string; at: num
   );
 };
 
-/** App mark: three stacked cards (same as the tray icon). */
+/** Stack Neverflow mark (same as the app icon, src/app/app_icon.cpp): a walnut tile, a cream U-shaped
+ *  tray, and three cards stacked inside it — all below the rim, "never overflow". 64-unit grid. */
 export const Logo: React.FC<{ size?: number }> = ({ size = 72 }) => (
-  <div style={{ position: 'relative', width: size, height: size }}>
-    <div style={{ position: 'absolute', left: size * 0.34, top: size * 0.06, width: size * 0.62, height: size * 0.46, borderRadius: size * 0.12, background: '#448361' }} />
-    <div style={{ position: 'absolute', left: size * 0.2, top: size * 0.22, width: size * 0.62, height: size * 0.46, borderRadius: size * 0.12, background: '#d9730d' }} />
-    <div style={{ position: 'absolute', left: size * 0.04, top: size * 0.38, width: size * 0.62, height: size * 0.56, borderRadius: size * 0.12, background: '#337ea9', border: `${Math.max(2, size * 0.03)}px solid #fff` }} />
-  </div>
+  <svg width={size} height={size} viewBox="0 0 64 64">
+    <defs>
+      <linearGradient id="sn-walnut" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stopColor="#7E5536" />
+        <stop offset="1" stopColor="#4A2E1D" />
+      </linearGradient>
+    </defs>
+    <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#sn-walnut)" />
+    <rect x="20" y="40" width="24" height="6" rx="2" fill="#FFFFFF" />
+    <rect x="20" y="32.5" width="24" height="6" rx="2" fill="#BFE3CF" />
+    <rect x="20" y="25" width="24" height="6" rx="2" fill="#5B9AC4" />
+    <path d="M14 20 V42 A7 7 0 0 0 21 49 H43 A7 7 0 0 0 50 42 V20" fill="none" stroke="#F3E9DE" strokeWidth="4.5"
+          strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
 );
+
+export const BRAND = {
+  name: 'Stack Neverflow',
+  slogan: 'Tasks stack up, but never overflow.',
+  tagline: 'Your windows. Your tasks. One organized desktop.',
+};
 
 export const FULL = { W, H };

@@ -151,7 +151,7 @@ void Paint(EditorState& s, HDC dc) {
     c.FillRoundRect(s.cancelRect, S(kRadius), s.hoverButton == 1 ? kMuted : kBackground);
     c.StrokeRoundRect(s.cancelRect, S(kRadius), 1, kBorder);
     c.Text(L"취소", s.cancelRect, kForeground, S(13), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    c.FillRoundRect(s.saveRect, S(kRadius), s.hoverButton == 2 ? RGB(39, 39, 42) : kPrimary);
+    c.FillRoundRect(s.saveRect, S(kRadius), s.hoverButton == 2 ? kPrimaryHover : kPrimary);
     c.Text(L"저장", s.saveRect, kPrimaryFg, S(13), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     c.Blit(dc);
 }

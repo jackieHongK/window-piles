@@ -122,7 +122,9 @@ private:
     void Quit();
 
     HWND main_ = nullptr;
-    HICON icon_ = nullptr;
+    HICON icon_ = nullptr;      // color mark (balloons)
+    HICON trayIcon_ = nullptr;  // single-color mark matching the taskbar theme
+    void UpdateTrayIcon();      // after a taskbar theme change
     NOTIFYICONDATAW nid_{};
     UINT taskbarCreatedMsg_ = 0;
     HWINEVENTHOOK objectHook_ = nullptr;

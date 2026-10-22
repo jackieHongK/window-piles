@@ -1,21 +1,26 @@
-// Design tokens: shadcn/ui "zinc" neutrals with a Notion-like, monochrome feel.
-// Color is used only where the user chose it (pile title bars).
+// Design tokens — Stack Neverflow, "Deskterior": the screen is a desk, piles are paper stacks.
+// Warm "ink" neutrals on white paper, walnut as the brand accent (mark and focus only).
+// Other color appears only where the user chose it (pile title bars).
 #pragma once
 
 #include <windows.h>
 
 namespace wp::theme {
 
-constexpr COLORREF kBackground = RGB(255, 255, 255);
-constexpr COLORREF kForeground = RGB(9, 9, 11);        // zinc-950
-constexpr COLORREF kBorder = RGB(228, 228, 231);       // zinc-200
-constexpr COLORREF kBorderStrong = RGB(161, 161, 170); // zinc-400
-constexpr COLORREF kMuted = RGB(244, 244, 245);        // zinc-100
-constexpr COLORREF kMutedFg = RGB(113, 113, 122);      // zinc-500
-constexpr COLORREF kSubtleFg = RGB(82, 82, 91);        // zinc-600
-constexpr COLORREF kPrimary = RGB(24, 24, 27);         // zinc-900
-constexpr COLORREF kPrimaryFg = RGB(250, 250, 250);    // zinc-50
-constexpr COLORREF kRing = RGB(161, 161, 170);
+constexpr COLORREF kBackground = RGB(255, 255, 255);   // paper
+constexpr COLORREF kForeground = RGB(26, 25, 23);      // ink
+constexpr COLORREF kBorder = RGB(225, 222, 214);
+constexpr COLORREF kBorderStrong = RGB(168, 163, 153);
+constexpr COLORREF kMuted = RGB(243, 241, 236);
+constexpr COLORREF kMutedFg = RGB(120, 115, 106);
+constexpr COLORREF kSubtleFg = RGB(87, 82, 74);
+constexpr COLORREF kPrimary = RGB(33, 27, 22);
+constexpr COLORREF kPrimaryFg = RGB(250, 249, 246);
+constexpr COLORREF kPrimaryHover = RGB(56, 47, 39);
+constexpr COLORREF kPrimarySubtleFg = RGB(214, 209, 200);  // secondary text on kPrimary
+constexpr COLORREF kHover = RGB(250, 249, 246);            // faint hover on white
+constexpr COLORREF kRing = RGB(123, 75, 42);           // walnut
+constexpr COLORREF kBrand = RGB(123, 75, 42);          // walnut: logo/mark and focus, never on pile cards
 
 constexpr wchar_t kFont[] = L"Malgun Gothic";
 

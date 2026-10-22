@@ -4,6 +4,7 @@
 
 #include <algorithm>
 
+#include "app/app_icon.h"
 #include "common/canvas.h"
 #include "common/win_util.h"
 #include "ui/popup_base.h"
@@ -13,14 +14,17 @@ namespace wp {
 
 namespace {
 
-constexpr int kWidth = 520, kPad = 28, kBadge = 26, kGapStep = 18;
-const wchar_t kTitle[] = L"창 더미 사용법";
+constexpr int kWidth = 520, kPad = 28, kBadge = 26, kGapStep = 18, kMark = 40;
+const wchar_t kCaption[] = L"Stack Neverflow 사용법";  // taskbar / Alt+Tab
+const wchar_t kWordmark[] = L"Stack Neverflow";
+const wchar_t kSlogan[] = L"Tasks stack up, but never overflow.";
+const wchar_t kTitle[] = L"사용법";
 const wchar_t kSubtitle[] = L"이 다섯 가지만 알면 바로 쓸 수 있어요.";
 const wchar_t kTipTitle[] = L"알아두면 좋아요";
 const wchar_t kTip[] =
     L"컴퓨터를 다시 켜거나 프로그램을 업데이트해도 더미는 그대로 남아요. 그사이 닫힌 앱은 더미 안 '다시 열어야 할 "
     L"창' 목록에 보이고, 누르면 그 앱이 열려요. 그 앱 창을 다시 더미에 넣으면 목록에서 사라져요.\n"
-    L"'모든 창 꺼내기'와 '종료'는 더미 오른쪽 버튼 메뉴나 화면 오른쪽 아래 트레이 아이콘에 있어요. 프로그램이 "
+    L"'모든 창 꺼내기'와 'Neverflow 종료'는 더미 오른쪽 버튼 메뉴나 화면 오른쪽 아래 트레이 아이콘에 있어요. 프로그램이 "
     L"갑자기 꺼져도 숨겨 둔 창은 자동으로 다시 나타나요.";
 const wchar_t kButton[] = L"알겠어요";
 
@@ -62,7 +66,7 @@ void GuideWindow::Show() {
     Layout();
     int x = center.x - size_.cx / 2, y = center.y - size_.cy / 2;
     hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, RegisterPopupClass(L"WindowPilesGuide", &GuideWindow::Proc),
-                            kTitle, WS_POPUP, x, y, size_.cx, size_.cy, nullptr, nullptr, GetModuleHandleW(nullptr),
+                            kCaption, WS_POPUP, x, y, size_.cx, size_.cy, nullptr, nullptr, GetModuleHandleW(nullptr),
                             nullptr);
     SetWindowLongPtrW(hwnd_, GWLP_USERDATA, (LONG_PTR)this);
     ApplyRoundedCorners(hwnd_);
@@ -75,7 +79,7 @@ void GuideWindow::Layout() {
     int w = S(kWidth), pad = S(kPad);
     int y = pad;
     closeRect_ = {w - S(16) - S(32), S(14), w - S(16), S(14) + S(32)};
-    y += S(36) + S(14);  // icon row
+    y += S(kMark) + S(18);  // brand row: mark + wordmark + slogan
     y += MeasureUiText(kTitle, S(20), true).cy + S(4);
     y += MeasureUiText(kSubtitle, S(13), false).cy;
     headerH_ = y;
@@ -113,13 +117,16 @@ void GuideWindow::Paint(HDC dc) {
     if (!HasDwmRoundedCorners()) c.StrokeRoundRect({0, 0, size_.cx, size_.cy}, 0, 1, kBorder);
     int pad = S(kPad);
 
-    // App mark: three stacked cards.
-    int ix = pad, iy = pad;
-    c.FillRoundRect({ix + S(12), iy, ix + S(36), iy + S(18)}, S(4), RGB(212, 212, 216));
-    c.FillRoundRect({ix + S(6), iy + S(8), ix + S(30), iy + S(26)}, S(4), RGB(161, 161, 170));
-    c.FillRoundRect({ix, iy + S(16), ix + S(24), iy + S(34)}, S(4), kPrimary);
+    // Brand row: the mark, the wordmark and the slogan.
+    DrawMark(c, pad, pad, S(kMark));
+    int bx = pad + S(kMark) + S(12);
+    SIZE ws = c.MeasureText(kWordmark, S(17), true), sl = c.MeasureText(kSlogan, S(12), false);
+    int by = pad + (S(kMark) - ws.cy - S(2) - sl.cy) / 2;
+    c.Text(kWordmark, {bx, by, size_.cx - pad, by + ws.cy}, kForeground, S(17), true, DT_LEFT | DT_TOP | DT_SINGLELINE);
+    c.Text(kSlogan, {bx, by + ws.cy + S(2), size_.cx - pad, by + ws.cy + S(2) + sl.cy}, kMutedFg, S(12), false,
+           DT_LEFT | DT_TOP | DT_SINGLELINE);
 
-    int y = pad + S(36) + S(14);
+    int y = pad + S(kMark) + S(18);
     SIZE ts = c.MeasureText(kTitle, S(20), true);
     c.Text(kTitle, {pad, y, size_.cx - pad, y + ts.cy}, kForeground, S(20), true, DT_LEFT | DT_TOP | DT_SINGLELINE);
     y += ts.cy + S(4);
@@ -143,7 +150,7 @@ void GuideWindow::Paint(HDC dc) {
     c.Text(kTipTitle, tipTitleRect_, kForeground, S(13), true, DT_LEFT | DT_TOP | DT_SINGLELINE);
     c.Text(kTip, tipTextRect_, kSubtleFg, S(13), false, DT_LEFT | DT_TOP | DT_WORDBREAK);
 
-    c.FillRoundRect(buttonRect_, S(kRadius), hoverButton_ ? RGB(39, 39, 42) : kPrimary);
+    c.FillRoundRect(buttonRect_, S(kRadius), hoverButton_ ? kPrimaryHover : kPrimary);
     c.Text(kButton, buttonRect_, kPrimaryFg, S(14), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     c.Blit(dc);
 }

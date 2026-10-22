@@ -67,7 +67,7 @@ LRESULT CALLBACK MenuProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                     continue;
                 }
                 if ((int)i == s->hover) c.FillRoundRect(r, S(kRadiusSm), kMuted);
-                COLORREF fg = it.disabled ? RGB(161, 161, 170) : kForeground;
+                COLORREF fg = it.disabled ? kBorderStrong : kForeground;
                 RECT tr{r.left + S(10), r.top, r.right - S(10), r.bottom};
                 c.Text(it.text, tr, fg, S(kTextPx), false, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
                 if (!it.hint.empty()) c.Text(it.hint, tr, kMutedFg, S(12), false, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);

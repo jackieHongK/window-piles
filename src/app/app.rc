@@ -1,0 +1,35 @@
+// Version information shown in Explorer (Properties > Details) and Task Manager.
+// The product is "Stack Neverflow"; the file keeps its old name for compatibility (autostart, updates).
+#include <winver.h>
+
+#define SN_VERSION     0,3,0,0
+#define SN_VERSION_STR "0.3.0"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    SN_VERSION
+ PRODUCTVERSION SN_VERSION
+ FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+ FILEFLAGS      0
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE       VFT_APP
+ FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "Stack Neverflow"
+            VALUE "FileDescription",  "Stack Neverflow"
+            VALUE "FileVersion",      SN_VERSION_STR
+            VALUE "InternalName",     "WindowPiles"
+            VALUE "OriginalFilename", "WindowPiles.exe"
+            VALUE "ProductName",      "Stack Neverflow"
+            VALUE "ProductVersion",   SN_VERSION_STR
+            VALUE "Comments",         "Tasks stack up, but never overflow."
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

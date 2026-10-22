@@ -37,7 +37,9 @@ public:
     // Dashed outline; straight edges are dashed, corners solid.
     void DashedRoundRect(const RECT& r, int radius, int thickness, int dash, int gap, COLORREF color, BYTE alpha = 255);
     // Soft drop shadow under a rounded rect (layered approximation of a blur).
-    void Shadow(const RECT& r, int radius, int blur, int offsetY, BYTE alpha);
+    void Shadow(const RECT& r, int radius, int blur, int offsetY, BYTE alpha, COLORREF color = RGB(0, 0, 0));
+    // Rounded rect filled with a vertical gradient (opaque).
+    void FillRoundRectV(const RECT& r, int radius, COLORREF top, COLORREF bottom);
     // Scales `img` into `dst` (box filter down, nearest up), clipped to the rounded rect `radius`.
     void DrawImage(const Image& img, const RECT& dst, int radius = 0);
     // GDI text. Only pixels that were already opaque keep the text, so text must sit on an opaque fill.
