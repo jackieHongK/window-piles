@@ -14,14 +14,15 @@ namespace {
 
 constexpr wchar_t kClass[] = L"WindowPilesPile";
 
-// Layout in DIPs.
+// Layout in DIPs. The previews are strips of each window's top part (tabs, address bar, title):
+// enough to recognise it, while a card is only ~60% as tall as with whole-window previews.
 constexpr int kMargin = 12;  // transparent room for the shadow
-constexpr int kHeaderH = 36;
-constexpr int kPad = 10;
-constexpr int kThumbW = 240, kThumbH = 135;
-constexpr int kStep = 10;  // overlap offset between stacked previews
+constexpr int kHeaderH = 32;
+constexpr int kPad = 10, kPadY = 9;
+constexpr int kThumbW = Pile::kPreviewW, kThumbH = Pile::kPreviewH;
+constexpr int kStep = 10, kStepY = 6;  // overlap offset between stacked previews
 constexpr int kCardW = kPad * 2 + kThumbW + kStep * 2;
-constexpr int kThumbsH = kPad * 2 + kThumbH + kStep * 2;
+constexpr int kThumbsH = kPadY * 2 + kThumbH + kStepY * 2;
 constexpr int kMissingTitleH = 26, kMissingRowH = 28, kMissingMoreH = 22, kMissingMaxRows = 4;
 constexpr COLORREF kBadge = RGB(239, 68, 68);  // notification red (shadcn red-500)
 
@@ -41,6 +42,17 @@ std::wstring CountText(const Pile& p) {
     int n = (int)p.members.size(), hidden = p.HiddenCount();
     if (hidden == n) return std::to_wstring(n);
     return std::to_wstring(n - hidden) + L"/" + std::to_wstring(n) + L" 열림";
+}
+
+// The top part of a window snapshot in the strip's proportions (a whole window is taller).
+Image TopStrip(const Image& img) {
+    int h = std::max(1, img.w * kThumbH / kThumbW);
+    if (img.h <= h) return img;
+    Image out;
+    out.w = img.w;
+    out.h = h;
+    out.px.assign(img.px.begin(), img.px.begin() + (size_t)img.w * h);
+    return out;
 }
 
 int MissingSectionH(const Pile& p) {
@@ -95,12 +107,12 @@ void PileWindow::SetHot(bool hot) {
     if (visible_) Render();
 }
 
-void PileWindow::SetVisible(bool visible) {
+void PileWindow::SetVisible(bool visible, HWND insertAfter) {
     if (visible == visible_) return;
     visible_ = visible;
     if (visible) {
         Render();
-        SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        SetWindowPos(hwnd_, insertAfter, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     } else {
         ShowWindow(hwnd_, SW_HIDE);
     }
@@ -167,7 +179,7 @@ void PileWindow::Render() {
     COLORREF onColor = ContrastText(pile_.color);
     std::wstring count = hasMembers ? CountText(pile_) : L"닫힌 창 " + std::to_wstring(pile_.missing.size());
     SIZE cs = c.MeasureText(count, S(12), true);
-    RECT pill{header.right - S(12) - cs.cx - S(16), header.top + S(8), header.right - S(12), header.bottom - S(8)};
+    RECT pill{header.right - S(12) - cs.cx - S(16), header.top + S(7), header.right - S(12), header.bottom - S(7)};
     c.FillRoundRect(pill, S(10), onColor == kForeground ? RGB(0, 0, 0) : RGB(255, 255, 255), 40);
     c.Text(count, pill, onColor, S(12), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     // Title text; hovering it shows a pencil and a soft highlight: click to rename in place.
@@ -188,17 +200,22 @@ void PileWindow::Render() {
 
     int y = header.bottom;
     if (hasMembers) {
-        // Up to 3 most recently added windows, the newest in front (bottom-left).
+        // Up to 3 windows that were in front when put away, the front-most in front (bottom-left).
         int n = (int)pile_.members.size();
-        int shown = std::min(n, Pile::kPreviews);
-        int bodyTop = y + S(kPad);
+        auto front = pile_.FrontToBack(Pile::kPreviews);
+        int shown = (int)front.size();
+        int bodyTop = y + S(kPadY);
         for (int k = shown - 1; k >= 0; --k) {
-            const Member& m = pile_.members[n - 1 - k];
-            int x = card.left + S(kPad + kStep * k), ty = bodyTop + S(kStep * (2 - k));
+            const Member& m = *front[k];
+            int x = card.left + S(kPad + kStep * k), ty = bodyTop + S(kStepY * (2 - k));
             RECT box{x, ty, x + S(kThumbW), ty + S(kThumbH)};
             c.Shadow(box, S(kRadiusSm), S(4), S(1), 30);
             c.FillRoundRect(box, S(kRadiusSm), kMuted);
-            if (!m.snapshot.empty()) c.DrawImage(m.snapshot, FitRect(m.snapshot.w, m.snapshot.h, box), S(kRadiusSm));
+            if (!m.snapshot.empty()) {
+                Image strip = TopStrip(m.snapshot);
+                RECT dst = strip.h * kThumbW >= strip.w * kThumbH ? box : FitRect(strip.w, strip.h, box);
+                c.DrawImage(strip, dst, S(kRadiusSm));
+            }
             c.StrokeRoundRect(box, S(kRadiusSm), 1, kBorder);
             if (!m.hidden && pile_.folded) c.FillRoundRect(box, S(kRadiusSm), kBackground, 150);  // this one is out
         }
@@ -324,8 +341,11 @@ LRESULT PileWindow::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             POINT c;
             GetCursorPos(&c);
             int dx = c.x - pressCursor_.x, dy = c.y - pressCursor_.y;
-            if (!dragging_ && (abs(dx) > GetSystemMetrics(SM_CXDRAG) || abs(dy) > GetSystemMetrics(SM_CYDRAG)))
+            if (!dragging_ && (abs(dx) > GetSystemMetrics(SM_CXDRAG) || abs(dy) > GetSystemMetrics(SM_CYDRAG))) {
                 dragging_ = true;
+                // A card being carried is on top of the others (and stays there: OnPileMoved).
+                SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
             if (dragging_) {
                 pile_.pos = {pressPos_.x + dx, pressPos_.y + dy};
                 SetWindowPos(hwnd_, nullptr, pile_.pos.x, pile_.pos.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);

@@ -143,6 +143,61 @@ JournalEntry EntryOf(const Member& m) {
     return e;
 }
 
+// `windows` sorted front-most first, as they overlap on screen right now (one pass over the
+// top-level windows, which EnumWindows lists in z-order).
+std::vector<HWND> FrontToBack(const std::vector<HWND>& windows) {
+    struct Ctx {
+        const std::vector<HWND>* want;
+        std::vector<HWND> out;
+    } ctx{&windows, {}};
+    EnumWindows([](HWND h, LPARAM lp) -> BOOL {
+        auto* c = (Ctx*)lp;
+        if (std::find(c->want->begin(), c->want->end(), h) != c->want->end()) c->out.push_back(h);
+        return c->out.size() < c->want->size();
+    }, (LPARAM)&ctx);
+    for (HWND h : windows)  // not top-level any more (shouldn't happen): keep them, at the back
+        if (std::find(ctx.out.begin(), ctx.out.end(), h) == ctx.out.end()) ctx.out.push_back(h);
+    return ctx.out;
+}
+
+// rcNormalPosition is in workspace coordinates (relative to the primary monitor's work area);
+// the offset to screen coordinates is the taskbar's room on that side.
+POINT WorkspaceOffset() {
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
+    return {mi.rcWork.left - mi.rcMonitor.left, mi.rcWork.top - mi.rcMonitor.top};
+}
+
+void MoveHiddenTo(HWND h, const WINDOWPLACEMENT& wp) {
+    if (wp.showCmd == SW_SHOWMINIMIZED) return;
+    RECT r = wp.rcNormalPosition;
+    if (r.right <= r.left || r.bottom <= r.top) return;
+    POINT o = WorkspaceOffset();
+    SetWindowPos(h, nullptr, r.left + o.x, r.top + o.y, r.right - r.left, r.bottom - r.top,
+                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+}
+
+// A window must come back mostly on screen: if less than half of it would be visible (a monitor was
+// unplugged, the resolution changed, it was put away hanging off an edge), move it — and shrink it if
+// needed — into the nearest work area.
+void KeepOnScreen(WINDOWPLACEMENT& wp) {
+    POINT o = WorkspaceOffset();
+    RECT s = wp.rcNormalPosition;
+    OffsetRect(&s, o.x, o.y);
+    int w = s.right - s.left, h = s.bottom - s.top;
+    if (w <= 0 || h <= 0) return;
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(MonitorFromRect(&s, MONITOR_DEFAULTTONEAREST), &mi);
+    RECT vis{};
+    IntersectRect(&vis, &s, &mi.rcWork);
+    if ((long long)(vis.right - vis.left) * (vis.bottom - vis.top) * 2 >= (long long)w * h) return;
+    const RECT& work = mi.rcWork;
+    w = std::min<int>(w, work.right - work.left);
+    h = std::min<int>(h, work.bottom - work.top);
+    int x = std::clamp<int>(s.left, work.left, work.right - w), y = std::clamp<int>(s.top, work.top, work.bottom - h);
+    wp.rcNormalPosition = {x - o.x, y - o.y, x - o.x + w, y - o.y + h};
+}
+
 // The "reopen" list keeps the most recent entries only: it would otherwise grow with every reboot.
 constexpr size_t kMaxMissing = 20;
 void TrimMissing(Pile& pile) {
@@ -280,6 +335,8 @@ int App::RestoreSavedPiles() {
             m.title = WindowTitle(m.hwnd);
             m.placement = sm.wp;
             m.placement.length = sizeof(WINDOWPLACEMENT);
+            m.stamp = sm.stamp;
+            nextStamp_ = std::max(nextStamp_, sm.stamp + 1);
             m.hidden = !IsWindowVisible(m.hwnd);  // previews for the cards in front: Refresh below
             claimed.push_back(sm.hwnd);
             p->members.push_back(std::move(m));
@@ -304,7 +361,7 @@ int App::RestoreSavedPiles() {
                 }
     if (!toFold.empty()) {
         UINT dpi = GetDpiForSystem();
-        std::vector<Image> shots = snapshots_.Capture(shoot, Scale(240, dpi));
+        std::vector<Image> shots = snapshots_.Capture(shoot, Scale(Pile::kPreviewW, dpi));
         for (size_t i = 0; i < shoot.size(); ++i)
             if (!shots[i].empty()) PileOf(shoot[i])->Find(shoot[i])->snapshot = std::move(shots[i]);
         double t1 = NowMs();
@@ -364,6 +421,7 @@ void App::PersistNow(bool background) {
             sm.title = IsWindow(m.hwnd) ? WindowTitle(m.hwnd) : m.title;
             sm.wp = m.placement;
             sm.hidden = m.hidden;
+            sm.stamp = m.stamp;
             sp.members.push_back(sm);
         }
         out.push_back(std::move(sp));
@@ -454,7 +512,7 @@ void App::TakeOut(HWND hwnd, const WINDOWPLACEMENT& before) {
         p->active = false;
         p->folded = true;
         frame_.reset();
-        p->view->SetVisible(true);
+        ShowCard(*p);
     }
     if (p->Empty()) RemovePile(*p);
     else Refresh(*p);
@@ -520,7 +578,24 @@ void App::OnPileClick(Pile& pile) {
     else Fold(pile);
 }
 
-void App::OnPileMoved(Pile&) { PersistSoon(); }
+void App::OnPileMoved(Pile& pile) {
+    // The card the user just put down is the top one now (piles_ is the stacking order, bottom first).
+    auto it = std::find_if(piles_.begin(), piles_.end(), [&](const auto& p) { return p.get() == &pile; });
+    if (it != piles_.end()) std::rotate(it, it + 1, piles_.end());
+    PersistSoon();
+}
+
+void App::ShowCard(Pile& pile) {
+    // Back in its own layer: right under the nearest visible card above it, not on top of everything.
+    HWND above = HWND_TOPMOST;
+    auto it = std::find_if(piles_.begin(), piles_.end(), [&](const auto& p) { return p.get() == &pile; });
+    for (auto up = it == piles_.end() ? it : it + 1; up != piles_.end(); ++up)
+        if ((*up)->view->visible()) {
+            above = (*up)->view->hwnd();
+            break;
+        }
+    pile.view->SetVisible(true, above);
+}
 
 void App::OnMissingClick(Pile& pile, int index) {
     if (index < 0 || index >= (int)pile.missing.size()) return;
@@ -712,7 +787,7 @@ void App::UpdatePreviews(Pile& pile) {
         if (!pile.ShowsPreview(m)) {
             if (!m.snapshot.empty()) m.snapshot = Image{};
         } else if (m.snapshot.empty() && IsWindow(m.hwnd)) {
-            m.snapshot = MakeIconCard(m.hwnd, Scale(240, dpi), Scale(135, dpi));
+            m.snapshot = MakeIconCard(m.hwnd, Scale(Pile::kPreviewW, dpi), Scale(Pile::kPreviewH, dpi));
         }
     }
 }
@@ -728,12 +803,18 @@ void App::HideMembers(Pile& pile, const std::vector<HWND>& hwnds, bool readPlace
             GetWindowPlacement(h, &m->placement);
         }
         visible.push_back(h);
-        if (pile.ShowsPreview(*m)) shoot.push_back(h);
     }
     int pileId = pile.id;
     if (!visible.empty()) {
+        // 0) remember how they overlap right now (front-most gets the highest stamp; put away now =
+        //    in front of the ones put away earlier), so unfolding restores the same stacking order
+        std::vector<HWND> order = FrontToBack(visible);
+        for (size_t i = 0; i < order.size(); ++i) pile.Find(order[i])->stamp = nextStamp_ + (order.size() - i);
+        nextStamp_ += order.size() + 1;
+        for (HWND h : visible)
+            if (pile.ShowsPreview(*pile.Find(h))) shoot.push_back(h);
         // 1) previews while the windows are still visible (spec §4.3) — only for the cards in front
-        std::vector<Image> shots = snapshots_.Capture(shoot, Scale(240, dpi));
+        std::vector<Image> shots = snapshots_.Capture(shoot, Scale(Pile::kPreviewW, dpi));
         for (size_t i = 0; i < shoot.size(); ++i)
             if (!shots[i].empty()) pile.Find(shoot[i])->snapshot = std::move(shots[i]);
         std::vector<RECT> from;
@@ -753,7 +834,13 @@ void App::HideMembers(Pile& pile, const std::vector<HWND>& hwnds, bool readPlace
         // 2) journal before hiding (spec §4.4 step 4 → 6)
         SaveJournalNow();
         // 3) hide the originals (async: a hung app can't block us) and gather them into the card
-        for (HWND h : visible) ShowWindowAsync(h, SW_HIDE);
+        for (HWND h : visible) {
+            ShowWindowAsync(h, SW_HIDE);
+            // A window dropped onto the card was carried next to it. Once hidden, move it back to
+            // where it was before the drag (queued after the hide, so it never flashes): even if the
+            // app is too busy for a full restore later, it reappears in its own place.
+            if (!readPlacement) MoveHiddenTo(h, pile.Find(h)->placement);
+        }
         if (pile.active) {
             pile.active = false;
             frame_.reset();
@@ -769,7 +856,7 @@ void App::HideMembers(Pile& pile, const std::vector<HWND>& hwnds, bool readPlace
     if (p->active) frame_.reset();
     p->folded = true;
     p->active = false;
-    p->view->SetVisible(true);
+    ShowCard(*p);
     Refresh(*p);
     SaveJournal();
 }
@@ -803,9 +890,11 @@ void App::Expand(Pile& pile, bool makeActive) {
         SaveJournal();
         return;
     }
+    // Back-most first, as they overlapped when put away: raising them in this order (kTimerToFront)
+    // leaves the one that was on top on top again.
     std::vector<Member*> toShow;
-    for (auto& m : pile.members)
-        if (m.hidden) toShow.push_back(&m);
+    for (Member* m : pile.FrontToBack())
+        if (m->hidden) toShow.insert(toShow.begin(), m);
     double t0 = NowMs(), tAnim = t0, tRestore = t0, tFrame = t0;
 
     if (makeActive) {
@@ -822,12 +911,13 @@ void App::Expand(Pile& pile, bool makeActive) {
     }
     tRestore = NowMs();
 
-    // Front-most (newest) first: those are the windows the user sees and reaches for first.
+    // Restored front-most first: those are the windows the user sees and reaches for first.
     std::vector<HWND> shown;
     for (auto it = toShow.rbegin(); it != toShow.rend(); ++it) {
         Member* m = *it;
         m->hidden = false;
         m->attention = false;  // the user is looking at it now
+        KeepOnScreen(m->placement);
         RestoreWindow(m->hwnd, m->placement, false, stateFrozen_);  // exiting: all at once, bounded wait
         shown.insert(shown.begin(), m->hwnd);
     }
@@ -838,11 +928,12 @@ void App::Expand(Pile& pile, bool makeActive) {
         // Restores run asynchronously; raise the windows and refresh the frame's monitors once
         // they have landed.
         toFront_ = shown;
+        toFrontWaits_ = 0;
         SetTimer(main_, kTimerToFront, 250, nullptr);
         if (!pile.customName) pile.name = AutoName(pile);
         frame_ = std::make_unique<WorkFrame>(pile, *this);
     } else {
-        pile.view->SetVisible(true);
+        ShowCard(pile);
     }
     double tRefresh = NowMs();
     Refresh(pile);
@@ -870,7 +961,7 @@ void App::RestoreAll() {
         if (p->HiddenCount() > 0) {
             Expand(*p, false);
         } else {
-            p->view->SetVisible(true);
+            ShowCard(*p);
             Refresh(*p);
         }
     }
@@ -1019,7 +1110,7 @@ void App::OnMemberGone(HWND hwnd) {
         p->active = false;
         p->folded = true;
         frame_.reset();
-        p->view->SetVisible(true);
+        ShowCard(*p);
     }
     RefreshSoon(*p);  // an app closing many windows at once: one redraw and one write for all
     SaveJournal();
@@ -1374,10 +1465,21 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
                 for (HWND h : dead) OnMemberGone(h);
                 UpdateReclaim();  // ends the after-restart window when its time is up
             } else if (wp == kTimerToFront) {
+                // A window shown by a late restore would land on top: wait (briefly) until they're in.
+                if (RestoresPending() && ++toFrontWaits_ < 20) {
+                    SetTimer(main_, kTimerToFront, 100, nullptr);
+                    return 0;
+                }
                 KillTimer(main_, kTimerToFront);
-                for (HWND h : toFront_)
-                    if (IsWindow(h))
-                        SetWindowPos(h, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+                toFrontWaits_ = 0;
+                // Front-most to the top, then each one right behind the one in front of it. Every app
+                // handles its own (asynchronous) move, in any order, and the chain still comes out right.
+                HWND above = HWND_TOP;
+                for (auto it = toFront_.rbegin(); it != toFront_.rend(); ++it)
+                    if (IsWindow(*it)) {
+                        SetWindowPos(*it, above, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+                        above = *it;
+                    }
                 // We received the click moments ago, so the foreground lock allows this. Best effort.
                 if (!toFront_.empty() && IsWindow(toFront_.back()) && !IsIconic(toFront_.back()))
                     SetForegroundWindow(toFront_.back());

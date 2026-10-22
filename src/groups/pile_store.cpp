@@ -80,6 +80,7 @@ bool SavePileState(const std::vector<SavedPile>& piles, bool background) {
             s += "{\"hwnd\":\"" + Num(m.hwnd) + "\",\"pid\":" + Num((uint64_t)m.pid) + ",\"createTime\":\"" +
                  Num(m.createTime) + "\",\"class\":" + json::Quote(m.className) + ",\"exe\":" + json::Quote(m.exePath) +
                  ",\"title\":" + json::Quote(m.title) + ",\"hidden\":" + (m.hidden ? "true" : "false") +
+                 ",\"z\":" + Num(m.stamp) +
                  ",\"showCmd\":" + Num((uint64_t)m.wp.showCmd) + ",\"flags\":" + Num((uint64_t)m.wp.flags) +
                  ",\"normal\":[" + Num((long long)r.left) + "," + Num((long long)r.top) + "," + Num((long long)r.right) +
                  "," + Num((long long)r.bottom) + "],\"maxPos\":[" + Num((long long)m.wp.ptMaxPosition.x) + "," +
@@ -153,6 +154,7 @@ bool LoadPileState(std::vector<SavedPile>& piles) {
                 if (auto* x = mv.Get("exe")) m.exePath = x->WStr();
                 if (auto* x = mv.Get("title")) m.title = x->WStr();
                 if (auto* x = mv.Get("hidden")) m.hidden = x->Bool();
+                if (auto* x = mv.Get("z")) m.stamp = x->U64();  // absent in files from v0.2.0 and earlier
                 if (auto* x = mv.Get("showCmd")) m.wp.showCmd = (UINT)x->U64();
                 if (auto* x = mv.Get("flags")) m.wp.flags = (UINT)x->U64();
                 if (auto* x = mv.Get("normal"); x && x->arr.size() == 4)

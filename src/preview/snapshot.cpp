@@ -335,9 +335,17 @@ Image MakeIconCard(HWND hwnd, int w, int h) {
         icon = (HICON)res;
     if (!icon) icon = (HICON)GetClassLongPtrW(hwnd, GCLP_HICON);
     if (!icon) icon = LoadIconW(nullptr, IDI_APPLICATION);
+    std::wstring title = WindowTitle(hwnd);
+    if (w > h * 5 / 2) {  // a strip: icon on the left, title beside it
+        int is = h / 2, x = h / 4;
+        c.DrawIcon(icon, x, (h - is) / 2, is);
+        RECT tr{x + is + h / 5, 0, w - 8, h};
+        c.Text(title, tr, RGB(235, 235, 240), std::max(10, h * 2 / 9), false,
+               DT_LEFT | DT_VCENTER | DT_END_ELLIPSIS | DT_SINGLELINE);
+        return c.ToImage();
+    }
     int is = std::min(w, h) * 2 / 5;
     c.DrawIcon(icon, (w - is) / 2, h / 2 - is + h / 10, is);
-    std::wstring title = WindowTitle(hwnd);
     RECT tr{8, h / 2 + h / 8, w - 8, h - 6};
     c.Text(title, tr, RGB(235, 235, 240), std::max(10, h / 9), false, DT_CENTER | DT_END_ELLIPSIS | DT_SINGLELINE);
     return c.ToImage();

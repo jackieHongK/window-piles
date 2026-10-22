@@ -269,7 +269,7 @@ int wmain(int argc, wchar_t** argv) {
         Check(s.bgFraction > 0.5, "1) 바 위에 올리면 진한 강조색으로 바뀜");
         SaveShot(L"1_bar_hot", Inflate(barCard, S(40)));
     });
-    Check(!IsWindowVisible(w1), "1) 바에 놓은 창이 숨겨짐");
+    Check(PumpUntil([&] { return !IsWindowVisible(w1); }, 5000), "1) 바에 놓은 창이 숨겨짐");  // after the preview capture
     auto cards = VisibleOfClass(L"WindowPilesPile");
     Check(cards.size() == 1, "1) 더미 카드 1개 생성");
     if (cards.size() != 1) return 1;
@@ -277,7 +277,7 @@ int wmain(int argc, wchar_t** argv) {
 
     // 2) onto the card
     Drag(w2, Center(Rect(card)));
-    Check(!IsWindowVisible(w2), "2) 카드에 놓은 두 번째 창도 숨겨짐");
+    Check(PumpUntil([&] { return !IsWindowVisible(w2); }, 5000), "2) 카드에 놓은 두 번째 창도 숨겨짐");
     DWORD appPid = 0;
     GetWindowThreadProcessId(mainWnd, &appPid);
     Check(FileHas(L"recovery.json", "\"managerPid\":" + std::to_string(appPid)) &&

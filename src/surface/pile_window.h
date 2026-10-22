@@ -34,7 +34,8 @@ public:
 
     void Render();  // redraw from the model
     void SetHot(bool hot);
-    void SetVisible(bool visible);
+    // Showing again goes right under `insertAfter` (the card above it), so cards keep their stacking order.
+    void SetVisible(bool visible, HWND insertAfter = HWND_TOPMOST);
     bool visible() const { return visible_; }
     RECT ScreenRect() const;  // whole window (incl. shadow margin)
     RECT CardRect() const;    // the card itself, screen px

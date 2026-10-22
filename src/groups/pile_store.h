@@ -17,6 +17,7 @@ struct SavedMember {
     std::wstring className, exePath, title;
     WINDOWPLACEMENT wp{sizeof(WINDOWPLACEMENT)};
     bool hidden = false;
+    uint64_t stamp = 0;  // stacking order when put away (Member::stamp)
 };
 
 struct SavedPile {

@@ -4,6 +4,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -29,6 +30,9 @@ struct Member {
     int unread = 0;          // unread count read from the window title
     bool attention = false;  // the app flashed its taskbar button / marked the title
     DWORD hiddenAt = 0;      // GetTickCount() when put away (a flash right then is not news)
+    // How it overlapped the other windows when it was put away: higher = nearer the front. Unfolding
+    // brings the windows back in this order, so the one on top before is on top again.
+    uint64_t stamp = 0;
     Image snapshot;  // shown in the folded card (snapshot or icon card); never written to disk
 };
 
@@ -75,12 +79,36 @@ struct Pile {
             if (m.hwnd == h) return &m;
         return nullptr;
     }
-    // The card shows the last kPreviews members (newest in front). Only those need a preview image,
-    // a capture or an animation ghost, so a pile of 50 windows costs the same as one of 3.
+    // The card shows the kPreviews front-most members (by stamp, then the most recently added) as
+    // strips of their top part. Only those need a preview image, a capture or an animation ghost, so
+    // a pile of 50 windows costs the same as one of 3.
     static constexpr int kPreviews = 3;
+    static constexpr int kPreviewW = 240, kPreviewH = 64;  // DIP
+    static bool InFrontOf(const Member& a, size_t ia, const Member& b, size_t ib) {
+        return a.stamp != b.stamp ? a.stamp > b.stamp : ia > ib;
+    }
     bool ShowsPreview(const Member& m) const {
         size_t i = (size_t)(&m - members.data());
-        return i < members.size() && i + kPreviews >= members.size();
+        if (i >= members.size()) return false;
+        int ahead = 0;
+        for (size_t k = 0; k < members.size(); ++k)
+            if (k != i && InFrontOf(members[k], k, m, i) && ++ahead >= kPreviews) return false;
+        return true;
+    }
+    // Members front-most first (the first `n`, or all).
+    std::vector<const Member*> FrontToBack(size_t n = SIZE_MAX) const {
+        std::vector<size_t> idx(members.size());
+        for (size_t k = 0; k < idx.size(); ++k) idx[k] = k;
+        std::sort(idx.begin(), idx.end(),
+                  [&](size_t a, size_t b) { return InFrontOf(members[a], a, members[b], b); });
+        std::vector<const Member*> out;
+        for (size_t k = 0; k < idx.size() && k < n; ++k) out.push_back(&members[idx[k]]);
+        return out;
+    }
+    std::vector<Member*> FrontToBack(size_t n = SIZE_MAX) {
+        std::vector<Member*> out;
+        for (const Member* m : static_cast<const Pile&>(*this).FrontToBack(n)) out.push_back(&members[m - members.data()]);
+        return out;
     }
 };
 

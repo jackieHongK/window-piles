@@ -39,6 +39,7 @@ std::string ValidateIdentity(const JournalEntry& e);
 void RestoreWindow(HWND hwnd, const WINDOWPLACEMENT& wp, bool activate, bool urgent = false);
 // Waits (bounded) until queued RestoreWindow calls finished. Call before the process exits.
 bool WaitForRestores(DWORD timeoutMs);
+bool RestoresPending();
 
 // Restores every validated entry; returns how many were restored.
 int RecoverFromJournal(const Journal& j, int* skipped);

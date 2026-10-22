@@ -225,6 +225,7 @@ struct RestoreJob {
     HWND hwnd;
     WINDOWPLACEMENT wp;
     DWORD queuedAt;
+    DWORD answerMs;  // how long the app may take to answer before it counts as frozen
 };
 
 // Opening a pile of 40 windows used to fire 40 restores at once: the apps (and the disk, for
@@ -233,6 +234,9 @@ struct RestoreJob {
 // rest: when the oldest queued job has waited a second, another worker joins.
 constexpr int kParallelRestores = 4;
 constexpr DWORD kStuckMs = 1000;
+// How long an app may take to answer before it counts as frozen: generous normally (a busy app must
+// still get its window back in the right place), short when exiting (Windows' time limit).
+constexpr DWORD kAnswerMs = 1500, kUrgentAnswerMs = 300;
 SRWLOCK g_queueLock = SRWLOCK_INIT;
 std::deque<RestoreJob> g_queue;
 int g_workers = 0;  // guarded by g_queueLock
@@ -248,11 +252,13 @@ void CALLBACK RunRestores(PTP_CALLBACK_INSTANCE, void*) {
         RestoreJob job = g_queue.front();
         g_queue.pop_front();
         ReleaseSRWLockExclusive(&g_queueLock);
-        // An app that doesn't answer within a moment (frozen, busy) gets an asynchronous show instead:
-        // the window comes back where it was hidden, and no worker sits blocked behind it.
+        // A frozen app (suspended, hung) gets an asynchronous show instead: the window comes back
+        // where it was hidden, and no worker sits blocked behind it.
         DWORD_PTR r = 0;
-        if (SendMessageTimeoutW(job.hwnd, WM_NULL, 0, 0, SMTO_ABORTIFHUNG, 200, &r))
+        if (SendMessageTimeoutW(job.hwnd, WM_NULL, 0, 0, SMTO_ABORTIFHUNG, job.answerMs, &r))
             SetWindowPlacement(job.hwnd, &job.wp);
+        else
+            Log("restore: window %p did not answer in %lu ms, shown where it was", job.hwnd, job.answerMs);
         if (!IsWindowVisible(job.hwnd)) ShowWindowAsync(job.hwnd, SW_SHOWNA);
         --g_pendingRestores;
     }
@@ -277,7 +283,7 @@ void RestoreWindow(HWND hwnd, const WINDOWPLACEMENT& saved, bool activate, bool 
     ++g_pendingRestores;
     AcquireSRWLockExclusive(&g_queueLock);
     DWORD now = GetTickCount();
-    g_queue.push_back({hwnd, wp, now});
+    g_queue.push_back({hwnd, wp, now, urgent ? kUrgentAnswerMs : kAnswerMs});
     bool spawn = urgent || g_workers < kParallelRestores || now - g_queue.front().queuedAt > kStuckMs;
     if (spawn) ++g_workers;
     ReleaseSRWLockExclusive(&g_queueLock);
@@ -293,6 +299,8 @@ void RestoreWindow(HWND hwnd, const WINDOWPLACEMENT& saved, bool activate, bool 
         }
     }
 }
+
+bool RestoresPending() { return g_pendingRestores > 0; }
 
 bool WaitForRestores(DWORD timeoutMs) {
     DWORD start = GetTickCount();

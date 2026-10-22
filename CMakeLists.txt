@@ -59,6 +59,10 @@ target_link_libraries(e2e_piles PRIVATE poc_common)
 add_executable(e2e_badges tests/e2e/e2e_badges.cpp)
 target_link_libraries(e2e_badges PRIVATE poc_common)
 
+# Stacking order of windows in a pile and of overlapping cards is kept (no mouse input).
+add_executable(e2e_order tests/e2e/e2e_order.cpp)
+target_link_libraries(e2e_order PRIVATE poc_common)
+
 # Load measurement: many big windows in one pile (no mouse input).
 add_executable(e2e_perf tests/e2e/e2e_perf.cpp)
 target_link_libraries(e2e_perf PRIVATE poc_common)

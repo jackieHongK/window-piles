@@ -182,7 +182,7 @@ int wmain() {
     CloseHandle(twProc);
     appProc = Launch(app, L"--autostart");
     PumpUntil([&] { return MainWnd() != nullptr; }, 5000);
-    PumpFor(1500);
+    PumpUntil([&] { return ReadState().find("\"missing\":[{") != std::string::npos; }, 6000);
     st = ReadState();
     Check(st.find("\"missing\":[{") != std::string::npos, "4) 재부팅 후: 사라진 창이 '다시 열어야 할 창'으로 남음");
     twProc = Launch(tw, L"--normal 2 --seconds 120", &twPid);

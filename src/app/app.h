@@ -68,6 +68,7 @@ private:
     void TakeOut(HWND hwnd, const WINDOWPLACEMENT& before);  // remove one window from its pile
     void RestoreAll();
     void EditStyle(Pile& pile, POINT anchor);
+    void ShowCard(Pile& pile);     // show its card again in its place in the stacking order
     void Refresh(Pile& pile);      // rename + redraw card / frame
     void RefreshSoon(Pile& pile);  // same, once per burst of changes
     void UpdatePreviews(Pile& pile);  // images only for the cards in front
@@ -130,13 +131,15 @@ private:
     std::unique_ptr<WorkFrame> frame_;  // for the active pile
     std::unique_ptr<GuideWindow> guide_;
     int nextId_ = 1;
+    uint64_t nextStamp_ = 1;  // for Member::stamp (stacking order when put away)
     int colorIndex_ = 0;
     SnapshotEngine snapshots_;
     std::unique_ptr<DragWatcher> drag_;
     bool quitting_ = false;
     bool stateFrozen_ = false;  // shutting down: keep the saved piles as they were
     std::vector<HWND> pendingGone_;  // destroy events seen before the window was fully gone
-    std::vector<HWND> toFront_;      // windows to raise once their async restore has landed
+    std::vector<HWND> toFront_;      // windows to raise once their async restore has landed, back-most first
+    int toFrontWaits_ = 0;
     double startedMs_ = 0;
     bool reclaimActive_ = false;
     HWINEVENTHOOK nameHook_ = nullptr;  // only while reclaiming (title changes are frequent)
