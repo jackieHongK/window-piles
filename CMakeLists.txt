@@ -42,6 +42,20 @@ add_executable(WindowPiles WIN32
 target_include_directories(WindowPiles PRIVATE src)
 target_link_libraries(WindowPiles PRIVATE user32 gdi32 dwmapi shell32 shcore advapi32 comdlg32 wtsapi32 kernel32 d3d11 dxgi windowsapp)
 
+# The exe's icon (Explorer, shortcuts, pinned items) is generated at build time from the same drawing
+# code the app uses at runtime (DrawMark), so there is no binary .ico in the repo to keep in sync.
+add_executable(make_icon tests/tools/make_icon.cpp src/app/app_icon.cpp src/common/canvas.cpp)
+target_include_directories(make_icon PRIVATE src)
+target_link_libraries(make_icon PRIVATE user32 gdi32 advapi32 ole32 windowscodecs)
+set(APP_ICO "${CMAKE_BINARY_DIR}/gen/app.ico")
+add_custom_command(OUTPUT "${APP_ICO}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/gen"
+    COMMAND make_icon "${APP_ICO}"
+    DEPENDS make_icon VERBATIM)
+target_sources(WindowPiles PRIVATE "${APP_ICO}")
+target_include_directories(WindowPiles PRIVATE "${CMAKE_BINARY_DIR}/gen")  # app.rc finds app.ico here
+set_source_files_properties(src/app/app.rc PROPERTIES OBJECT_DEPENDS "${APP_ICO}")
+
 # ---------------------------------------------------------------------------
 # P0 PoC helpers (screen sampling, window lookup, timing, OS info)
 # ---------------------------------------------------------------------------
