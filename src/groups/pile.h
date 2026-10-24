@@ -43,6 +43,7 @@ struct MissingWindow {
     std::wstring exePath;
     std::wstring appName;
     std::wstring title;
+    bool launched = false;  // reopened from the card this session (not saved): don't launch it again
 };
 
 struct Pile {

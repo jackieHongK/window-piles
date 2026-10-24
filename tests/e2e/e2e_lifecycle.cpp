@@ -9,6 +9,8 @@
 //   4. "reboot": windows gone, app starts                    → listed as "다시 열어야 할 창";
 //      the app reopens windows with the same titles          → put back into the pile automatically
 //   5. "End task" (exit code 1)                              → windows shown, app NOT relaunched
+//   6. a pile with only a closed app, clicked                → the app is reopened; its first window
+//                                                              joins the pile and stays open
 #include "poc_common.h"
 
 #include <tlhelp32.h>
@@ -204,9 +206,50 @@ int wmain() {
     PumpFor(2000);
     Check(MainWnd() == nullptr, "5) 작업 끝내기 후에는 다시 실행하지 않음");
 
-    if (appProc) CloseHandle(appProc);
-    TerminateProcess(twProc, 0);
+    // 6) a pile holding only a closed app (saved under an old title): one click on the card reopens
+    //    the app, and its first new window joins the pile and stays open
+    quit = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\TestWindowsQuit");
+    if (quit) SetEvent(quit), CloseHandle(quit);
+    WaitForSingleObject(twProc, 5000);
     CloseHandle(twProc);
+    std::string twEsc;
+    for (char c : Utf8(tw)) twEsc += (c == '\\') ? std::string("\\\\") : std::string(1, c);
+    state = "{\"schema\":1,\"piles\":[{\"id\":1,\"name\":\"닫힌 앱 더미\",\"customName\":true,\"color\":11107891,"
+            "\"x\":1500,\"y\":40,\"folded\":true,\"members\":[],\"missing\":[{\"exe\":\"" + twEsc +
+            "\",\"app\":\"TestWindows\",\"title\":\"TW-예전 창\"}]}]}";
+    f = CreateFileW((DataDir() + L"\\piles.json").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+    WriteFile(f, state.data(), (DWORD)state.size(), &n, nullptr);
+    CloseHandle(f);
+    appProc = Launch(app, L"--autostart");
+    HWND card = nullptr;
+    PumpUntil([&] { return (card = FindWindowW(L"WindowPilesPile", nullptr)) && IsWindowVisible(card); }, 5000);
+    if (card) {
+        RECT cr;
+        GetClientRect(card, &cr);
+        // Right part of the header: not the name (rename) and not a row of the reopen list.
+        LPARAM pt = MAKELPARAM(cr.right * 3 / 4, MulDiv(30, GetDpiForWindow(card), 96));
+        PostMessageW(card, WM_LBUTTONDOWN, MK_LBUTTON, pt);
+        PostMessageW(card, WM_LBUTTONUP, 0, pt);
+    }
+    HWND r1 = nullptr;
+    PumpUntil([&] { return (r1 = FindTopLevelByTitle(L"TW-Normal-1")) != nullptr; }, 8000);
+    PumpUntil([&] { return ReadState().find("\"missing\":[]") != std::string::npos; }, 5000);
+    PumpFor(1500);
+    st = ReadState();
+    int joined = 0;
+    HWND joinedWnd = nullptr;
+    for (const wchar_t* t : {L"TW-Normal-1", L"TW-Normal-2", L"TW-Normal-3"})
+        if (st.find(Utf8(t)) != std::string::npos) ++joined, joinedWnd = FindTopLevelByTitle(t);
+    Check(r1 != nullptr, "6) 닫힌 앱만 남은 더미를 클릭 → 그 앱이 다시 실행됨");
+    Check(joined == 1 && st.find("\"missing\":[]") != std::string::npos,
+          "6) 다시 실행된 앱의 첫 창 하나가 더미에 들어가고 목록에서 빠짐");
+    Check(joinedWnd && IsWindowVisible(joinedWnd), "6) 들어간 창은 열린 채로 있음 (다시 숨기지 않음)");
+    PostMessageW(MainWnd(), WM_ENDSESSION, TRUE, 0);
+    if (appProc) WaitForSingleObject(appProc, 5000);
+    quit = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\TestWindowsQuit");
+    if (quit) SetEvent(quit), CloseHandle(quit);
+
+    if (appProc) CloseHandle(appProc);
     Print("\n%s (%d failed)\n", g_fail ? "LIFECYCLE FAILED" : "LIFECYCLE PASSED", g_fail);
     return g_fail ? 1 : 0;
 }

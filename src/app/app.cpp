@@ -575,9 +575,20 @@ void App::OnDragDrop(HWND hwnd, const WINDOWPLACEMENT& before, POINT cursor, Dro
 // ---------------------------------------------------------------------------------------------
 
 void App::OnPileClick(Pile& pile) {
-    if (pile.members.empty()) return;  // only "reopen" entries: nothing to unfold
-    if (pile.folded) Activate(pile);
-    else Fold(pile);
+    if (!pile.folded && !pile.members.empty()) {
+        Fold(pile);
+        return;
+    }
+    int id = pile.id;
+    if (!pile.members.empty()) Activate(pile);
+    // Opening also reopens the apps whose windows were closed (after the unfold, which may add some).
+    if (Pile* p = FindPile(id)) {
+        if (p->members.empty() && p->folded) {  // only "reopen" entries: their windows will stay open
+            p->folded = false;
+            Refresh(*p);
+        }
+        RelaunchMissing(*p);
+    }
 }
 
 void App::OnPileMoved(Pile& pile) {
@@ -603,8 +614,29 @@ void App::OnMissingClick(Pile& pile, int index) {
     if (index < 0 || index >= (int)pile.missing.size()) return;
     const MissingWindow& w = pile.missing[index];
     if (w.exePath.empty() || Lower(FileName(w.exePath)) == L"applicationframehost.exe") return;
-    // Opens the app; the entry disappears once one of its windows is dropped back into this pile.
-    ShellExecuteW(nullptr, L"open", w.exePath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    LaunchIntoPile(pile, w.exePath);
+}
+
+void App::RelaunchMissing(Pile& pile) {
+    std::vector<std::wstring> launched;
+    for (MissingWindow& w : pile.missing) {
+        std::wstring exe = Lower(w.exePath);
+        // Store apps run inside ApplicationFrameHost: launching that opens nothing.
+        if (w.launched || exe.empty() || Lower(FileName(exe)) == L"applicationframehost.exe") continue;
+        w.launched = true;
+        if (std::find(launched.begin(), launched.end(), exe) != launched.end()) continue;  // once per app
+        launched.push_back(exe);
+        LaunchIntoPile(pile, w.exePath);
+    }
+}
+
+void App::LaunchIntoPile(Pile& pile, const std::wstring& exePath) {
+    // Opens the app without arguments (we don't know which document it had open). Its next window
+    // joins this pile and takes the entry off the list (TryReclaim).
+    ShellExecuteW(nullptr, L"open", exePath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    launchJoin_[Lower(exePath)] = pile.id;
+    launchJoinUntil_ = NowMs() + 60 * 1000;  // ponytail: fixed wait, slow apps starting later aren't joined
+    UpdateReclaim();
 }
 
 void App::OnPileMenu(Pile& pile, POINT pt) {
@@ -1286,7 +1318,8 @@ void App::Revalidate() {
 void App::UpdateReclaim() {
     bool anyMissing = false;
     for (auto& p : piles_) anyMissing |= !p->missing.empty();
-    bool want = anyMissing && NowMs() - startedMs_ < kReclaimWindowMs;
+    if (NowMs() >= launchJoinUntil_) launchJoin_.clear();
+    bool want = anyMissing && (NowMs() - startedMs_ < kReclaimWindowMs || !launchJoin_.empty());
     if (want == reclaimActive_) return;
     reclaimActive_ = want;
     if (want) {
@@ -1313,31 +1346,35 @@ void App::TryReclaim(HWND hwnd) {
     if (cached == reclaimExe_.end()) cached = reclaimExe_.emplace(pid, ProcessExePath(pid)).first;
     const std::wstring exe = Lower(cached->second);
     if (exe.empty()) return;
-    for (auto& p : piles_) {
-        auto it = std::find_if(p->missing.begin(), p->missing.end(), [&](const MissingWindow& w) {
-            return w.title == title && Lower(w.exePath) == exe;
-        });
-        if (it == p->missing.end()) continue;
-        if (!CanPile(hwnd)) return;
-        // Same app, same window title as before the restart: it belongs in this pile.
-        p->missing.erase(it);
-        Member m;
-        m.hwnd = hwnd;
-        m.pid = pid;
-        m.createTime = ProcessCreateTime(pid);
-        m.className = WindowClass(hwnd);
-        m.exePath = cached->second;
-        m.title = title;
-        GetWindowPlacement(hwnd, &m.placement);
-        p->members.push_back(std::move(m));
-        ++reclaimed_;
-        SetTimer(main_, kTimerReclaimNote, 2500, nullptr);  // one note for a burst of windows
-        // A browser restoring its session opens many windows at once: put them away together.
-        reclaimPending_.push_back(hwnd);
-        SetTimer(main_, kTimerReclaimFold, 500, nullptr);
-        UpdateReclaim();
-        return;
-    }
+    // Same app, same window title as before the restart: it belongs in that pile.
+    Pile* target = nullptr;
+    for (auto& p : piles_)
+        if (std::any_of(p->missing.begin(), p->missing.end(),
+                        [&](const MissingWindow& w) { return w.title == title && Lower(w.exePath) == exe; })) {
+            target = p.get();
+            break;
+        }
+    // Or the first window of an app reopened from a card (usually a new title: no document open).
+    auto join = launchJoin_.find(exe);
+    if (!target && join != launchJoin_.end()) target = FindPile(join->second);
+    if (!target || !CanPile(hwnd)) return;
+    if (join != launchJoin_.end() && join->second == target->id) launchJoin_.erase(join);  // one window per launch
+    Member m;
+    m.hwnd = hwnd;
+    m.pid = pid;
+    m.createTime = ProcessCreateTime(pid);
+    m.className = WindowClass(hwnd);
+    m.exePath = cached->second;
+    m.title = title;
+    GetWindowPlacement(hwnd, &m.placement);
+    ClaimMissing(*target, m);  // the same-title entry if there is one, else one of the same app
+    target->members.push_back(std::move(m));
+    ++reclaimed_;
+    SetTimer(main_, kTimerReclaimNote, 2500, nullptr);  // one note for a burst of windows
+    // A browser restoring its session opens many windows at once: put them away together.
+    reclaimPending_.push_back(hwnd);
+    SetTimer(main_, kTimerReclaimFold, 500, nullptr);
+    UpdateReclaim();
 }
 
 void App::FoldReclaimed() {
