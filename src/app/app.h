@@ -99,7 +99,7 @@ private:
     void ShowStillHidden();            // fallback when a restore is stuck on a frozen app
     // After a restart, windows that apps reopen with the same app + title go back into their pile.
     void UpdateReclaim();
-    void TryReclaim(HWND hwnd);
+    void TryReclaim(HWND hwnd, bool justShown);
     // Opening a pile reopens its closed apps (once per app); their next window joins the pile.
     void RelaunchMissing(Pile& pile);
     void LaunchIntoPile(Pile& pile, const std::wstring& exePath);
@@ -153,6 +153,7 @@ private:
     std::vector<HWND> toFront_;      // windows to raise once their async restore has landed, back-most first
     int toFrontWaits_ = 0;
     double startedMs_ = 0;
+    bool afterBoot_ = false;  // started soon after Windows did: windows reopened with their old title come back
     bool reclaimActive_ = false;
     HWINEVENTHOOK nameHook_ = nullptr;  // only while reclaiming (title changes are frequent)
     int reclaimed_ = 0;
@@ -160,6 +161,7 @@ private:
     std::vector<HWND> reclaimPending_;          // matched, waiting to be folded together
     std::map<std::wstring, int> launchJoin_;    // lower-case exe → pile id: apps reopened from a card
     double launchJoinUntil_ = 0;                // their windows join until then
+    std::vector<HWND> untitledShown_;           // appeared without a title yet: their first title still counts as new
     UINT shellHookMsg_ = 0;                        // HSHELL_* notifications from Explorer
     std::map<DWORD, HWINEVENTHOOK> titleHooks_;    // pid → title-change hook scoped to that process
     bool journalDirty_ = false;

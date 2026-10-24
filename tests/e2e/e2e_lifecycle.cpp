@@ -13,8 +13,10 @@
 //                                                              joins the pile and stays open
 //   7. a pile holding a folder and a gone file, clicked      → the folder opens in Explorer and that
 //                                                              window joins the pile; both stay listed
+//   8. that pile folded again, then another folder opened    → stays open, outside the pile
 #include "poc_common.h"
 
+#include <shellapi.h>
 #include <tlhelp32.h>
 
 #include <string>
@@ -295,7 +297,31 @@ int wmain() {
     Check(st.find("CabinetWClass") != std::string::npos && ex && IsWindowVisible(ex), "7) 열린 탐색기 창이 더미에 들어가고 열린 채로 있음");
     Check(st.find(Utf8(L"SN 함께 열 폴더")) != std::string::npos && st.find(Utf8(L"없는 보고서.xlsx")) != std::string::npos,
           "7) 찾을 수 없는 파일도 목록에 그대로 남음");
+
+    // 8) fold that pile again, then open another folder on our own within the minute: it is the user's
+    //    window, not the pile's (it must neither be hidden into the folded pile nor join it)
+    if (card) {
+        LPARAM pt = MAKELPARAM(cr.right * 3 / 4, MulDiv(30, GetDpiForWindow(card), 96));
+        PostMessageW(card, WM_LBUTTONDOWN, MK_LBUTTON, pt);
+        PostMessageW(card, WM_LBUTTONUP, 0, pt);
+    }
+    bool foldedAgain = ex && PumpUntil([&] { return !IsWindowVisible(ex); }, 4000);
+    std::wstring other = DataDir() + L"\\SN 따로 연 폴더";
+    CreateDirectoryW(other.c_str(), nullptr);
+    ShellExecuteW(nullptr, L"open", other.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    HWND mine = nullptr;
+    PumpUntil([&] {
+        for (HWND h : FindTopLevelByTitlePrefix(L""))
+            if (WindowClass(h) == L"CabinetWClass" && WindowTitle(h).find(L"SN 따로 연 폴더") != std::wstring::npos) mine = h;
+        return mine != nullptr;
+    }, 8000);
+    PumpFor(2500);
+    st = ReadState();
+    Check(foldedAgain, "8) 파일 더미를 다시 접으면 탐색기 창도 함께 접힘");
+    Check(mine && IsWindowVisible(mine) && st.find(Utf8(L"SN 따로 연 폴더")) == std::string::npos,
+          "8) 접은 뒤 따로 연 폴더 창은 더미에 들어가지 않고 열린 채로 있음");
     PostMessageW(MainWnd(), WM_ENDSESSION, TRUE, 0);
+    if (mine) PostMessageW(mine, WM_CLOSE, 0, 0);
     if (appProc) WaitForSingleObject(appProc, 5000), CloseHandle(appProc);
     if (ex) PostMessageW(ex, WM_CLOSE, 0, 0);
     Print("\n%s (%d failed)\n", g_fail ? "LIFECYCLE FAILED" : "LIFECYCLE PASSED", g_fail);

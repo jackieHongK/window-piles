@@ -266,6 +266,9 @@ int App::Run() {
     if (!FlagExists(L"autostart.off") && !UsingTestDataDir()) SetAutostart(true);
 
     startedMs_ = NowMs();
+    // After a reboot, apps reopen their windows with the old titles: those go back into their piles.
+    // A plain restart of this app is no reason to pull in a "홈" or "새 탭" window the user opens.
+    afterBoot_ = GetTickCount64() < 30ull * 60 * 1000 || UsingTestDataDir();
     activity::Append(activity::Kind::Start);
     int recovered = RestoreSavedPiles();
     Log("run: %zu piles restored, %d leftover windows recovered", piles_.size(), recovered);
@@ -978,6 +981,9 @@ void App::HideMembers(Pile& pile, const std::vector<HWND>& hwnds, bool readPlace
 }
 
 void App::Fold(Pile& pile) {
+    // Windows still expected from apps this pile opened are not part of it any more once it's put away.
+    for (auto it = launchJoin_.begin(); it != launchJoin_.end();)
+        it = it->second == pile.id ? launchJoin_.erase(it) : std::next(it);
     std::vector<HWND> all;
     for (auto& m : pile.members) all.push_back(m.hwnd);
     HideMembers(pile, all, true);
@@ -1254,7 +1260,7 @@ void CALLBACK App::OnObjectEvent(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idO
     }
     if (instance_->reclaimActive_ && (event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_NAMECHANGE) &&
         GetAncestor(hwnd, GA_ROOT) == hwnd)
-        PostMessageW(instance_->main_, WM_APP_RECLAIM, (WPARAM)hwnd, 0);
+        PostMessageW(instance_->main_, WM_APP_RECLAIM, (WPARAM)hwnd, event == EVENT_OBJECT_SHOW);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1391,7 +1397,7 @@ void App::UpdateReclaim() {
     bool anyMissing = false;
     for (auto& p : piles_) anyMissing |= !p->missing.empty();
     if (NowMs() >= launchJoinUntil_) launchJoin_.clear();
-    bool want = (anyMissing && NowMs() - startedMs_ < kReclaimWindowMs) || !launchJoin_.empty();
+    bool want = (anyMissing && afterBoot_ && NowMs() - startedMs_ < kReclaimWindowMs) || !launchJoin_.empty();
     if (want == reclaimActive_) return;
     reclaimActive_ = want;
     if (want) {
@@ -1403,32 +1409,48 @@ void App::UpdateReclaim() {
         UnhookWinEvent(nameHook_);
         nameHook_ = nullptr;
         reclaimExe_.clear();
+        untitledShown_.clear();
     }
 }
 
-void App::TryReclaim(HWND hwnd) {
+void App::TryReclaim(HWND hwnd, bool justShown) {
     // Runs for title changes all over the system while reclaiming, so the cheap checks go first and
     // the process lookups (cached per process) only for windows that could match.
     if (!reclaimActive_ || !IsWindow(hwnd) || !IsWindowVisible(hwnd) || PileOf(hwnd)) return;
     std::wstring title = WindowTitle(hwnd);
-    if (title.empty()) return;
+    auto untitled = std::find(untitledShown_.begin(), untitledShown_.end(), hwnd);
+    if (title.empty()) {
+        // Many apps show a window first and title it a moment later: that title change is still "new".
+        if (justShown && untitled == untitledShown_.end()) untitledShown_.push_back(hwnd);
+        return;
+    }
+    if (untitled != untitledShown_.end()) {
+        untitledShown_.erase(untitled);
+        justShown = true;
+    }
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
     auto cached = reclaimExe_.find(pid);
     if (cached == reclaimExe_.end()) cached = reclaimExe_.emplace(pid, ProcessExePath(pid)).first;
     const std::wstring exe = Lower(cached->second);
     if (exe.empty()) return;
-    // Same app, same window title as before the restart: it belongs in that pile.
+    // Same app, same window title as before the reboot: it belongs in that pile.
     Pile* target = nullptr;
-    for (auto& p : piles_)
-        if (std::any_of(p->missing.begin(), p->missing.end(),
-                        [&](const MissingWindow& w) { return w.title == title && Lower(w.exePath) == exe; })) {
-            target = p.get();
-            break;
-        }
-    // Or the first window of an app reopened from a card (usually a new title: no document open).
+    if (afterBoot_ && NowMs() - startedMs_ < kReclaimWindowMs)
+        for (auto& p : piles_)
+            if (std::any_of(p->missing.begin(), p->missing.end(),
+                            [&](const MissingWindow& w) { return w.title == title && Lower(w.exePath) == exe; })) {
+                target = p.get();
+                break;
+            }
+    // Or a new window of an app this pile just opened (a file, a folder, a closed app): only a window
+    // that appears (not an existing one getting a new title, e.g. a folder opened as an Explorer tab),
+    // and only while that pile is open. Folding it or opening another pile cancels this (Fold).
     auto join = launchJoin_.find(exe);
-    if (!target && join != launchJoin_.end()) target = FindPile(join->second);
+    if (!target && join != launchJoin_.end() && justShown) {
+        Pile* p = FindPile(join->second);
+        if (p && !p->folded) target = p;
+    }
     if (!target || !CanPile(hwnd)) return;
     if (join != launchJoin_.end() && join->second == target->id) launchJoin_.erase(join);  // one window per launch
     Member m;
@@ -1571,7 +1593,7 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_APP_SHOW_STATS: ShowStats(); return 0;
         case WM_APP_MEMBER_GONE: OnMemberGone((HWND)wp); return 0;
         case WM_APP_MEMBER_SHOWN: OnMemberShown((HWND)wp); return 0;
-        case WM_APP_RECLAIM: TryReclaim((HWND)wp); return 0;
+        case WM_APP_RECLAIM: TryReclaim((HWND)wp, lp != 0); return 0;
         case WM_APP_TITLE: OnTitleChanged((HWND)wp); return 0;
         case WM_APP_FLUSH: Flush(); return 0;
         case WM_TIMER:
