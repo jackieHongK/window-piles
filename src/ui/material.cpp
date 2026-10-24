@@ -93,7 +93,7 @@ float Pattern(const char* id, int x, int y, float k, COLORREF& tint, float& tint
         bool over = ((x / t) + (y / t)) & 1;
         return (over ? row : col) * 0.10f + (ValueNoise(x, y, (int)(30 * k), (int)(3 * k), 13) - 0.5f) * 0.06f;
     }
-    if (is("oak")) {
+    if (is("oak") || is("walnut")) {
         // Long grain lines along x, wavy, with darker latewood bands.
         float g = std::sin(y / (2.2f * k) + 9.0f * Fbm(x / 6, y, (int)(40 * k), 21));
         return 0.06f * g - 0.08f * std::pow(std::max(0.0f, g), 8.0f) +

@@ -18,6 +18,7 @@ public:
     virtual ~PileHost() = default;
     virtual void OnPileClick(Pile& pile) = 0;
     virtual void OnPileMoved(Pile& pile) = 0;
+    virtual void OnPileDragging(Pile& pile) = 0;  // the card is being carried (pointer = where it is)
     virtual void OnPileMenu(Pile& pile, POINT screenPt) = 0;
     // A "다시 열어야 할 창" row was clicked.
     virtual void OnMissingClick(Pile& pile, int index) = 0;
@@ -39,6 +40,9 @@ public:
 
     void Render();  // redraw from the model
     void SetHot(bool hot);
+    // Start carrying the card with the pointer as if it had been pressed and dragged (taking it out of
+    // the organizer): it follows until the button goes up, then lands like any dragged card.
+    void BeginCarry();
     // Showing again goes right under `insertAfter` (the card above it), so cards keep their stacking order.
     void SetVisible(bool visible, HWND insertAfter = HWND_TOPMOST);
     bool visible() const { return visible_; }

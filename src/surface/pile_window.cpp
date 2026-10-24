@@ -117,6 +117,14 @@ RECT PileWindow::CardRect() const {
             pile_.pos.y + size_.cy - margin_};
 }
 
+void PileWindow::BeginCarry() {
+    pressed_ = dragging_ = true;
+    GetCursorPos(&pressCursor_);
+    pressPos_ = pile_.pos;
+    SetCapture(hwnd_);
+    SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 void PileWindow::SetHot(bool hot) {
     if (hot == hot_) return;
     hot_ = hot;
@@ -449,6 +457,7 @@ LRESULT PileWindow::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             if (dragging_) {
                 pile_.pos = {pressPos_.x + dx, pressPos_.y + dy};
                 SetWindowPos(hwnd_, nullptr, pile_.pos.x, pile_.pos.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+                host_.OnPileDragging(pile_);
             }
             return 0;
         }

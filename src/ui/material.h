@@ -36,6 +36,7 @@ constexpr Material kMaterials[] = {
     {L"황동 (실험)", "brass", RGB(196, 162, 96), false, true, false},
     {L"콘크리트 (실험)", "concrete", RGB(178, 176, 171), false, true, false},
     {L"오크 원목 (실험)", "oak", RGB(198, 160, 116), false, true, false},
+    {L"월넛 원목 (실험)", "walnut", RGB(104, 66, 42), true, true, false},
 };
 constexpr int kMaterialCount = sizeof(kMaterials) / sizeof(kMaterials[0]);
 

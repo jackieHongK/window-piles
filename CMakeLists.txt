@@ -31,6 +31,7 @@ add_executable(WindowPiles WIN32
     src/activity/activity_log.cpp
     src/preview/snapshot.cpp
     src/surface/pile_window.cpp
+    src/surface/organizer.cpp
     src/interaction/drag_watcher.cpp
     src/ui/popup_base.cpp
     src/ui/menu.cpp
@@ -80,6 +81,10 @@ target_link_libraries(e2e_badges PRIVATE poc_common)
 # Stacking order of windows in a pile and of overlapping cards is kept (no mouse input).
 add_executable(e2e_order tests/e2e/e2e_order.cpp)
 target_link_libraries(e2e_order PRIVATE poc_common)
+
+# Edge organizer: docked piles, the tray, opening and folding from it (no mouse input).
+add_executable(e2e_organizer tests/e2e/e2e_organizer.cpp)
+target_link_libraries(e2e_organizer PRIVATE poc_common)
 
 # Load measurement: many big windows in one pile (no mouse input).
 add_executable(e2e_perf tests/e2e/e2e_perf.cpp)

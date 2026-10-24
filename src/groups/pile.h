@@ -52,6 +52,7 @@ struct Pile {
     bool customName = false;  // the user renamed it: stop auto-naming
     COLORREF color = RGB(51, 126, 169);
     int material = 0;     // card body below the title bar: index into kMaterials (ui/material.h)
+    bool docked = false;  // kept in the edge organizer: no card on the desktop
     bool folded = true;   // folded = windows put away in the card
     bool active = false;  // open and "being worked on": card hidden, screen frame + top tab shown
     POINT pos{};          // top-left of the pile card window, screen px (stays put while open)

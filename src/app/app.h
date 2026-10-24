@@ -13,6 +13,7 @@
 #include "groups/pile.h"
 #include "interaction/drag_watcher.h"
 #include "preview/snapshot.h"
+#include "surface/organizer.h"
 #include "surface/pile_window.h"
 #include "ui/guide_window.h"
 #include "ui/stats_window.h"
@@ -26,7 +27,7 @@ constexpr UINT WM_APP_SHOW_GUIDE = WM_APP + 10;
 constexpr UINT WM_APP_SHOW_STATS = WM_APP + 11;
 constexpr wchar_t kMainWindowClass[] = L"WindowPilesMain";
 
-class App : public PileHost, public DragHost {
+class App : public PileHost, public DragHost, public OrganizerHost {
 public:
     App();
     ~App() override;
@@ -37,6 +38,13 @@ public:
     void OnPileMoved(Pile& pile) override;
     void OnPileMenu(Pile& pile, POINT pt) override;
     void OnMissingClick(Pile& pile, int index) override;
+    void OnPileDragging(Pile& pile) override;
+    // OrganizerHost
+    std::vector<Pile*> OrganizerPiles() override;
+    void OnOrganizerOpen(Pile& pile) override;
+    void OnOrganizerCarryOut(Pile& pile, POINT screenPt) override;
+    void OnOrganizerMenu(Pile* pile, POINT screenPt) override;
+    void OnOrganizerMoved() override;
     void OnFilesDropped(Pile& pile, const std::vector<std::wstring>& paths) override;
     void OnFileClick(Pile& pile, int index) override;
     void OnFileRemove(Pile& pile, int index) override;
@@ -141,6 +149,11 @@ private:
 
     std::vector<std::unique_ptr<Pile>> piles_;
     std::unique_ptr<WorkFrame> frame_;  // for the active pile
+    std::unique_ptr<Organizer> organizer_;  // the edge organizer, when turned on
+    void SetOrganizer(bool on);
+    // Keep a pile in the organizer (its card leaves the desktop) or take it out, its card landing at
+    // `at` (screen px) or next to the bookmark.
+    void Dock(Pile& pile, bool on, const POINT* at = nullptr);
     std::unique_ptr<GuideWindow> guide_;
     int nextId_ = 1;
     uint64_t nextStamp_ = 1;  // for Member::stamp (stacking order when put away)

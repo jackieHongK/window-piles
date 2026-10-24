@@ -57,6 +57,9 @@ enum MenuId : UINT {
     kMenuHelp,
     kMenuQuit,
     kMenuStats,
+    kMenuDock,
+    kMenuOrganizer,
+    kMenuOrganizerSide,
 };
 
 std::wstring FileName(const std::wstring& path) {
@@ -208,6 +211,25 @@ void TrimMissing(Pile& pile) {
 
 std::wstring FlagPath(const wchar_t* name) { return AppDataDir() + L"\\" + name; }
 bool FlagExists(const wchar_t* name) { return GetFileAttributesW(FlagPath(name).c_str()) != INVALID_FILE_ATTRIBUTES; }
+Organizer::Place LoadOrganizerPlace() {
+    std::wstring ini = FlagPath(L"organizer.ini");
+    Organizer::Place p;
+    wchar_t buf[64] = {};
+    GetPrivateProfileStringW(L"organizer", L"side", L"right", buf, 64, ini.c_str());
+    p.right = wcscmp(buf, L"left") != 0;
+    p.yPermille = (int)GetPrivateProfileIntW(L"organizer", L"y", 500, ini.c_str());
+    GetPrivateProfileStringW(L"organizer", L"monitor", L"", buf, 64, ini.c_str());
+    p.monitor = buf;
+    return p;
+}
+
+void SaveOrganizerPlace(const Organizer::Place& p) {
+    std::wstring ini = FlagPath(L"organizer.ini");
+    WritePrivateProfileStringW(L"organizer", L"side", p.right ? L"right" : L"left", ini.c_str());
+    WritePrivateProfileStringW(L"organizer", L"y", std::to_wstring(p.yPermille).c_str(), ini.c_str());
+    WritePrivateProfileStringW(L"organizer", L"monitor", p.monitor.c_str(), ini.c_str());
+}
+
 void SetFlag(const wchar_t* name, bool on) {
     if (on) {
         HANDLE f = CreateFileW(FlagPath(name).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
@@ -272,6 +294,7 @@ int App::Run() {
     activity::Append(activity::Kind::Start);
     int recovered = RestoreSavedPiles();
     Log("run: %zu piles restored, %d leftover windows recovered", piles_.size(), recovered);
+    if (!FlagExists(L"organizer.off")) SetOrganizer(true);
 
     drag_ = std::make_unique<DragWatcher>(*this);
     // Member windows closing or showing themselves. Out-of-context: no injection.
@@ -320,6 +343,7 @@ int App::RestoreSavedPiles() {
         p->customName = sp.customName;
         p->color = sp.color;
         p->material = sp.material;
+        p->docked = sp.docked;
         p->pos = sp.pos;
         p->missing = sp.missing;
         p->files = sp.files;
@@ -417,6 +441,7 @@ void App::PersistNow(bool background) {
         sp.customName = p->customName;
         sp.color = p->color;
         sp.material = p->material;
+        sp.docked = p->docked;
         sp.pos = p->pos;
         sp.folded = p->folded;
         sp.missing = p->missing;
@@ -600,7 +625,27 @@ void App::OnPileClick(Pile& pile) {
     }
 }
 
+void App::OnPileDragging(Pile& pile) {
+    POINT c;
+    GetCursorPos(&c);
+    if (!organizer_) return;
+    organizer_->DragOver(c);
+    // The tray opening as a drop target must not cover the card being carried.
+    SetWindowPos(pile.view->hwnd(), HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 void App::OnPileMoved(Pile& pile) {
+    // Put down on the organizer's bookmark or open tray: it goes into the organizer.
+    if (organizer_) {
+        POINT c;
+        GetCursorPos(&c);
+        bool dock = organizer_->IsDropTarget(c);
+        organizer_->DragEnd();
+        if (dock) {
+            Dock(pile, true);
+            return;
+        }
+    }
     // The card the user just put down is the top one now (piles_ is the stacking order, bottom first).
     auto it = std::find_if(piles_.begin(), piles_.end(), [&](const auto& p) { return p.get() == &pile; });
     if (it != piles_.end()) std::rotate(it, it + 1, piles_.end());
@@ -608,6 +653,11 @@ void App::OnPileMoved(Pile& pile) {
 }
 
 void App::ShowCard(Pile& pile) {
+    if (pile.docked && organizer_) {  // lives in the organizer: no card on the desktop
+        pile.view->SetVisible(false);
+        organizer_->Refresh();
+        return;
+    }
     // Back in its own layer: right under the nearest visible card above it, not on top of everything.
     HWND above = HWND_TOPMOST;
     auto it = std::find_if(piles_.begin(), piles_.end(), [&](const auto& p) { return p.get() == &pile; });
@@ -727,6 +777,7 @@ void App::OnPileMenu(Pile& pile, POINT pt) {
     std::vector<MenuItem> items;
     if (!pile.members.empty()) items.push_back({kMenuToggle, pile.folded ? L"펼치기" : L"접기", L"클릭"});
     items.push_back({kMenuStyle, L"이름·색 바꾸기…"});
+    if (organizer_) items.push_back({kMenuDock, pile.docked ? L"오거나이저에서 빼기" : L"오거나이저에 꽂기"});
     if (!pile.members.empty()) items.push_back({kMenuDissolve, L"더미 풀기", L"창은 그대로"});
     if (!pile.missing.empty())
         items.push_back({kMenuClearMissing, L"닫힌 창 목록 지우기", std::to_wstring(pile.missing.size()) + L"개"});
@@ -749,6 +800,9 @@ void App::OnPileMenu(Pile& pile, POINT pt) {
             break;
         case kMenuDissolve:
             if (p) Dissolve(*p);
+            break;
+        case kMenuDock:
+            if (p) Dock(*p, !p->docked);
             break;
         case kMenuClearMissing:
             if (p) {
@@ -871,8 +925,10 @@ Pile& App::CreatePile(POINT nearPt) {
 
 void App::RemovePile(Pile& pile) {
     if (pile.active) frame_.reset();
+    bool docked = pile.docked;
     piles_.erase(std::remove_if(piles_.begin(), piles_.end(), [&](const auto& p) { return p.get() == &pile; }),
                  piles_.end());
+    if (docked && organizer_) organizer_->Refresh();
     SaveJournal();
 }
 
@@ -891,6 +947,7 @@ void App::Refresh(Pile& pile) {
     UpdatePreviews(pile);
     pile.view->Render();
     if (pile.active && frame_) frame_->Update();
+    if (pile.docked && organizer_) organizer_->Refresh();
 }
 
 void App::RefreshSoon(Pile& pile) {
@@ -966,7 +1023,7 @@ void App::HideMembers(Pile& pile, const std::vector<HWND>& hwnds, bool readPlace
         }
         pile.folded = true;
         pile.view->Render();  // computes the card rect at the card's own position
-        RECT card = pile.view->CardRect();
+        RECT card = pile.docked && organizer_ ? organizer_->HandleRect() : pile.view->CardRect();
         if (animate) AnimateRects(from, std::vector<RECT>(from.size(), card), pile.color, kAnimMs, true);
         SetTimer(main_, kTimerVerify, 500, nullptr);
     }
@@ -1021,7 +1078,7 @@ void App::Expand(Pile& pile, bool makeActive) {
 
     if (makeActive) {
         // Spread out of the card, then the card steps aside for the frame + top tab.
-        RECT card = pile.view->CardRect();
+        RECT card = pile.docked && organizer_ ? organizer_->HandleRect() : pile.view->CardRect();
         std::vector<RECT> to;
         for (Member* m : toShow) {
             RECT r = RestoreRectOf(*m);
@@ -1323,6 +1380,7 @@ void App::ShowTrayMenu() {
         {kMenuRestoreAll, L"모든 창 꺼내기", hidden ? std::to_wstring(hidden) + L"개" : L"", hidden == 0},
         {kMenuStats, L"작업 기록", L"오늘 쓴 시간"},
         {kMenuAutostart, L"Windows 시작 시 자동 실행", autostart ? L"켜짐 ✓" : L"꺼짐"},
+        {kMenuOrganizer, L"가장자리 오거나이저", organizer_ ? L"켜짐 ✓" : L"꺼짐"},
         {kMenuHelp, L"사용법"},
         {},
         {kMenuQuit, L"Neverflow 종료", L"창을 모두 꺼내요"},
@@ -1333,8 +1391,93 @@ void App::ShowTrayMenu() {
     else if (id == kMenuAutostart) {
         SetAutostart(!autostart);
         SetFlag(L"autostart.off", autostart);  // remember the user's choice across launches
+    } else if (id == kMenuOrganizer) {
+        bool on = organizer_ != nullptr;
+        SetOrganizer(!on);
+        SetFlag(L"organizer.off", on);
     } else if (id == kMenuHelp) ShowGuide();
     else if (id == kMenuQuit) Quit();
+}
+
+void App::SetOrganizer(bool on) {
+    if (on == (organizer_ != nullptr)) return;
+    if (on) {
+        organizer_ = std::make_unique<Organizer>(*this, LoadOrganizerPlace());
+        for (auto& p : piles_)
+            if (p->docked) p->view->SetVisible(false);
+        organizer_->Refresh();
+        return;
+    }
+    // Turned off: every pile in it comes back to the desktop as a card.
+    organizer_.reset();
+    for (auto& p : piles_)
+        if (p->docked) {
+            p->docked = false;
+            if (!p->active) ShowCard(*p);
+        }
+    PersistSoon();
+}
+
+void App::Dock(Pile& pile, bool on, const POINT* at) {
+    if (!organizer_ || pile.docked == on) return;
+    pile.docked = on;
+    if (on) {
+        pile.view->SetVisible(false);
+    } else {
+        // Out of the tray: the card lands where it was let go, or just inside the bookmark.
+        RECT h = organizer_->HandleRect();
+        UINT dpi = DpiForPoint({h.left, h.top});
+        SIZE win = PileWindow::WindowSize(dpi);
+        POINT p = at ? *at
+                     : POINT{organizer_->place().right ? h.left - win.cx / 2 - Scale(24, dpi) : h.right + win.cx / 2 + Scale(24, dpi),
+                             (h.top + h.bottom) / 2};
+        pile.pos = {p.x - win.cx / 2, p.y - Scale(28, dpi)};
+        if (!pile.active) ShowCard(pile);  // an open pile shows its card again once it's folded
+    }
+    organizer_->Refresh();
+    PersistSoon();
+}
+
+std::vector<Pile*> App::OrganizerPiles() {
+    std::vector<Pile*> out;
+    for (auto& p : piles_)
+        if (p->docked) out.push_back(p.get());
+    return out;
+}
+
+void App::OnOrganizerOpen(Pile& pile) { OnPileClick(pile); }
+
+void App::OnOrganizerCarryOut(Pile& pile, POINT screenPt) {
+    Dock(pile, false, &screenPt);  // the card appears under the pointer…
+    if (pile.view->visible()) pile.view->BeginCarry();  // …and follows it until it's let go
+}
+
+void App::OnOrganizerMoved() {
+    if (organizer_) SaveOrganizerPlace(organizer_->place());
+}
+
+void App::OnOrganizerMenu(Pile* pile, POINT pt) {
+    if (pile) {
+        OnPileMenu(*pile, pt);
+        return;
+    }
+    if (!organizer_) return;
+    bool right = organizer_->place().right;
+    std::vector<MenuItem> items = {
+        {kMenuOrganizerSide, right ? L"왼쪽 가장자리로 옮기기" : L"오른쪽 가장자리로 옮기기"},
+        {kMenuOrganizer, L"가장자리 오거나이저 끄기", L"카드는 바탕화면으로"},
+    };
+    UINT id = ShowMenu(items, pt);
+    if (id == kMenuOrganizerSide && organizer_) {
+        Organizer::Place place = organizer_->place();
+        place.right = !right;
+        SaveOrganizerPlace(place);
+        organizer_ = std::make_unique<Organizer>(*this, place);  // rebuilt on the other edge
+        organizer_->Refresh();
+    } else if (id == kMenuOrganizer) {
+        SetOrganizer(false);
+        SetFlag(L"organizer.off", true);
+    }
 }
 
 void App::Quit() {
