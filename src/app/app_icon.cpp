@@ -72,19 +72,25 @@ void StrokeTray(Canvas& c, int ox, int oy, int s, float width, COLORREF color, B
         }
 }
 
+// A paper card in the tray: flat color with volume — lighter top, darker bottom, a highlight on its top
+// edge and a soft shadow below, so it reads as a solid block, not a line.
 struct Card {
-    float y;
-    COLORREF color;
-    BYTE alpha;
+    float y, h;
+    COLORREF top, bottom;
 };
 
-void DrawCards(Canvas& c, int ox, int oy, int s, const std::vector<Card>& cards, float h) {
+void DrawCards(Canvas& c, int ox, int oy, int s, const std::vector<Card>& cards, float left, float right) {
     float k = s / 64.0f;
-    for (const Card& card : cards) {
-        RECT r{ox + (LONG)std::lround(20 * k), oy + (LONG)std::lround(card.y * k), ox + (LONG)std::lround(44 * k),
-               oy + (LONG)std::lround((card.y + h) * k)};
-        if (r.bottom <= r.top) r.bottom = r.top + 1;
-        c.FillRoundRect(r, std::max(1, (int)std::lround(2 * k)), card.color, card.alpha);
+    int px = std::max(1, (int)std::lround(k));  // ~1 grid unit, at least 1 px
+    int radius = std::max(1, (int)std::lround(2 * k));
+    for (const Card& card : cards) {  // bottom card first: each one's shadow falls on the one below
+        RECT r{ox + (LONG)std::lround(left * k), oy + (LONG)std::lround(card.y * k), ox + (LONG)std::lround(right * k),
+               oy + (LONG)std::lround((card.y + card.h) * k)};
+        if (r.bottom - r.top < 2) r.bottom = r.top + 2;
+        c.FillRoundRect({r.left, r.top + px, r.right, r.bottom + px}, radius, RGB(0x26, 0x16, 0x0C), 110);
+        c.FillRoundRectV(r, radius, card.top, card.bottom);
+        if (r.bottom - r.top >= 4)
+            c.FillRoundRect({r.left + px, r.top, r.right - px, r.top + px}, radius, RGB(255, 255, 255), 150);
     }
 }
 
@@ -108,55 +114,38 @@ HICON ToIcon(const Canvas& c, int size) {
     return icon;
 }
 
-bool Small(int size) { return size <= 20; }
+// Card colors: brand blue, note mint, paper (top → bottom of each card).
+constexpr COLORREF kBlueTop = RGB(0x78, 0xB4, 0xDC), kBlueBottom = RGB(0x46, 0x82, 0xAE);
+constexpr COLORREF kMintTop = RGB(0xD6, 0xF0, 0xE2), kMintBottom = RGB(0xA6, 0xD2, 0xBA);
+constexpr COLORREF kPaperTop = RGB(0xFF, 0xFF, 0xFF), kPaperBottom = RGB(0xEC, 0xE2, 0xD4);
 
 }  // namespace
 
 void DrawMark(Canvas& c, int x, int y, int s) {
     float k = s / 64.0f;
+    int px = std::max(1, (int)std::lround(k));
     RECT tile{x + (LONG)std::lround(2 * k), y + (LONG)std::lround(2 * k), x + (LONG)std::lround(62 * k),
               y + (LONG)std::lround(62 * k)};
-    c.FillRoundRectV(tile, (int)std::lround(14 * k), RGB(0x7E, 0x55, 0x36), RGB(0x4A, 0x2E, 0x1D));
-    if (Small(s)) {
-        DrawCards(c, x, y, s, {{37, RGB(255, 255, 255), 255}, {26, RGB(0x5B, 0x9A, 0xC4), 255}}, 8);
-        StrokeTray(c, x, y, s, std::max(2.0f, 4.5f * k), RGB(0xF3, 0xE9, 0xDE));
-    } else {
+    c.FillRoundRectV(tile, (int)std::lround(14 * k), RGB(0x9A, 0x6A, 0x44), RGB(0x46, 0x2B, 0x1B));
+    // Cards sit inside the tray with a gap to its floor and walls. At icon sizes (≤ 32 px: tray, small
+    // icons) a thicker tray and two wide cards, mint below so it doesn't merge with the cream floor.
+    bool small = s <= 32;
+    if (small)
+        DrawCards(c, x, y, s, {{33.5f, 8.5f, kMintTop, kMintBottom}, {24, 8.5f, kBlueTop, kBlueBottom}}, 19, 45);
+    else
         DrawCards(c, x, y, s,
-                  {{40, RGB(255, 255, 255), 255}, {32.5f, RGB(0xBF, 0xE3, 0xCF), 255}, {25, RGB(0x5B, 0x9A, 0xC4), 255}},
-                  6);
-        StrokeTray(c, x, y, s, 4.5f * k, RGB(0xF3, 0xE9, 0xDE));
-    }
+                  {{38, 5.5f, kPaperTop, kPaperBottom}, {30.5f, 5.5f, kMintTop, kMintBottom},
+                   {23, 5.5f, kBlueTop, kBlueBottom}},
+                  20, 44);
+    float stroke = std::max(2.0f, (small ? 5.5f : 4.5f) * k);
+    StrokeTray(c, x, y + px, s, stroke, RGB(0x26, 0x16, 0x0C), 120);  // the tray's shadow on the tile
+    StrokeTray(c, x, y, s, stroke, RGB(0xF6, 0xEE, 0xE4));
 }
 
 HICON MakeAppIcon(int size) {
     Canvas c(size, size);
     DrawMark(c, 0, 0, size);
     return ToIcon(c, size);
-}
-
-HICON MakeTrayIcon(int size, bool lightTaskbar) {
-    Canvas c(size, size);
-    COLORREF fg = lightTaskbar ? RGB(32, 30, 28) : RGB(255, 255, 255);
-    // The mark without its tile, enlarged so the tray (grid 10..54) fills the notification-area
-    // square, centered vertically on the tray's height (grid 20..49).
-    int vs = (int)std::lround(size * 64.0 / 44.0);
-    float k = vs / 64.0f;
-    int ox = -(int)std::lround(10 * k), oy = (int)std::lround(size / 2.0 - 34.5 * k);
-    if (Small(size)) {
-        DrawCards(c, ox, oy, vs, {{37, fg, 255}, {26, fg, 115}}, 8);
-        StrokeTray(c, ox, oy, vs, std::max(2.0f, 4.5f * k), fg);
-    } else {
-        DrawCards(c, ox, oy, vs, {{40, fg, 255}, {32.5f, fg, 200}, {25, fg, 115}}, 6);
-        StrokeTray(c, ox, oy, vs, 4.5f * k, fg);
-    }
-    return ToIcon(c, size);
-}
-
-bool TaskbarIsLight() {
-    DWORD value = 0, size = sizeof(value);
-    return RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-                        L"SystemUsesLightTheme", RRF_RT_REG_DWORD, nullptr, &value, &size) == ERROR_SUCCESS &&
-           value != 0;
 }
 
 }  // namespace wp

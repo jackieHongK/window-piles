@@ -254,7 +254,7 @@ int App::Run() {
     shellHookMsg_ = RegisterWindowMessageW(L"SHELLHOOK");
     RegisterShellHookWindow(main_);
     icon_ = MakeAppIcon(GetSystemMetrics(SM_CXSMICON) * 2);
-    trayIcon_ = MakeTrayIcon(GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem()), TaskbarIsLight());
+    trayIcon_ = MakeAppIcon(GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem()));
     Log("run: main window %p", main_);
     AddTrayIcon();
     Log("run: tray icon added");
@@ -1213,16 +1213,6 @@ void App::AddTrayIcon() {
     Shell_NotifyIconW(NIM_SETVERSION, &nid_);
 }
 
-void App::UpdateTrayIcon() {
-    HICON old = trayIcon_;
-    trayIcon_ = MakeTrayIcon(GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem()), TaskbarIsLight());
-    nid_.uFlags = NIF_ICON;
-    nid_.hIcon = trayIcon_;
-    Shell_NotifyIconW(NIM_MODIFY, &nid_);
-    nid_.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
-    if (old) DestroyIcon(old);
-}
-
 void App::Notify(const std::wstring& title, const std::wstring& text) {
     NOTIFYICONDATAW n = nid_;
     n.uFlags = NIF_INFO;
@@ -1551,10 +1541,6 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
                 pending.swap(pendingGone_);
                 for (HWND h : pending) OnMemberGone(h);  // re-queues itself if still alive
             }
-            return 0;
-        case WM_SETTINGCHANGE:
-            // Light/dark taskbar switched: the single-color tray icon follows it.
-            if (lp && wcscmp((const wchar_t*)lp, L"ImmersiveColorSet") == 0) UpdateTrayIcon();
             return 0;
         // Resume, unlock and a display change often arrive together: re-check once, a moment later.
         case WM_DISPLAYCHANGE:
