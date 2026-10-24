@@ -15,7 +15,7 @@ namespace {
 constexpr wchar_t kClass[] = L"WindowPilesPile";
 
 // Layout in DIPs. The previews are strips of each window's top part (tabs, address bar, title):
-// enough to recognise it, while a card is only ~60% as tall as with whole-window previews.
+// enough to recognise it, while a card stays much shorter than with whole-window previews.
 constexpr int kMargin = 12;  // transparent room for the shadow
 constexpr int kHeaderH = 32;
 constexpr int kPad = 10, kPadY = 9;
@@ -170,16 +170,7 @@ void PileWindow::Render() {
     RECT card{margin_, margin_, size_.cx - margin_, size_.cy - margin_};
     int radius = S(kRadiusLg);
     c.Shadow(card, radius, S(10), S(3), hot_ ? 70 : 45, kForeground);  // warm ink, not gray
-    // A paper stack: one or two sheets peek out behind the card (more windows → more sheets). They sit
-    // in the shadow margin, so the card's size, hit area and snapping stay as they were.
-    int sheets = std::min<int>(std::max<int>((int)pile_.members.size() - 1, 0), 2);
-    for (int i = sheets; i >= 1; --i) {
-        RECT sheet = card;
-        OffsetRect(&sheet, S(3 * i), -S(3 * i));
-        c.FillRoundRect(sheet, radius, i == 2 ? kMuted : kBackground);
-        c.StrokeRoundRect(sheet, radius, 1, kBorder);
-    }
-    c.FillRoundRect(card, radius, kBackground);
+    c.FillRoundRect(card, radius, kBackground);  // one clean sheet: no stacked layers behind it
 
     // Title bar in the pile's color (rounded top, straight bottom).
     RECT header{card.left, card.top, card.right, card.top + S(kHeaderH)};

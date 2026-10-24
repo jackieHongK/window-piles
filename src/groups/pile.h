@@ -84,7 +84,7 @@ struct Pile {
     // strips of their top part. Only those need a preview image, a capture or an animation ghost, so
     // a pile of 50 windows costs the same as one of 3.
     static constexpr int kPreviews = 3;
-    static constexpr int kPreviewW = 240, kPreviewH = 64;  // DIP
+    static constexpr int kPreviewW = 240, kPreviewH = 89;  // DIP (the card is 151 tall with these)
     static bool InFrontOf(const Member& a, size_t ia, const Member& b, size_t ib) {
         return a.stamp != b.stamp ? a.stamp > b.stamp : ia > ib;
     }
