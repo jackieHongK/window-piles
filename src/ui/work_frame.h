@@ -55,6 +55,8 @@ private:
 
 // Outlines that fly between window rectangles and the pile card ("gathering" / "spreading").
 // Blocks for `durationMs` while pumping messages. No-op when Windows animations are turned off.
-void AnimateRects(const std::vector<RECT>& from, const std::vector<RECT>& to, COLORREF color, int durationMs);
+// `settle`: on arrival they sink 2 px and come back, like paper landing on a stack.
+void AnimateRects(const std::vector<RECT>& from, const std::vector<RECT>& to, COLORREF color, int durationMs,
+                  bool settle = false);
 
 }  // namespace wp

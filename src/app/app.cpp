@@ -40,7 +40,7 @@ constexpr UINT WM_APP_FLUSH = WM_APP + 6;  // deferred redraws and journal write
 // How long after start-up windows reopened by their apps are put back into their piles.
 constexpr double kReclaimWindowMs = 15 * 60 * 1000;
 constexpr UINT kTrayId = 1;
-constexpr int kAnimMs = 220;
+constexpr int kAnimMs = 240;  // brand motion: 240 ms ease-out (+ a 2 px settle when folding)
 constexpr DWORD kIdleMs = 5 * 60 * 1000;  // no input for this long: not counted as work time
 constexpr DWORD kFlashGraceMs = 3000;      // flashes this soon after folding are ignored for badges
 constexpr wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -882,7 +882,7 @@ void App::HideMembers(Pile& pile, const std::vector<HWND>& hwnds, bool readPlace
         pile.folded = true;
         pile.view->Render();  // computes the card rect at the card's own position
         RECT card = pile.view->CardRect();
-        if (animate) AnimateRects(from, std::vector<RECT>(from.size(), card), pile.color, kAnimMs);
+        if (animate) AnimateRects(from, std::vector<RECT>(from.size(), card), pile.color, kAnimMs, true);
         SetTimer(main_, kTimerVerify, 500, nullptr);
     }
     Pile* p = FindPile(pileId);

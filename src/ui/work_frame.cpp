@@ -1,6 +1,7 @@
 #include "work_frame.h"
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 
 #include "common/canvas.h"
@@ -310,7 +311,8 @@ LRESULT CALLBACK GhostProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 
 }  // namespace
 
-void AnimateRects(const std::vector<RECT>& from, const std::vector<RECT>& to, COLORREF color, int durationMs) {
+void AnimateRects(const std::vector<RECT>& from, const std::vector<RECT>& to, COLORREF color, int durationMs,
+                  bool settle) {
     BOOL animate = TRUE;
     SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animate, 0);
     if (!animate || from.empty() || from.size() != to.size()) return;
@@ -327,21 +329,27 @@ void AnimateRects(const std::vector<RECT>& from, const std::vector<RECT>& to, CO
         ShowWindow(g, SW_SHOWNOACTIVATE);
         ghosts.push_back(g);
     }
+    // The settle phase: a short sink of 2 px (DPI-scaled) and back after the flight.
+    const double settleMs = settle ? 90 : 0;
+    const int sink = MulDiv(2, GetDpiForWindow(ghosts[0]), 96);
     double start = NowMs();
     for (;;) {
-        double t = std::min(1.0, (NowMs() - start) / durationMs);
+        double now = NowMs() - start;
+        double t = std::min(1.0, now / durationMs);
         double e = 1 - (1 - t) * (1 - t) * (1 - t);  // ease-out cubic
+        double st = settleMs > 0 ? std::clamp((now - durationMs) / settleMs, 0.0, 1.0) : 0;
+        int dy = (int)std::lround(sink * std::sin(3.14159265 * st));
         HDWP dwp = BeginDeferWindowPos((int)ghosts.size());
         for (size_t i = 0; i < ghosts.size(); ++i) {
             auto L = [e](LONG a, LONG b) { return (int)(a + (b - a) * e); };
-            int l = L(from[i].left, to[i].left), tp = L(from[i].top, to[i].top);
-            int r = L(from[i].right, to[i].right), b = L(from[i].bottom, to[i].bottom);
+            int l = L(from[i].left, to[i].left), tp = L(from[i].top, to[i].top) + dy;
+            int r = L(from[i].right, to[i].right), b = L(from[i].bottom, to[i].bottom) + dy;
             if (dwp) dwp = DeferWindowPos(dwp, ghosts[i], HWND_TOPMOST, l, tp, std::max(1, r - l), std::max(1, b - tp),
                                           SWP_NOACTIVATE);
         }
         if (dwp) EndDeferWindowPos(dwp);
         for (HWND g : ghosts) UpdateWindow(g);
-        if (t >= 1) break;
+        if (now >= durationMs + settleMs) break;
         MsgWaitForMultipleObjects(0, nullptr, FALSE, 12, QS_PAINT);
         MSG msg;
         while (PeekMessageW(&msg, nullptr, WM_PAINT, WM_PAINT, PM_REMOVE)) DispatchMessageW(&msg);
