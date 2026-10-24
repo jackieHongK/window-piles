@@ -290,9 +290,8 @@ bool EditPileStyle(const PileStyle& current, POINT anchor, const std::function<v
     SetFocus(s.edit);
 
     MSG msg;
-    bool firstClick = true;
     while (!s.done && GetMessageW(&msg, nullptr, 0, 0) > 0) {
-        if (FilterNameEdit(msg, s.edit, firstClick)) continue;
+        if (FilterNameEdit(msg, s.edit)) continue;
         if (msg.message == WM_KEYDOWN && (msg.hwnd == s.edit || msg.hwnd == s.hwnd)) {
             if (msg.wParam == VK_RETURN) {
                 s.saved = s.done = true;

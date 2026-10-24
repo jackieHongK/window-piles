@@ -379,7 +379,21 @@ int wmain(int argc, wchar_t** argv) {
         Check(rn.size() == 1, "4b) 타이틀 이름 클릭 → 그 자리에 이름 입력창");
         Check(IsWindowVisible(card) && !IsWindowVisible(w1), "4b) 이름을 눌러도 더미가 펼쳐지지 않음");
         if (!rn.empty()) {
-            TypeText(L"임시");  // replaces the preselected name; Ctrl+A must select it again
+            HWND ed = FindWindowExW(rn[0], nullptr, L"Edit", nullptr);
+            DWORD sel = (DWORD)SendMessageW(ed, EM_GETSEL, 0, 0);
+            int len = GetWindowTextLengthW(ed);
+            Check(len > 0 && LOWORD(sel) == 0 && HIWORD(sel) == len, "4b) 입력창이 열리면 이름 전체가 선택됨");
+            LRESULT mid = SendMessageW(ed, EM_POSFROMCHAR, len / 2, 0);  // client px of the middle char
+            RECT ec{};
+            GetClientRect(ed, &ec);
+            POINT inText{(short)LOWORD(mid) + 1, (ec.bottom - ec.top) / 2};
+            ClientToScreen(ed, &inText);
+            Click(inText);  // one click into the text places the caret there
+            sel = (DWORD)SendMessageW(ed, EM_GETSEL, 0, 0);
+            Check(LOWORD(sel) == HIWORD(sel) && LOWORD(sel) > 0 && LOWORD(sel) < len,
+                  "4b) 입력창 안을 한 번 클릭하면 그 자리에 커서 (다시 전체 선택되지 않음)");
+            CtrlKey('A');
+            TypeText(L"임시");  // replaces the whole name; Ctrl+A must select it again
             PumpFor(100);
             CtrlKey('A');
             TypeText(L"빠른 이름");

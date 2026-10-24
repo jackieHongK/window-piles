@@ -15,8 +15,7 @@ bool HasDwmRoundedCorners();
 // Keeps rect inside the work area of the monitor containing `anchor`.
 RECT ClampToWorkArea(RECT r, POINT anchor);
 // Message-loop filter for a pile-name EDIT: Ctrl+A selects all (the classic EDIT ignores it and
-// beeps), and the first click into the field selects all unless it was a drag-selection, like an
-// address bar. Returns true if the message was handled (skip Translate/Dispatch).
-bool FilterNameEdit(const MSG& msg, HWND edit, bool& firstClick);
+// beeps). Returns true if the message was handled (skip Translate/Dispatch).
+bool FilterNameEdit(const MSG& msg, HWND edit);
 
 }  // namespace wp
