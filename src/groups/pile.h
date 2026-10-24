@@ -57,6 +57,7 @@ struct Pile {
     POINT pos{};          // top-left of the pile card window, screen px (stays put while open)
     std::vector<Member> members;
     std::vector<MissingWindow> missing;
+    std::vector<std::wstring> files;  // files and folders kept with the pile (paths): opened when it opens
     std::unique_ptr<PileWindow> view;
 
     int HiddenCount() const {
@@ -64,7 +65,7 @@ struct Pile {
         for (auto& m : members) n += m.hidden;
         return n;
     }
-    bool Empty() const { return members.empty() && missing.empty(); }
+    bool Empty() const { return members.empty() && missing.empty() && files.empty(); }
     // Badge for the card: unread total and "something needs attention" over hidden windows.
     int BadgeCount() const {
         int n = 0;

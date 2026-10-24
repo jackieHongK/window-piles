@@ -42,7 +42,7 @@ add_executable(WindowPiles WIN32
     src/ui/wordmark.cpp
     src/ui/material.cpp)
 target_include_directories(WindowPiles PRIVATE src)
-target_link_libraries(WindowPiles PRIVATE user32 gdi32 dwmapi shell32 shcore advapi32 comdlg32 wtsapi32 kernel32 d3d11 dxgi windowsapp)
+target_link_libraries(WindowPiles PRIVATE user32 gdi32 dwmapi shell32 shlwapi shcore advapi32 comdlg32 wtsapi32 kernel32 d3d11 dxgi windowsapp)
 
 # The exe's icon (Explorer, shortcuts, pinned items) is generated at build time from the same drawing
 # code the app uses at runtime (DrawMark), so there is no binary .ico in the repo to keep in sync.

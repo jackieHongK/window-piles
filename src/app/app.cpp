@@ -1,6 +1,7 @@
 #include "app.h"
 
 #include <dwmapi.h>
+#include <shlwapi.h>
 #include <wtsapi32.h>
 
 #include <algorithm>
@@ -318,6 +319,7 @@ int App::RestoreSavedPiles() {
         p->material = sp.material;
         p->pos = sp.pos;
         p->missing = sp.missing;
+        p->files = sp.files;
         for (const SavedMember& sm : sp.members) {
             JournalEntry e;
             e.hwnd = sm.hwnd;
@@ -415,6 +417,7 @@ void App::PersistNow(bool background) {
         sp.pos = p->pos;
         sp.folded = p->folded;
         sp.missing = p->missing;
+        sp.files = p->files;
         for (auto& m : p->members) {
             SavedMember sm;
             sm.hwnd = (uint64_t)(uintptr_t)m.hwnd;
@@ -590,6 +593,7 @@ void App::OnPileClick(Pile& pile) {
             Refresh(*p);
         }
         RelaunchMissing(*p);
+        OpenPileFiles(*p);
     }
 }
 
@@ -636,9 +640,82 @@ void App::LaunchIntoPile(Pile& pile, const std::wstring& exePath) {
     // Opens the app without arguments (we don't know which document it had open). Its next window
     // joins this pile and takes the entry off the list (TryReclaim).
     ShellExecuteW(nullptr, L"open", exePath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    JoinNextWindow(pile, exePath);
+}
+
+void App::JoinNextWindow(Pile& pile, const std::wstring& exePath) {
     launchJoin_[Lower(exePath)] = pile.id;
     launchJoinUntil_ = NowMs() + 60 * 1000;  // ponytail: fixed wait, slow apps starting later aren't joined
     UpdateReclaim();
+}
+
+void App::OnFilesDropped(Pile& pile, const std::vector<std::wstring>& paths) {
+    // Kept as paths: the files stay where they are, the pile only remembers them.
+    int added = 0;
+    for (const std::wstring& path : paths) {
+        if (path.empty() || std::any_of(pile.files.begin(), pile.files.end(),
+                                        [&](const std::wstring& f) { return Lower(f) == Lower(path); }))
+            continue;
+        pile.files.push_back(path);
+        ++added;
+    }
+    if (!added) return;
+    Refresh(pile);
+    if (pile.active && frame_) frame_->Update();
+    PersistSoon();
+}
+
+void App::OnFileClick(Pile& pile, int index) {
+    if (index < 0 || index >= (int)pile.files.size()) return;
+    const std::wstring path = pile.files[index];
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        Notify(L"파일을 찾을 수 없어요", L"옮겨졌거나 지워졌어요: " + path);
+        return;
+    }
+    OpenPileFile(pile, path);
+}
+
+void App::OnFileRemove(Pile& pile, int index) {
+    if (index < 0 || index >= (int)pile.files.size()) return;
+    pile.files.erase(pile.files.begin() + index);
+    if (pile.Empty()) {
+        RemovePile(pile);
+    } else {
+        Refresh(pile);
+    }
+    PersistSoon();
+}
+
+void App::OpenPileFiles(Pile& pile) {
+    for (const std::wstring& path : std::vector<std::wstring>(pile.files)) {
+        DWORD attr = GetFileAttributesW(path.c_str());
+        if (attr == INVALID_FILE_ATTRIBUTES) continue;  // shown as "찾을 수 없음" on the card
+        // Already open in the pile: a member window whose title names it (Explorer shows the folder
+        // name, most apps the file name without its extension). Opening it again would duplicate it.
+        std::wstring stem = Lower(FileName(path));
+        if (!(attr & FILE_ATTRIBUTE_DIRECTORY) && stem.rfind(L'.') != std::wstring::npos) stem.resize(stem.rfind(L'.'));
+        bool open = !stem.empty() && std::any_of(pile.members.begin(), pile.members.end(), [&](const Member& m) {
+            return Lower(WindowTitle(m.hwnd)).find(stem) != std::wstring::npos;
+        });
+        if (!open) OpenPileFile(pile, path);
+    }
+}
+
+void App::OpenPileFile(Pile& pile, const std::wstring& path) {
+    // The app that will show it (Explorer for a folder): its next window joins this pile.
+    std::wstring exe;
+    if (GetFileAttributesW(path.c_str()) & FILE_ATTRIBUTE_DIRECTORY) {
+        wchar_t win[MAX_PATH] = {};
+        GetWindowsDirectoryW(win, MAX_PATH);
+        exe = std::wstring(win) + L"\\explorer.exe";
+    } else {
+        wchar_t buf[MAX_PATH] = {};
+        DWORD n = MAX_PATH;
+        if (SUCCEEDED(AssocQueryStringW(ASSOCF_INIT_IGNOREUNKNOWN, ASSOCSTR_EXECUTABLE, path.c_str(), L"open", buf, &n)))
+            exe = buf;
+    }
+    ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    if (!exe.empty()) JoinNextWindow(pile, exe);
 }
 
 void App::OnPileMenu(Pile& pile, POINT pt) {
@@ -1314,7 +1391,7 @@ void App::UpdateReclaim() {
     bool anyMissing = false;
     for (auto& p : piles_) anyMissing |= !p->missing.empty();
     if (NowMs() >= launchJoinUntil_) launchJoin_.clear();
-    bool want = anyMissing && (NowMs() - startedMs_ < kReclaimWindowMs || !launchJoin_.empty());
+    bool want = (anyMissing && NowMs() - startedMs_ < kReclaimWindowMs) || !launchJoin_.empty();
     if (want == reclaimActive_) return;
     reclaimActive_ = want;
     if (want) {

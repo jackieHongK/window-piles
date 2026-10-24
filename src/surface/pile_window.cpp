@@ -25,6 +25,7 @@ constexpr int kStep = 10, kStepY = 6;  // overlap offset between stacked preview
 constexpr int kCardW = kPad * 2 + kThumbW + kStep * 2;
 constexpr int kThumbsH = kPadY * 2 + kThumbH + kStepY * 2;
 constexpr int kMissingTitleH = 26, kMissingRowH = 28, kMissingMoreH = 22, kMissingMaxRows = 4;
+constexpr int kFilesMaxRows = 3;  // a longer file list folds into "외 N개 더" so the card stays tidy
 constexpr COLORREF kBadge = RGB(239, 68, 68);  // notification red (shadcn red-500)
 
 void RegisterOnce() {
@@ -56,13 +57,26 @@ Image TopStrip(const Image& img) {
     return out;
 }
 
-int MissingSectionH(const Pile& p) {
-    if (p.missing.empty()) return 0;
-    int rows = std::min<int>((int)p.missing.size(), kMissingMaxRows);
+// A titled list under the previews (files kept with the pile, windows to reopen). `nothingAbove`: it
+// opens the card body, so it gets top padding instead of a rule.
+int ListSectionH(size_t count, int maxRows, bool nothingAbove) {
+    if (!count) return 0;
+    int rows = std::min<int>((int)count, maxRows);
     int h = kMissingTitleH + rows * kMissingRowH + kPad;
-    if ((int)p.missing.size() > kMissingMaxRows) h += kMissingMoreH;
-    if (p.members.empty()) h += kPad;
+    if ((int)count > maxRows) h += kMissingMoreH;
+    if (nothingAbove) h += kPad;
     return h;
+}
+int FilesSectionH(const Pile& p) { return ListSectionH(p.files.size(), kFilesMaxRows, p.members.empty()); }
+int MissingSectionH(const Pile& p) {
+    return ListSectionH(p.missing.size(), kMissingMaxRows, p.members.empty() && p.files.empty());
+}
+
+// "report.xlsx" from "C:\work\report.xlsx"; for a folder, its last part.
+std::wstring LeafName(std::wstring path) {
+    while (path.size() > 3 && (path.back() == L'\\' || path.back() == L'/')) path.pop_back();
+    size_t slash = path.find_last_of(L"\\/");
+    return slash == std::wstring::npos ? path : path.substr(slash + 1);
 }
 
 }  // namespace
@@ -77,6 +91,7 @@ PileWindow::PileWindow(Pile& pile, PileHost& host) : pile_(pile), host_(host) {
                             WS_POPUP, pile.pos.x, pile.pos.y, 1, 1, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     SetWindowLongPtrW(hwnd_, GWLP_USERDATA, (LONG_PTR)this);
     SetWindowLongPtrW(hwnd_, GWLP_WNDPROC, (LONG_PTR)&PileWindow::WndProc);
+    DragAcceptFiles(hwnd_, TRUE);  // files and folders dropped from Explorer join the pile
     Render();
     ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
 }
@@ -119,15 +134,31 @@ void PileWindow::SetVisible(bool visible, HWND insertAfter) {
     }
 }
 
-HICON PileWindow::IconFor(const std::wstring& exePath) {
-    for (auto& [path, icon] : icons_)
-        if (path == exePath) return icon;
+HICON PileWindow::IconFor(const std::wstring& path) {
+    for (auto& [p, icon] : icons_)
+        if (p == path) return icon;
     HICON icon = nullptr;
     SHFILEINFOW sfi{};
-    if (!exePath.empty() && SHGetFileInfoW(exePath.c_str(), 0, &sfi, sizeof(sfi), SHGFI_ICON | SHGFI_SMALLICON))
+    if (!path.empty() && SHGetFileInfoW(path.c_str(), 0, &sfi, sizeof(sfi), SHGFI_ICON | SHGFI_SMALLICON))
         icon = sfi.hIcon;
-    icons_.push_back({exePath, icon});
+    icons_.push_back({path, icon});
     return icon;
+}
+
+const std::wstring& PileWindow::TypeNameOf(const std::wstring& path) {
+    for (auto& [p, name] : typeNames_)
+        if (p == path) return name;
+    SHFILEINFOW sfi{};
+    std::wstring name;
+    if (SHGetFileInfoW(path.c_str(), 0, &sfi, sizeof(sfi), SHGFI_TYPENAME)) name = sfi.szTypeName;
+    typeNames_.push_back({path, name.empty() ? L"파일" : name});
+    return typeNames_.back().second;
+}
+
+int PileWindow::FileAt(POINT client) const {
+    for (size_t i = 0; i < fileRects_.size(); ++i)
+        if (PtInRect(&fileRects_[i], client)) return (int)i;
+    return -1;
 }
 
 int PileWindow::MissingAt(POINT client) const {
@@ -161,7 +192,7 @@ void PileWindow::Render() {
     UINT dpi = DpiForPoint(pile_.pos);
     auto S = [dpi](int v) { return Scale(v, dpi); };
     bool hasMembers = !pile_.members.empty();
-    int cardH = kHeaderH + (hasMembers ? kThumbsH : 0) + MissingSectionH(pile_);
+    int cardH = kHeaderH + (hasMembers ? kThumbsH : 0) + FilesSectionH(pile_) + MissingSectionH(pile_);
     margin_ = S(kMargin);
     size_ = {S(kCardW) + 2 * margin_, S(cardH) + 2 * margin_};
     SnapToWorkArea(false);
@@ -185,7 +216,9 @@ void PileWindow::Render() {
     c.FillRoundRect(header, radius, pile_.color);
     c.FillRoundRect({header.left, header.bottom - radius, header.right, header.bottom}, 0, pile_.color);
     COLORREF onColor = ContrastText(pile_.color);
-    std::wstring count = hasMembers ? CountText(pile_) : L"닫힌 창 " + std::to_wstring(pile_.missing.size());
+    std::wstring count = hasMembers                ? CountText(pile_)
+                         : !pile_.missing.empty() ? L"닫힌 창 " + std::to_wstring(pile_.missing.size())
+                                                  : L"파일 " + std::to_wstring(pile_.files.size());
     SIZE cs = c.MeasureText(count, S(12), true);
     RECT pill{header.right - S(12) - cs.cx - S(16), header.top + S(7), header.right - S(12), header.bottom - S(7)};
     c.FillRoundRect(pill, S(10), onColor == kForeground ? RGB(0, 0, 0) : RGB(255, 255, 255), 40);
@@ -250,13 +283,64 @@ void PileWindow::Render() {
         y += S(kThumbsH);
     }
 
+    // Text only shows on opaque pixels: on a see-through material the lists sit on a frosted plate.
+    if ((!pile_.files.empty() || !pile_.missing.empty()) && kMaterials[ClampMaterial(pile_.material)].translucent)
+        c.FillRoundRect({card.left + S(4), y + S(4), card.right - S(4), card.bottom - S(4)}, S(kRadius), RGB(250, 251, 253));
+    bool above = hasMembers;  // something above the next list: separate it with a rule
+
+    // Files and folders kept with the pile, opened together with it: "name | type", like the reopen list.
+    fileRects_.clear();
+    fileRemoveRects_.clear();
+    if (!pile_.files.empty()) {
+        if (above) c.FillRoundRect({card.left + S(kPad), y, card.right - S(kPad), y + 1}, 0, bodyRule, ruleAlpha);
+        else y += S(kPad);
+        RECT title{card.left + S(14), y, card.right - S(14), y + S(kMissingTitleH)};
+        c.Text(L"함께 열 파일 " + std::to_wstring(pile_.files.size()) + L"개", title, bodyMuted, S(12), true,
+               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        y += S(kMissingTitleH);
+        int rows = std::min<int>((int)pile_.files.size(), kFilesMaxRows);
+        for (int i = 0; i < rows; ++i) {
+            const std::wstring& path = pile_.files[i];
+            bool exists = GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+            bool hot = i == hoverFile_;
+            RECT row{card.left + S(6), y, card.right - S(6), y + S(kMissingRowH)};
+            fileRects_.push_back(row);
+            if (hot) c.FillRoundRect(row, S(kRadiusSm), dark ? RGB(255, 255, 255) : kMuted, dark ? 40 : 255);
+            int ix = row.left + S(8), iy = row.top + (S(kMissingRowH) - S(16)) / 2;
+            if (exists) {  // a gone file has no icon: leave the slot empty rather than a blank tile
+                c.FillRoundRect({ix, iy, ix + S(16), iy + S(16)}, S(3), hot ? kMuted : kBackground);
+                c.DrawIcon(IconFor(path), ix, iy, S(16));
+            }
+            // The x that takes it off the list shows on the hovered row only.
+            RECT remove{};
+            if (hot) remove = {row.right - S(28), row.top + S(4), row.right - S(6), row.bottom - S(4)};
+            fileRemoveRects_.push_back(remove);
+            if (hot) c.Glyph(0xE711, remove, bodyFg, S(10));  // Cancel
+            int left = ix + S(24), right = row.right - S(8) - (hot ? S(24) : 0);
+            std::wstring type = exists ? TypeNameOf(path) : L"찾을 수 없음";
+            int typeW = std::min<int>(c.MeasureText(type, S(12), false).cx, (right - left) * 2 / 5);
+            RECT typeR{right - typeW, row.top, right, row.bottom};
+            int divider = typeR.left - S(8);
+            c.FillRoundRect({divider, row.top + S(8), divider + 1, row.bottom - S(8)}, 0, bodyRule, dark ? 90 : 255);
+            c.Text(LeafName(path), {left, row.top, divider - S(8), row.bottom}, exists ? bodySubtle : bodyMuted, S(12), false,
+                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            c.Text(type, typeR, bodyMuted, S(12), false, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            y += S(kMissingRowH);
+        }
+        if ((int)pile_.files.size() > kFilesMaxRows) {
+            RECT more{card.left + S(14), y, card.right - S(14), y + S(kMissingMoreH)};
+            c.Text(L"외 " + std::to_wstring(pile_.files.size() - kFilesMaxRows) + L"개 더", more, bodyMuted, S(12), false,
+                   DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            y += S(kMissingMoreH);
+        }
+        y += S(kPad);
+        above = true;
+    }
+
     // Windows that were in this pile but are gone (app closed / PC restarted): reopen list.
     missingRects_.clear();
     if (!pile_.missing.empty()) {
-        // Text only shows on opaque pixels: on a see-through material the list sits on a frosted plate.
-        if (kMaterials[ClampMaterial(pile_.material)].translucent)
-            c.FillRoundRect({card.left + S(4), y + S(4), card.right - S(4), card.bottom - S(4)}, S(kRadius), RGB(250, 251, 253));
-        if (hasMembers) c.FillRoundRect({card.left + S(kPad), y, card.right - S(kPad), y + 1}, 0, bodyRule, ruleAlpha);
+        if (above) c.FillRoundRect({card.left + S(kPad), y, card.right - S(kPad), y + 1}, 0, bodyRule, ruleAlpha);
         else y += S(kPad);
         RECT title{card.left + S(14), y, card.right - S(14), y + S(kMissingTitleH)};
         c.Text(L"다시 열어야 할 창 " + std::to_wstring(pile_.missing.size()) + L"개", title, bodyMuted, S(12), true,
@@ -342,6 +426,11 @@ LRESULT PileWindow::Handle(UINT msg, WPARAM wp, LPARAM lp) {
                 hoverMissing_ = hm;
                 needRender = true;
             }
+            int hf = pressed_ ? -1 : FileAt(client);
+            if (hf != hoverFile_) {
+                hoverFile_ = hf;
+                needRender = true;
+            }
             bool hn = !pressed_ && PtInRect(&nameZone_, client);
             if (hn != hoverName_) {
                 hoverName_ = hn;
@@ -367,6 +456,7 @@ LRESULT PileWindow::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             hover_ = false;
             hoverName_ = false;
             hoverMissing_ = -1;
+            hoverFile_ = -1;
             Render();
             return 0;
         case WM_SETCURSOR:
@@ -385,6 +475,16 @@ LRESULT PileWindow::Handle(UINT msg, WPARAM wp, LPARAM lp) {
                 return 0;
             }
             POINT client{(short)LOWORD(lp), (short)HIWORD(lp)};
+            int fi = FileAt(client);
+            if (fi >= 0) {
+                if (PtInRect(&fileRemoveRects_[fi], client)) {
+                    hoverFile_ = -1;
+                    host_.OnFileRemove(pile_, fi);
+                } else {
+                    host_.OnFileClick(pile_, fi);
+                }
+                return 0;
+            }
             int mi = MissingAt(client);
             if (mi >= 0) {
                 host_.OnMissingClick(pile_, mi);
@@ -423,6 +523,9 @@ LRESULT PileWindow::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         }
         case WM_DPICHANGED:
             Render();
+            return 0;
+        case WM_DROPFILES:
+            host_.OnFilesDropped(pile_, DroppedPaths((HDROP)wp));
             return 0;
     }
     return DefWindowProcW(hwnd_, msg, wp, lp);

@@ -30,6 +30,7 @@ struct SavedPile {
     bool folded = true;
     std::vector<SavedMember> members;
     std::vector<MissingWindow> missing;
+    std::vector<std::wstring> files;
 };
 
 std::wstring PileStatePath();

@@ -2,9 +2,11 @@
 #pragma once
 
 #include <windows.h>
+#include <shellapi.h>
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace wp {
 
@@ -16,6 +18,8 @@ std::wstring WindowTitle(HWND hwnd);
 std::wstring WindowClass(HWND hwnd);
 std::wstring ProcessExeName(DWORD pid);
 std::wstring ProcessExePath(DWORD pid);
+// Paths dropped from Explorer (WM_DROPFILES); releases the drop.
+std::vector<std::wstring> DroppedPaths(HDROP drop);
 uint64_t ProcessCreateTime(DWORD pid);  // FILETIME as uint64, 0 if unknown
 
 // %LOCALAPPDATA%\WindowPiles (created on demand), or WINDOWPILES_DATA_DIR when tests set it.

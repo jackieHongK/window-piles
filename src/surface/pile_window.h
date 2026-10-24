@@ -21,6 +21,11 @@ public:
     virtual void OnPileMenu(Pile& pile, POINT screenPt) = 0;
     // A "다시 열어야 할 창" row was clicked.
     virtual void OnMissingClick(Pile& pile, int index) = 0;
+    // Files or folders were dropped on the card (or the open pile's top tab): keep them with the pile.
+    virtual void OnFilesDropped(Pile& pile, const std::vector<std::wstring>& paths) = 0;
+    // A row of the pile's file list was clicked (open it), or its × (take it off the list).
+    virtual void OnFileClick(Pile& pile, int index) = 0;
+    virtual void OnFileRemove(Pile& pile, int index) = 0;
     // The title text / pencil on the title bar was clicked: quick rename.
     virtual void OnPileRename(Pile& pile) = 0;
 };
@@ -45,8 +50,10 @@ public:
     static SIZE WindowSize(UINT dpi);  // size with previews and no missing-window list
 
 private:
-    HICON IconFor(const std::wstring& exePath);
+    HICON IconFor(const std::wstring& path);
+    const std::wstring& TypeNameOf(const std::wstring& path);  // "Microsoft Excel 워크시트", "파일 폴더", …
     int MissingAt(POINT client) const;
+    int FileAt(POINT client) const;
     static LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
     LRESULT Handle(UINT msg, WPARAM wp, LPARAM lp);
     void SnapToWorkArea(bool magnet);
@@ -61,6 +68,10 @@ private:
     bool visible_ = true;
 
     std::vector<RECT> missingRects_;  // client coords of the missing-window rows
+    std::vector<RECT> fileRects_;     // client coords of the file rows
+    std::vector<RECT> fileRemoveRects_;  // their × (only the hovered row shows it)
+    int hoverFile_ = -1;
+    std::vector<std::pair<std::wstring, std::wstring>> typeNames_;  // path → type name
     RECT nameZone_{};    // client: title text + pencil (hover shows the pencil, click renames)
     RECT pencilRect_{};  // client
     RECT renameRect_{};  // client: input area for quick rename

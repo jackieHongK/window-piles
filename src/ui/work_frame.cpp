@@ -115,6 +115,7 @@ void WorkFrame::Build() {
                                 GetModuleHandleW(nullptr), nullptr);
         SetWindowLongPtrW(p.tab, GWLP_USERDATA, (LONG_PTR)this);
         SetWindowLongPtrW(p.tab, GWLP_WNDPROC, (LONG_PTR)&WorkFrame::TabProc);
+        DragAcceptFiles(p.tab, TRUE);  // files dropped on the open pile's tab join it, like on its card
         parts_.push_back(p);
     }
     Update();
@@ -290,6 +291,9 @@ LRESULT CALLBACK WorkFrame::TabProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             self->host_.OnPileMenu(self->pile_, c);
             return 0;
         }
+        case WM_DROPFILES:
+            self->host_.OnFilesDropped(self->pile_, DroppedPaths((HDROP)wp));
+            return 0;
     }
     return DefWindowProcW(h, msg, wp, lp);
 }

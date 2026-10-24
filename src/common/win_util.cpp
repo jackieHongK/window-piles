@@ -1,5 +1,6 @@
 #include "win_util.h"
 
+#include <shellapi.h>
 #include <shellscalingapi.h>
 #include <shlobj.h>
 
@@ -185,6 +186,19 @@ bool IsWindows11() {
                      RRF_RT_REG_SZ, nullptr, buf, &size) != ERROR_SUCCESS)
         return false;
     return _wtoi(buf) >= 22000;
+}
+
+std::vector<std::wstring> DroppedPaths(HDROP drop) {
+    std::vector<std::wstring> out;
+    UINT n = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+    for (UINT i = 0; i < n; ++i) {
+        UINT len = DragQueryFileW(drop, i, nullptr, 0);
+        std::wstring path(len, L'\0');
+        DragQueryFileW(drop, i, path.data(), len + 1);
+        out.push_back(path);
+    }
+    DragFinish(drop);
+    return out;
 }
 
 }  // namespace wp

@@ -11,6 +11,8 @@
 //   5. "End task" (exit code 1)                              → windows shown, app NOT relaunched
 //   6. a pile with only a closed app, clicked                → the app is reopened; its first window
 //                                                              joins the pile and stays open
+//   7. a pile holding a folder and a gone file, clicked      → the folder opens in Explorer and that
+//                                                              window joins the pile; both stay listed
 #include "poc_common.h"
 
 #include <tlhelp32.h>
@@ -250,6 +252,52 @@ int wmain() {
     if (quit) SetEvent(quit), CloseHandle(quit);
 
     if (appProc) CloseHandle(appProc);
+
+    // 7) a pile holding files: a folder and a file that is gone. Opening the pile opens the folder in
+    //    Explorer, whose window joins the pile; the list keeps both paths.
+    std::wstring folder = DataDir() + L"\\SN 함께 열 폴더";
+    CreateDirectoryW(folder.c_str(), nullptr);
+    auto jsonPath = [](const std::wstring& p) {
+        std::string e;
+        for (char ch : Utf8(p)) e += (ch == '\\') ? std::string("\\\\") : std::string(1, ch);
+        return e;
+    };
+    std::string gone = jsonPath(DataDir() + L"\\없는 보고서.xlsx");
+    state = "{\"schema\":1,\"piles\":[{\"id\":1,\"name\":\"파일 더미\",\"customName\":true,\"color\":11107891,"
+            "\"x\":1500,\"y\":40,\"folded\":true,\"members\":[],\"missing\":[],\"files\":[\"" + jsonPath(folder) +
+            "\",\"" + gone + "\"]}]}";
+    f = CreateFileW((DataDir() + L"\\piles.json").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+    WriteFile(f, state.data(), (DWORD)state.size(), &n, nullptr);
+    CloseHandle(f);
+    appProc = Launch(app, L"--autostart");
+    card = nullptr;
+    PumpUntil([&] { return (card = FindWindowW(L"WindowPilesPile", nullptr)) && IsWindowVisible(card); }, 5000);
+    RECT cr{};
+    if (card) {
+        GetClientRect(card, &cr);
+        LPARAM pt = MAKELPARAM(cr.right * 3 / 4, MulDiv(30, GetDpiForWindow(card), 96));  // header: not a file row
+        PostMessageW(card, WM_LBUTTONDOWN, MK_LBUTTON, pt);
+        PostMessageW(card, WM_LBUTTONUP, 0, pt);
+    }
+    auto explorerFor = [&]() -> HWND {
+        HWND found = nullptr;
+        for (HWND h : FindTopLevelByTitlePrefix(L""))
+            if (WindowClass(h) == L"CabinetWClass" && WindowTitle(h).find(L"SN 함께 열 폴더") != std::wstring::npos) found = h;
+        return found;
+    };
+    HWND ex = nullptr;
+    PumpUntil([&] { return (ex = explorerFor()) != nullptr; }, 8000);
+    PumpUntil([&] { return ReadState().find("CabinetWClass") != std::string::npos; }, 6000);
+    PumpFor(1000);
+    st = ReadState();
+    Check(card && cr.bottom > MulDiv(126 + 24, GetDpiForWindow(card), 96), "7) 파일이 든 더미 카드에 '함께 열 파일' 목록이 표시됨 (카드가 그만큼 길어짐)");
+    Check(ex != nullptr, "7) 더미를 펼치면 담아 둔 폴더가 탐색기로 열림");
+    Check(st.find("CabinetWClass") != std::string::npos && ex && IsWindowVisible(ex), "7) 열린 탐색기 창이 더미에 들어가고 열린 채로 있음");
+    Check(st.find(Utf8(L"SN 함께 열 폴더")) != std::string::npos && st.find(Utf8(L"없는 보고서.xlsx")) != std::string::npos,
+          "7) 찾을 수 없는 파일도 목록에 그대로 남음");
+    PostMessageW(MainWnd(), WM_ENDSESSION, TRUE, 0);
+    if (appProc) WaitForSingleObject(appProc, 5000), CloseHandle(appProc);
+    if (ex) PostMessageW(ex, WM_CLOSE, 0, 0);
     Print("\n%s (%d failed)\n", g_fail ? "LIFECYCLE FAILED" : "LIFECYCLE PASSED", g_fail);
     return g_fail ? 1 : 0;
 }

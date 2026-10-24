@@ -37,6 +37,9 @@ public:
     void OnPileMoved(Pile& pile) override;
     void OnPileMenu(Pile& pile, POINT pt) override;
     void OnMissingClick(Pile& pile, int index) override;
+    void OnFilesDropped(Pile& pile, const std::vector<std::wstring>& paths) override;
+    void OnFileClick(Pile& pile, int index) override;
+    void OnFileRemove(Pile& pile, int index) override;
     void OnPileRename(Pile& pile) override;
 
     // DragHost
@@ -100,6 +103,11 @@ private:
     // Opening a pile reopens its closed apps (once per app); their next window joins the pile.
     void RelaunchMissing(Pile& pile);
     void LaunchIntoPile(Pile& pile, const std::wstring& exePath);
+    // The next window of `exePath` (within a minute) joins the pile: it was opened from the pile.
+    void JoinNextWindow(Pile& pile, const std::wstring& exePath);
+    // Files kept with the pile: open those not already open in it; open one with the app it belongs to.
+    void OpenPileFiles(Pile& pile);
+    void OpenPileFile(Pile& pile, const std::wstring& path);
     void FoldReclaimed();  // windows matched in the last moment, put away together
     // Activity log ("작업 기록"): which pile is open, minus lock/sleep/idle/exit time.
     void TrackActivity();

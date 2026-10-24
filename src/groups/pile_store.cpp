@@ -90,6 +90,8 @@ bool SavePileState(const std::vector<SavedPile>& piles, bool background) {
         }
         s += "],\"missing\":[";
         for (size_t k = 0; k < p.missing.size(); ++k) s += (k ? "," : "") + WriteMissing(p.missing[k]);
+        s += "],\"files\":[";
+        for (size_t k = 0; k < p.files.size(); ++k) s += (k ? "," : "") + json::Quote(p.files[k]);
         s += "]}";
     }
     s += "]}";
@@ -170,6 +172,8 @@ bool LoadPileState(std::vector<SavedPile>& piles) {
             }
         if (auto* ms = pv.Get("missing"))
             for (const auto& mv : ms->arr) p.missing.push_back(ReadMissing(mv));
+        if (auto* fs = pv.Get("files"))
+            for (const auto& fv : fs->arr) p.files.push_back(fv.WStr());
         piles.push_back(std::move(p));
     }
     return true;
