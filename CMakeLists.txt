@@ -38,7 +38,8 @@ add_executable(WindowPiles WIN32
     src/ui/pile_editor.cpp
     src/ui/inline_rename.cpp
     src/ui/stats_window.cpp
-    src/ui/work_frame.cpp)
+    src/ui/work_frame.cpp
+    src/ui/wordmark.cpp)
 target_include_directories(WindowPiles PRIVATE src)
 target_link_libraries(WindowPiles PRIVATE user32 gdi32 dwmapi shell32 shcore advapi32 comdlg32 wtsapi32 kernel32 d3d11 dxgi windowsapp)
 
@@ -88,7 +89,7 @@ add_executable(unread_test tests/unit/unread_test.cpp src/groups/unread.cpp)
 target_include_directories(unread_test PRIVATE src)
 
 # Tool: renders the app mark and tray icons into one image for review (icon_preview out.bmp).
-add_executable(icon_preview tests/tools/icon_preview.cpp src/app/app_icon.cpp src/common/canvas.cpp)
+add_executable(icon_preview tests/tools/icon_preview.cpp src/app/app_icon.cpp src/common/canvas.cpp src/ui/wordmark.cpp)
 target_include_directories(icon_preview PRIVATE src)
 target_link_libraries(icon_preview PRIVATE user32 gdi32 advapi32)
 

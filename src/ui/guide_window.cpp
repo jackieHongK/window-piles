@@ -9,6 +9,7 @@
 #include "common/win_util.h"
 #include "ui/popup_base.h"
 #include "ui/theme.h"
+#include "ui/wordmark.h"
 
 namespace wp {
 
@@ -16,7 +17,6 @@ namespace {
 
 constexpr int kWidth = 520, kPad = 28, kBadge = 26, kGapStep = 18, kMark = 40;
 const wchar_t kCaption[] = L"Stack Neverflow 사용법";  // taskbar / Alt+Tab
-const wchar_t kWordmark[] = L"Stack Neverflow";
 const wchar_t kSlogan[] = L"Tasks stack up, but never overflow.";
 const wchar_t kTitle[] = L"사용법";
 const wchar_t kSubtitle[] = L"이 다섯 가지만 알면 바로 쓸 수 있어요.";
@@ -120,10 +120,10 @@ void GuideWindow::Paint(HDC dc) {
     // Brand row: the mark, the wordmark and the slogan.
     DrawMark(c, pad, pad, S(kMark));
     int bx = pad + S(kMark) + S(12);
-    SIZE ws = c.MeasureText(kWordmark, S(17), true), sl = c.MeasureText(kSlogan, S(12), false);
-    int by = pad + (S(kMark) - ws.cy - S(2) - sl.cy) / 2;
-    c.Text(kWordmark, {bx, by, size_.cx - pad, by + ws.cy}, kForeground, S(17), true, DT_LEFT | DT_TOP | DT_SINGLELINE);
-    c.Text(kSlogan, {bx, by + ws.cy + S(2), size_.cx - pad, by + ws.cy + S(2) + sl.cy}, kMutedFg, S(12), false,
+    SIZE ws = WordmarkSize(S(17)), sl = c.MeasureText(kSlogan, S(12), false);
+    int by = pad + (S(kMark) - ws.cy - S(4) - sl.cy) / 2;
+    DrawWordmark(c, bx, by, ws.cy, kForeground);
+    c.Text(kSlogan, {bx, by + ws.cy + S(4), size_.cx - pad, by + ws.cy + S(4) + sl.cy}, kMutedFg, S(12), false,
            DT_LEFT | DT_TOP | DT_SINGLELINE);
 
     int y = pad + S(kMark) + S(18);

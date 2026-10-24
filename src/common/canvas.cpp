@@ -185,6 +185,48 @@ void Canvas::FillRoundRectV(const RECT& r, int radius, COLORREF top, COLORREF bo
     }
 }
 
+void Canvas::FillPolygons(const std::vector<std::vector<PtF>>& contours, COLORREF color, BYTE alpha) {
+    struct Edge {
+        float x0, y0, x1, y1;
+        int dir;
+    };
+    std::vector<Edge> edges;
+    float minX = 1e9f, maxX = -1e9f, minY = 1e9f, maxY = -1e9f;
+    for (const auto& c : contours)
+        for (size_t i = 0; i < c.size(); ++i) {
+            PtF p = c[i], q = c[(i + 1) % c.size()];
+            minX = std::min(minX, p.x), maxX = std::max(maxX, p.x), minY = std::min(minY, p.y), maxY = std::max(maxY, p.y);
+            if (p.y != q.y) edges.push_back(p.y < q.y ? Edge{p.x, p.y, q.x, q.y, 1} : Edge{q.x, q.y, p.x, p.y, -1});
+        }
+    int x0 = std::max(0, (int)std::floor(minX)), x1 = std::min(w_, (int)std::ceil(maxX) + 1);
+    int y0 = std::max(0, (int)std::floor(minY)), y1 = std::min(h_, (int)std::ceil(maxY) + 1);
+    if (x0 >= x1 || y0 >= y1) return;
+    constexpr int kSub = 4;  // sub-scanlines per pixel row; horizontal coverage is exact
+    std::vector<float> cov(x1 - x0);
+    std::vector<std::pair<float, int>> hits;
+    for (int y = y0; y < y1; ++y) {
+        std::fill(cov.begin(), cov.end(), 0.0f);
+        for (int s = 0; s < kSub; ++s) {
+            float sy = y + (s + 0.5f) / kSub;
+            hits.clear();
+            for (const Edge& e : edges)
+                if (sy >= e.y0 && sy < e.y1) hits.push_back({e.x0 + (sy - e.y0) * (e.x1 - e.x0) / (e.y1 - e.y0), e.dir});
+            std::sort(hits.begin(), hits.end());
+            int winding = 0;
+            for (size_t i = 0; i + 1 < hits.size(); ++i) {
+                winding += hits[i].second;
+                if (winding == 0) continue;
+                float a = std::max(hits[i].first, (float)x0), b = std::min(hits[i + 1].first, (float)x1);
+                for (int x = (int)std::floor(a); x < b && x < x1; ++x)
+                    cov[x - x0] += (std::min(b, x + 1.0f) - std::max(a, (float)x)) / kSub;
+            }
+        }
+        uint32_t* row = px_ + (size_t)y * w_;
+        for (int x = x0; x < x1; ++x)
+            if (float c = std::min(cov[x - x0], 1.0f); c > 0) row[x] = Over(Premul(color, (int)(alpha * c + 0.5f)), row[x]);
+    }
+}
+
 void Canvas::DrawImage(const Image& img, const RECT& dst, int radius) {
     if (img.empty()) return;
     int dw = dst.right - dst.left, dh = dst.bottom - dst.top;

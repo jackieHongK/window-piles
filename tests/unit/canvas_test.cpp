@@ -1,5 +1,6 @@
 // Unit test: the fast paths in Canvas::FillRoundRect / StrokeRoundRect must draw exactly the same
-// pixels as the plain per-pixel coverage loops they replace. Exit code = failures.
+// pixels as the plain per-pixel coverage loops they replace; FillPolygons covers edges, overlaps
+// and holes correctly. Exit code = failures.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -97,6 +98,32 @@ int wmain() {
                             s.r.right, s.r.bottom, s.radius, a, stroke, diff);
                 }
             }
+    // FillPolygons (the outlined wordmark): nonzero winding with exact horizontal coverage.
+    {
+        using P = Canvas::PtF;
+        auto sq = [](float l, float t, float r, float b, bool ccw = false) {
+            std::vector<P> v{{l, t}, {r, t}, {r, b}, {l, b}};
+            if (ccw) std::reverse(v.begin(), v.end());
+            return v;
+        };
+        auto check = [&](bool ok, const wchar_t* what) {
+            ++cases;
+            if (!ok) ++g_fail, wprintf(L"[FAIL] polygons: %ls\n", what);
+        };
+        Canvas a(40, 40), b(40, 40);
+        a.FillPolygons({sq(10, 10, 20, 20)}, RGB(212, 76, 71));
+        b.FillRoundRect({10, 10, 20, 20}, 0, RGB(212, 76, 71));
+        check(std::equal(a.pixels(), a.pixels() + 1600, b.pixels()), L"pixel-aligned square == FillRoundRect");
+        Canvas h(40, 40);
+        h.FillPolygons({sq(10.5f, 10, 20, 20)}, RGB(0, 0, 0));
+        check((h.pixels()[15 * 40 + 10] >> 24) == 128 && (h.pixels()[15 * 40 + 11] >> 24) == 255, L"half-pixel edge");
+        Canvas o(40, 40);
+        o.FillPolygons({sq(5, 5, 20, 20), sq(10, 10, 30, 30)}, RGB(0, 0, 0));
+        check((o.pixels()[15 * 40 + 15] >> 24) == 255, L"overlapping contours fill once");
+        Canvas r(40, 40);
+        r.FillPolygons({sq(5, 5, 35, 35), sq(15, 15, 25, 25, true)}, RGB(0, 0, 0));
+        check((r.pixels()[20 * 40 + 20] >> 24) == 0 && (r.pixels()[8 * 40 + 8] >> 24) == 255, L"reversed contour is a hole");
+    }
     wprintf(L"%d cases\n%ls (%d failed)\n", cases, g_fail ? L"CANVAS FAILED" : L"CANVAS PASSED", g_fail);
     return g_fail;
 }

@@ -102,7 +102,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 | `src/app/` | 진입점(`--watchdog`·`--autostart`), 앱 코어(더미 관리·접기/펼치기·저장/복원·트레이), 아이콘 |
 | `src/interaction/drag_watcher.*` | 다른 앱 창 끌기 감지(WinEvent, 주입 없음) + 모니터별 상단 놓는 곳 바 |
 | `src/surface/pile_window.*` | 더미 카드 (레이어드 창, 변경 시에만 다시 그림), 다시 열어야 할 창 목록 |
-| `src/ui/` | 디자인 토큰(shadcn zinc + 노션 색), 메뉴, 사용법 창, 이름·색 팝오버, 작업 중 테두리/이름표, 모이기 애니메이션 |
+| `src/ui/` | 디자인 토큰(따뜻한 잉크 무채색 + 노션 색), 메뉴, 사용법 창, 이름·색 팝오버, 작업 중 테두리/이름표, 모이기 애니메이션, 워드마크 |
 | `src/groups/` | 더미 모델, 상태 저장(`piles.json`), 창 제목의 안 읽음 수 |
 | `src/activity/` | 작업 기록: 날짜별 이벤트 파일 쓰기·읽기, 더미별 시간 계산 |
 | `src/ui/stats_window.*` | 작업 기록 창(하루 흐름, 더미별, 최근 7일) |
@@ -118,6 +118,8 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 | `tests/unit/canvas_test.cpp` | 그리기 최적화가 원래 결과와 픽셀 단위로 같은지 (90개 항목) |
 | `tests/e2e/e2e_perf.cpp` | 부하 측정: 큰 창 N개 한 더미의 시작·펼치기·접기·로그아웃 시간, 앱 응답 지연, 메모리 |
 | `poc/`, `scripts/run_poc.ps1` | P0 기술 검증 도구 |
+| `assets/brand/wordmark.svg`, `scripts/gen_wordmark.py` | 외곽선으로 바꾼 워드마크와 그 생성 스크립트(Bricolage Grotesque, OFL) |
+| `scripts/package.ps1`, `tests/tools/` | 배포 zip 만들기, 아이콘 생성(`make_icon`)·미리보기(`icon_preview`) |
 
 E2E 테스트 실행:
 - **공통:** `WindowPiles.exe`는 **꺼 둔 상태**여야 합니다. 테스트는 별도 데이터 폴더(`build\bin\Release\e2e-data`)를 쓰므로 실제 더미 상태는 건드리지 않습니다.

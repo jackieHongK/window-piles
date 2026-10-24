@@ -40,6 +40,11 @@ public:
     void Shadow(const RECT& r, int radius, int blur, int offsetY, BYTE alpha, COLORREF color = RGB(0, 0, 0));
     // Rounded rect filled with a vertical gradient (opaque).
     void FillRoundRectV(const RECT& r, int radius, COLORREF top, COLORREF bottom);
+    // Anti-aliased fill of closed polygons (nonzero winding, so overlapping outlines are fine), in px.
+    struct PtF {
+        float x, y;
+    };
+    void FillPolygons(const std::vector<std::vector<PtF>>& contours, COLORREF color, BYTE alpha = 255);
     // Scales `img` into `dst` (box filter down, nearest up), clipped to the rounded rect `radius`.
     void DrawImage(const Image& img, const RECT& dst, int radius = 0);
     // GDI text. Only pixels that were already opaque keep the text, so text must sit on an opaque fill.
