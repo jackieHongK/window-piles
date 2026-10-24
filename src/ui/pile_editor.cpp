@@ -9,6 +9,7 @@
 
 #include "common/canvas.h"
 #include "common/win_util.h"
+#include "ui/material.h"
 #include "ui/popup_base.h"
 #include "ui/theme.h"
 
@@ -27,9 +28,10 @@ struct EditorState {
     UINT dpi = 96;
     SIZE size{};
     RECT previewRect{}, inputRect{}, cancelRect{}, saveRect{};
-    std::vector<RECT> swatches;  // kPresetCount presets + 1 custom
-    int nameLabelY = 0, colorLabelY = 0, colorNameY = 0;
-    int hoverSwatch = -1;
+    std::vector<RECT> swatches;   // kPresetCount presets + 1 custom
+    std::vector<RECT> materials;  // kMaterialCount
+    int nameLabelY = 0, colorLabelY = 0, colorNameY = 0, materialLabelY = 0, materialNameY = 0;
+    int hoverSwatch = -1, hoverMaterial = -1;
     int hoverButton = 0;  // 1 cancel, 2 save
     bool choosing = false;
     bool done = false, saved = false;
@@ -75,6 +77,18 @@ void Layout(EditorState& s) {
     }
     y = s.swatches.back().bottom + S(10);
     s.colorNameY = y;
+    y += MeasureUiText(L"가", S(12), false).cy + S(18);
+    s.materialLabelY = y;
+    y += MeasureUiText(L"소재", S(13), true).cy + S(10);
+    s.materials.clear();
+    constexpr int kPerRow = 6;
+    int mw = (w - 2 * pad - (kPerRow - 1) * S(kSwatchGap)) / kPerRow;
+    for (int i = 0; i < kMaterialCount; ++i) {
+        int x = pad + (i % kPerRow) * (mw + S(kSwatchGap)), yy = y + (i / kPerRow) * (S(kSwatch) + S(kSwatchGap));
+        s.materials.push_back({x, yy, x + mw, yy + S(kSwatch)});
+    }
+    y = s.materials.back().bottom + S(10);
+    s.materialNameY = y;
     y += MeasureUiText(L"가", S(12), false).cy + S(22);
     int bh = S(36);
     int saveW = MeasureUiText(L"저장", S(13), true).cx + S(32);
@@ -96,7 +110,7 @@ void Paint(EditorState& s, HDC dc) {
     SIZE t = c.MeasureText(L"더미 꾸미기", S(16), true);
     c.Text(L"더미 꾸미기", {pad, y, w - pad, y + t.cy}, kForeground, S(16), true, DT_LEFT | DT_TOP | DT_SINGLELINE);
     y += t.cy + S(4);
-    c.Text(L"이름과 색을 바꿔서 한눈에 알아보게 하세요.", {pad, y, w - pad, y + S(20)}, kMutedFg, S(12), false,
+    c.Text(L"이름, 색, 소재를 바꿔서 한눈에 알아보게 하세요.", {pad, y, w - pad, y + S(20)}, kMutedFg, S(12), false,
            DT_LEFT | DT_TOP | DT_SINGLELINE);
 
     // Live preview of the title bar.
@@ -147,6 +161,30 @@ void Paint(EditorState& s, HDC dc) {
                                              : ColorName(s.style.color);
     c.Text(hint, {pad, s.colorNameY, w - pad, s.colorNameY + S(20)}, kMutedFg, S(12), false,
            DT_LEFT | DT_TOP | DT_SINGLELINE);
+
+    // Material of the card body: real swatches of each texture.
+    c.Text(L"소재", {pad, s.materialLabelY, w - pad, s.materialLabelY + S(20)}, kForeground, S(13), true,
+           DT_LEFT | DT_TOP | DT_SINGLELINE);
+    for (int i = 0; i < kMaterialCount; ++i) {
+        RECT r = s.materials[i];
+        RECT o{r.left - S(3), r.top - S(3), r.right + S(3), r.bottom + S(3)};
+        if (i == s.style.material) c.StrokeRoundRect(o, S(kRadiusSm) + S(3), S(2), kForeground);
+        else if (i == s.hoverMaterial) c.StrokeRoundRect(o, S(kRadiusSm) + S(3), S(2), kBorder);
+        FillMaterial(c, r, S(kRadiusSm), i, s.dpi);
+        c.StrokeRoundRect(r, S(kRadiusSm), 1, kBorder);
+        if (kMaterials[i].paid) {  // a small brass dot marks the paid materials
+            RECT dot{r.right - S(9), r.top + S(3), r.right - S(3), r.top + S(9)};
+            c.FillRoundRect({dot.left - 1, dot.top - 1, dot.right + 1, dot.bottom + 1}, S(4), RGB(255, 255, 255));
+            c.FillRoundRect(dot, S(3), RGB(196, 150, 70));
+        }
+        if (i == s.style.material)
+            c.Text(L"✓", r, kMaterials[i].dark ? RGB(255, 255, 255) : kForeground, S(13), true,
+                   DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
+    int mi = s.hoverMaterial >= 0 ? s.hoverMaterial : ClampMaterial(s.style.material);
+    std::wstring mname = std::wstring(kMaterials[mi].name) + (kMaterials[mi].paid ? L" · 유료 소재, 베타 동안 무료" : L" · 무료");
+    c.Text(mname, {pad, s.materialNameY, w - pad, s.materialNameY + S(20)}, kMutedFg, S(12), false,
+           DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS);
 
     c.FillRoundRect(s.cancelRect, S(kRadius), s.hoverButton == 1 ? kMuted : kBackground);
     c.StrokeRoundRect(s.cancelRect, S(kRadius), 1, kBorder);
@@ -210,19 +248,24 @@ LRESULT CALLBACK EditorProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             int hs = -1;
             for (size_t i = 0; i < s->swatches.size(); ++i)
                 if (PtInRect(&s->swatches[i], p)) hs = (int)i;
+            int hm = -1;
+            for (size_t i = 0; i < s->materials.size(); ++i)
+                if (PtInRect(&s->materials[i], p)) hm = (int)i;
             int hb = PtInRect(&s->cancelRect, p) ? 1 : PtInRect(&s->saveRect, p) ? 2 : 0;
-            if (hs != s->hoverSwatch || hb != s->hoverButton) {
+            if (hs != s->hoverSwatch || hm != s->hoverMaterial || hb != s->hoverButton) {
                 s->hoverSwatch = hs;
+                s->hoverMaterial = hm;
                 s->hoverButton = hb;
                 InvalidateRect(h, nullptr, FALSE);
             }
-            SetCursor(LoadCursorW(nullptr, (hs >= 0 || hb) ? IDC_HAND : IDC_ARROW));
+            SetCursor(LoadCursorW(nullptr, (hs >= 0 || hm >= 0 || hb) ? IDC_HAND : IDC_ARROW));
             TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, h, 0};
             TrackMouseEvent(&tme);
             return 0;
         }
         case WM_MOUSELEAVE:
             s->hoverSwatch = -1;
+            s->hoverMaterial = -1;
             s->hoverButton = 0;
             InvalidateRect(h, nullptr, FALSE);
             return 0;
@@ -237,6 +280,13 @@ LRESULT CALLBACK EditorProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                         if (s->preview) s->preview(s->style);
                         InvalidateRect(h, nullptr, FALSE);
                     }
+                    return 0;
+                }
+            for (size_t i = 0; i < s->materials.size(); ++i)
+                if (PtInRect(&s->materials[i], p)) {
+                    s->style.material = (int)i;
+                    if (s->preview) s->preview(s->style);
+                    InvalidateRect(h, nullptr, FALSE);
                     return 0;
                 }
             if (PtInRect(&s->saveRect, p)) s->saved = s->done = true;

@@ -39,7 +39,8 @@ add_executable(WindowPiles WIN32
     src/ui/inline_rename.cpp
     src/ui/stats_window.cpp
     src/ui/work_frame.cpp
-    src/ui/wordmark.cpp)
+    src/ui/wordmark.cpp
+    src/ui/material.cpp)
 target_include_directories(WindowPiles PRIVATE src)
 target_link_libraries(WindowPiles PRIVATE user32 gdi32 dwmapi shell32 shcore advapi32 comdlg32 wtsapi32 kernel32 d3d11 dxgi windowsapp)
 

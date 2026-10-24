@@ -25,6 +25,7 @@ struct SavedPile {
     std::wstring name;
     bool customName = false;
     COLORREF color = 0;
+    int material = 0;
     POINT pos{};
     bool folded = true;
     std::vector<SavedMember> members;

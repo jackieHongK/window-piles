@@ -315,6 +315,7 @@ int App::RestoreSavedPiles() {
         p->name = sp.name;
         p->customName = sp.customName;
         p->color = sp.color;
+        p->material = sp.material;
         p->pos = sp.pos;
         p->missing = sp.missing;
         for (const SavedMember& sm : sp.members) {
@@ -410,6 +411,7 @@ void App::PersistNow(bool background) {
         sp.name = p->name;
         sp.customName = p->customName;
         sp.color = p->color;
+        sp.material = p->material;
         sp.pos = p->pos;
         sp.folded = p->folded;
         sp.missing = p->missing;
@@ -710,11 +712,12 @@ void App::OnPileRename(Pile& pile) {
 
 void App::EditStyle(Pile& pile, POINT anchor) {
     int pileId = pile.id;
-    PileStyle current{pile.name, pile.color}, result;
+    PileStyle current{pile.name, pile.color, pile.material}, result;
     bool wasCustom = pile.customName;
     auto preview = [this, pileId](const PileStyle& s) {
         if (Pile* p = FindPile(pileId)) {
             p->color = s.color;
+            p->material = s.material;
             if (!s.name.empty()) p->name = s.name;
             p->view->Render();
             if (p->active && frame_) frame_->Update();
@@ -725,10 +728,12 @@ void App::EditStyle(Pile& pile, POINT anchor) {
     if (!p) return;
     if (saved) {
         p->color = result.color;
+        p->material = result.material;
         p->customName = !result.name.empty();
         if (p->customName) p->name = result.name;
     } else {
         p->color = current.color;
+        p->material = current.material;
         p->name = current.name;
         p->customName = wasCustom;
     }

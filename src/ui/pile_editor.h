@@ -11,6 +11,7 @@ namespace wp {
 struct PileStyle {
     std::wstring name;
     COLORREF color = 0;
+    int material = 0;  // ui/material.h
 };
 
 // Blocks until saved or cancelled. `preview` gets live changes so the pile can update as you edit.

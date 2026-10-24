@@ -6,6 +6,7 @@
 #include <string>
 
 #include "common/win_util.h"
+#include "ui/material.h"
 #include "ui/theme.h"
 
 namespace wp {
@@ -170,12 +171,19 @@ void PileWindow::Render() {
     RECT card{margin_, margin_, size_.cx - margin_, size_.cy - margin_};
     int radius = S(kRadiusLg);
     c.Shadow(card, radius, S(10), S(3), hot_ ? 70 : 45, kForeground);  // warm ink, not gray
-    c.FillRoundRect(card, radius, kBackground);  // one clean sheet: no stacked layers behind it
+    // One clean sheet (no stacked layers behind it) of the chosen material; text on it follows its tone.
+    FillMaterial(c, card, radius, pile_.material, dpi);
+    bool dark = kMaterials[ClampMaterial(pile_.material)].dark;
+    COLORREF bodyFg = dark ? RGB(244, 238, 230) : kForeground;
+    COLORREF bodySubtle = dark ? RGB(228, 220, 209) : kSubtleFg;
+    COLORREF bodyMuted = dark ? RGB(200, 190, 178) : kMutedFg;
+    COLORREF bodyRule = dark ? RGB(255, 255, 255) : kBorder;
+    BYTE ruleAlpha = dark ? 50 : 255;
 
-    // Title bar in the pile's color (rounded top, straight bottom).
+    // Title bar in the pile's color (rounded top, straight bottom), drawn over the material.
     RECT header{card.left, card.top, card.right, card.top + S(kHeaderH)};
-    c.FillRoundRect({header.left, header.top, header.right, header.bottom + radius}, radius, pile_.color);
-    c.FillRoundRect({header.left, header.bottom, header.right, header.bottom + radius}, 0, kBackground);
+    c.FillRoundRect(header, radius, pile_.color);
+    c.FillRoundRect({header.left, header.bottom - radius, header.right, header.bottom}, 0, pile_.color);
     COLORREF onColor = ContrastText(pile_.color);
     std::wstring count = hasMembers ? CountText(pile_) : L"닫힌 창 " + std::to_wstring(pile_.missing.size());
     SIZE cs = c.MeasureText(count, S(12), true);
@@ -245,10 +253,13 @@ void PileWindow::Render() {
     // Windows that were in this pile but are gone (app closed / PC restarted): reopen list.
     missingRects_.clear();
     if (!pile_.missing.empty()) {
-        if (hasMembers) c.FillRoundRect({card.left + S(kPad), y, card.right - S(kPad), y + 1}, 0, kBorder);
+        // Text only shows on opaque pixels: on a see-through material the list sits on a frosted plate.
+        if (kMaterials[ClampMaterial(pile_.material)].translucent)
+            c.FillRoundRect({card.left + S(4), y + S(4), card.right - S(4), card.bottom - S(4)}, S(kRadius), RGB(250, 251, 253));
+        if (hasMembers) c.FillRoundRect({card.left + S(kPad), y, card.right - S(kPad), y + 1}, 0, bodyRule, ruleAlpha);
         else y += S(kPad);
         RECT title{card.left + S(14), y, card.right - S(14), y + S(kMissingTitleH)};
-        c.Text(L"다시 열어야 할 창 " + std::to_wstring(pile_.missing.size()) + L"개", title, kMutedFg, S(12), true,
+        c.Text(L"다시 열어야 할 창 " + std::to_wstring(pile_.missing.size()) + L"개", title, bodyMuted, S(12), true,
                DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         y += S(kMissingTitleH);
         int rows = std::min<int>((int)pile_.missing.size(), kMissingMaxRows);
@@ -257,22 +268,22 @@ void PileWindow::Render() {
             RECT row{card.left + S(6), y, card.right - S(6), y + S(kMissingRowH)};
             missingRects_.push_back(row);  // canvas coords == client coords
             bool canOpen = !mw.exePath.empty();
-            if (i == hoverMissing_ && canOpen) c.FillRoundRect(row, S(kRadiusSm), kMuted);
+            if (i == hoverMissing_ && canOpen) c.FillRoundRect(row, S(kRadiusSm), dark ? RGB(255, 255, 255) : kMuted, dark ? 40 : 255);
             int ix = row.left + S(8), iy = row.top + (S(kMissingRowH) - S(16)) / 2;
             c.FillRoundRect({ix, iy, ix + S(16), iy + S(16)}, S(3), i == hoverMissing_ && canOpen ? kMuted : kBackground);
             c.DrawIcon(IconFor(mw.exePath), ix, iy, S(16));
             std::wstring text = mw.appName + (mw.title.empty() ? L"" : L" · " + mw.title);
             int right = row.right - S(8) - (i == hoverMissing_ && canOpen ? S(44) : 0);
-            c.Text(text, {ix + S(24), row.top, right, row.bottom}, kSubtleFg, S(12), false,
+            c.Text(text, {ix + S(24), row.top, right, row.bottom}, bodySubtle, S(12), false,
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
             if (i == hoverMissing_ && canOpen)
-                c.Text(L"열기 ↗", {right, row.top, row.right - S(8), row.bottom}, kForeground, S(12), true,
+                c.Text(L"열기 ↗", {right, row.top, row.right - S(8), row.bottom}, bodyFg, S(12), true,
                        DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
             y += S(kMissingRowH);
         }
         if ((int)pile_.missing.size() > kMissingMaxRows) {
             RECT more{card.left + S(14), y, card.right - S(14), y + S(kMissingMoreH)};
-            c.Text(L"외 " + std::to_wstring(pile_.missing.size() - kMissingMaxRows) + L"개 더", more, kMutedFg, S(12),
+            c.Text(L"외 " + std::to_wstring(pile_.missing.size() - kMissingMaxRows) + L"개 더", more, bodyMuted, S(12),
                    false, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         }
     }
