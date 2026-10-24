@@ -57,6 +57,14 @@ void Key(WORD vk) {
     in[1].ki.dwFlags = KEYEVENTF_KEYUP;
     SendInput(2, in, sizeof(INPUT));
 }
+void CtrlKey(WORD vk) {
+    INPUT in[4]{};
+    for (INPUT& i : in) i.type = INPUT_KEYBOARD;
+    in[0].ki.wVk = in[3].ki.wVk = VK_CONTROL;
+    in[1].ki.wVk = in[2].ki.wVk = vk;
+    in[2].ki.dwFlags = in[3].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(4, in, sizeof(INPUT));
+}
 void TypeText(const std::wstring& s) {
     for (wchar_t ch : s) {
         INPUT in[2]{};
@@ -371,12 +379,15 @@ int wmain(int argc, wchar_t** argv) {
         Check(rn.size() == 1, "4b) 타이틀 이름 클릭 → 그 자리에 이름 입력창");
         Check(IsWindowVisible(card) && !IsWindowVisible(w1), "4b) 이름을 눌러도 더미가 펼쳐지지 않음");
         if (!rn.empty()) {
+            TypeText(L"임시");  // replaces the preselected name; Ctrl+A must select it again
+            PumpFor(100);
+            CtrlKey('A');
             TypeText(L"빠른 이름");
             PumpFor(200);
             SaveShot(L"4b_inline", Inflate(Rect(rn[0]), S(12)));
             Key(VK_RETURN);
             PumpFor(1200);
-            Check(FileHas(L"piles.json", Utf8(L"\"빠른 이름\"")), "4b) Enter → 새 이름 저장");
+            Check(FileHas(L"piles.json", Utf8(L"\"빠른 이름\"")), "4b) Ctrl+A로 다시 입력 → Enter → 새 이름 저장");
         }
     }
 

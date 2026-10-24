@@ -47,4 +47,21 @@ RECT ClampToWorkArea(RECT r, POINT anchor) {
     return r;
 }
 
+bool FilterNameEdit(const MSG& msg, HWND edit, bool& firstClick) {
+    if (msg.hwnd != edit) return false;
+    if (msg.message == WM_KEYDOWN && msg.wParam == 'A' && GetKeyState(VK_CONTROL) < 0 && GetKeyState(VK_MENU) >= 0) {
+        SendMessageW(edit, EM_SETSEL, 0, -1);
+        return true;  // not translated: no WM_CHAR 0x01, so no beep
+    }
+    if (msg.message == WM_LBUTTONUP && firstClick) {
+        firstClick = false;
+        DispatchMessageW(&msg);
+        DWORD start = 0, end = 0;
+        SendMessageW(edit, EM_GETSEL, (WPARAM)&start, (LPARAM)&end);
+        if (start == end) SendMessageW(edit, EM_SETSEL, 0, -1);
+        return true;
+    }
+    return false;
+}
+
 }  // namespace wp
