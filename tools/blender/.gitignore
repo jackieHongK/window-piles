@@ -1,0 +1,7 @@
+# build outputs and the 4K scan originals (see README)
+out/
+studio/
+pkg/
+tex/walnut_*
+*.blend
+*.blend1

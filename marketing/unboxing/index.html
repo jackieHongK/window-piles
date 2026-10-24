@@ -1,0 +1,1572 @@
+<meta charset="utf-8">
+<title>Neverflow Tray 언박싱</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+KR:wght@400;500;700;900&display=swap">
+<style>
+/* Layout: one full-bleed photo studio; the HUD sits at the edges like a camera viewfinder so the box owns the frame.
+   Single dark studio look on purpose (the product is lit like a catalogue shot), same in both themes. */
+:root{
+  --stage:#1C1A17; --ink:#F1ECE3; --ink-2:#BDB5A8; --ink-3:#8A8277; --glass:rgba(26,24,21,.68); --line:rgba(241,236,227,.14);
+  --walnut:#CC976C; --walnut-deep:#7B4B2A; --paper:#F1ECE3;
+  --display:"Bricolage Grotesque","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
+  --body:"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Consolas,"Noto Sans KR",monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{background:var(--stage);color:var(--ink);font-family:var(--body);font-size:14px;line-height:1.6;overflow:hidden;-webkit-font-smoothing:antialiased;word-break:keep-all}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--walnut);outline-offset:2px;border-radius:6px}
+#stage{position:fixed;inset:0;touch-action:none}
+#stage canvas{display:block;width:100%;height:100%;outline:none}
+#stage.grab canvas{cursor:grab} #stage.grab canvas:active{cursor:grabbing}
+#stage.point canvas{cursor:pointer}
+#stage.ew canvas{cursor:ew-resize}
+
+.hud-top{position:fixed;left:0;right:0;top:0;z-index:5;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
+  padding-top:calc(14px + env(safe-area-inset-top,0px));padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));pointer-events:none}
+.hud-top > *{pointer-events:auto}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand svg{width:22px;height:22px;color:var(--walnut);flex:none}
+.brand b{font-family:var(--display);font-weight:700;letter-spacing:-.02em;font-size:15px;white-space:nowrap}
+.brand span{font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tools{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}
+.tb{border:1px solid var(--line);background:var(--glass);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);border-radius:9px;padding:6px 11px;font-size:12.5px;cursor:pointer;white-space:nowrap;color:var(--ink-2)}
+.tb:hover{color:var(--ink);border-color:rgba(241,236,227,.3)}
+.tb[aria-pressed="true"]{background:var(--paper);color:#1A1917;border-color:transparent}
+
+.cue{position:fixed;z-index:4;left:max(16px,env(safe-area-inset-left,0px));bottom:calc(76px + env(safe-area-inset-bottom,0px));max-width:min(380px,calc(100vw - 32px));
+  background:var(--glass);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:grid;gap:4px}
+.cue-meta{display:flex;flex-wrap:wrap;gap:4px 10px;font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--ink-3);text-transform:uppercase}
+.cue-meta b{color:var(--walnut);font-weight:500}
+.cue h1{margin:0;font-family:var(--display);font-weight:700;letter-spacing:-.02em;font-size:24px;line-height:1.2}
+.cue p{margin:0;color:var(--ink-2);font-size:13.5px}
+.cue-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.cue-actions:empty{display:none}
+.cue-actions button{border:1px solid var(--line);background:transparent;border-radius:8px;padding:6px 11px;font-size:12.5px;cursor:pointer;color:var(--ink-2)}
+.cue-actions button:hover{color:var(--ink);border-color:rgba(241,236,227,.3)}
+.cue-actions .primary{background:var(--paper);color:#1A1917;border-color:transparent;font-weight:500}
+.cue-actions .primary:hover{color:#1A1917;background:#fff}
+
+.rail{position:fixed;z-index:4;left:0;right:0;bottom:0;padding-bottom:calc(14px + env(safe-area-inset-bottom,0px));padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));pointer-events:none}
+.rail ol{list-style:none;margin:0 auto;padding:0;display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:6px;max-width:1040px}
+.rail li{display:grid;gap:5px;font-size:11.5px;color:var(--ink-3);min-width:0}
+.rail li i{height:3px;border-radius:2px;background:var(--line)}
+.rail li span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rail li span em{font-style:normal;font-family:var(--mono);font-size:10.5px;margin-right:4px}
+.rail li.done i{background:rgba(204,151,108,.55)} .rail li.done{color:var(--ink-2)}
+.rail li.now i{background:var(--walnut)} .rail li.now{color:var(--ink)}
+.rail li.app span{opacity:.55}
+@media (max-width:760px){.rail li span{display:none}.cue{bottom:calc(40px + env(safe-area-inset-bottom,0px))}.brand span{display:none}.cue h1{font-size:20px}}
+
+#hotspots{position:fixed;inset:0;z-index:3;pointer-events:none}
+.hs{position:absolute;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;border:1.5px solid rgba(255,255,255,.9);background:rgba(28,26,23,.35);cursor:pointer;pointer-events:auto;display:grid;place-items:center;transition:opacity .2s;font-family:var(--mono);font-size:10px;color:#fff;padding:0}
+.hs[aria-pressed="true"]{background:var(--walnut-deep)}
+.hs.off{opacity:0;pointer-events:none}
+.hs-card{position:fixed;z-index:4;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(76px + env(safe-area-inset-bottom,0px));width:min(320px,calc(100vw - 32px));background:var(--glass);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:grid;gap:4px}
+.hs-card h2{margin:0;font-family:var(--display);font-size:18px;letter-spacing:-.01em}
+.hs-card p{margin:0;color:var(--ink-2);font-size:13px}
+.hs-card .spec{font-family:var(--mono);font-size:11px;color:var(--walnut);letter-spacing:.05em}
+.hs-card .who{font-size:12.5px;color:var(--ink)}
+.hs-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
+.hs-nav span{font-family:var(--mono);font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.hs-nav div{display:flex;gap:6px}
+.hs-nav button{border:1px solid var(--line);background:transparent;border-radius:8px;padding:4px 10px;font-size:12.5px;cursor:pointer;color:var(--ink-2)}
+.hs-nav button:hover{color:var(--ink)}
+@media (max-width:760px){.hs-card{top:calc(64px + env(safe-area-inset-top,0px));bottom:auto}}
+
+.holo-tag{position:fixed;z-index:4;left:50%;top:calc(70px + env(safe-area-inset-top,0px));transform:translateX(-50%);font-family:var(--mono);font-size:11.5px;letter-spacing:.12em;color:var(--ink-2);background:var(--glass);border:1px solid var(--line);padding:6px 12px;border-radius:999px;white-space:nowrap;max-width:calc(100vw - 32px);overflow:hidden;text-overflow:ellipsis}
+.pt-badge{color:var(--ink-3)}
+
+.notes{position:fixed;z-index:6;top:0;right:0;bottom:0;width:min(440px,100vw);background:#211F1B;border-left:1px solid var(--line);overflow:auto;
+  padding-top:calc(18px + env(safe-area-inset-top,0px));padding-bottom:calc(24px + env(safe-area-inset-bottom,0px));padding-left:max(20px,env(safe-area-inset-left,0px));padding-right:max(20px,env(safe-area-inset-right,0px))}
+.notes h2{font-family:var(--display);font-size:22px;letter-spacing:-.02em;margin:0 0 4px}
+.notes h3{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin:22px 0 8px;font-weight:500}
+.notes p,.notes li{color:var(--ink-2);font-size:13.5px}
+.notes ul{margin:0;padding-left:18px;display:grid;gap:4px}
+.notes table{width:100%;border-collapse:collapse;font-size:12.5px}
+.notes td,.notes th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top;color:var(--ink-2)}
+.notes th{color:var(--ink-3);font-weight:500;font-size:11.5px}
+.notes td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--ink)}
+.notes .close{float:right}
+.stills{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.stills figure{margin:0;display:grid;gap:4px}
+.stills img{width:100%;max-width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:8px;background:#2A2723;display:block}
+.stills figcaption{font-size:11.5px;color:var(--ink-3)}
+.loading{position:fixed;inset:0;z-index:7;display:grid;place-content:center;justify-items:center;gap:12px;font-size:13px;color:var(--ink-2);transition:opacity .5s;
+  background:linear-gradient(rgba(28,26,23,.72),rgba(28,26,23,.9)),url(studio_dark.jpg) center/cover no-repeat,var(--stage)}
+.loading svg{width:34px;height:34px;color:var(--walnut)}
+.loading.off{opacity:0;pointer-events:none}
+@media (prefers-reduced-motion:reduce){.loading,.hs{transition:none}}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="mk-nf" viewBox="0 0 40 40"><path d="M5 12v17a6 6 0 0 0 6 6h18a6 6 0 0 0 6-6V12" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><rect x="10" y="26" width="20" height="5" rx="1.8" fill="currentColor"/><rect x="10" y="19.5" width="20" height="5" rx="1.8" fill="currentColor" opacity=".72"/><rect x="10" y="13" width="20" height="5" rx="1.8" fill="currentColor" opacity=".45"/></symbol></svg>
+
+<div id="stage" aria-label="Neverflow Tray Walnut 언박싱 3D 장면"></div>
+
+<header class="hud-top">
+  <div class="brand"><svg aria-hidden="true"><use href="#mk-nf"/></svg><b>Neverflow Tray · Walnut</b><span>SN-TR-WN · 언박싱 PoC</span></div>
+  <div class="tools">
+    <button class="tb" id="bSound" aria-pressed="true" type="button">소리</button>
+    <button class="tb" id="bStill" aria-pressed="false" type="button" title="동작 줄이기: 단계별 정지 컷">정지 컷</button>
+    <button class="tb" id="bPT" aria-pressed="false" type="button" hidden>경로 추적 렌더</button>
+    <button class="tb" id="bNotes" type="button">렌더 노트</button>
+    <button class="tb" id="bSkip" type="button">건너뛰기</button>
+    <button class="tb" id="bAgain" type="button" hidden>다시 언박싱</button>
+  </div>
+</header>
+
+<div id="hotspots"></div>
+<div class="hs-card" id="hsCard" hidden>
+  <p class="spec" id="hsSpec"></p><h2 id="hsTitle"></h2><p id="hsBody"></p><p class="who" id="hsWho"></p>
+  <div class="hs-nav"><span id="hsIdx"></span><div><button type="button" id="hsPrev">이전</button><button type="button" id="hsNext">다음</button><button type="button" id="hsClose">전체 보기</button></div></div>
+</div>
+<p class="holo-tag" id="holoTag" hidden></p>
+
+<section class="cue" aria-live="polite">
+  <div class="cue-meta"><b id="cueNo">00</b><span id="cueCam"></span><span id="cuePT" class="pt-badge"></span></div>
+  <h1 id="cueName">택배 도착</h1>
+  <p id="cueHint">상자를 준비하는 중이에요.</p>
+  <div class="cue-actions" id="cueActions"></div>
+</section>
+
+<nav class="rail" aria-label="언박싱 단계"><ol id="rail"></ol></nav>
+
+<aside class="notes" id="notes" hidden aria-label="렌더 노트">
+  <button class="tb close" id="bNotesClose" type="button">닫기</button>
+  <h2>렌더 노트</h2>
+  <p>Tray · Walnut 한 조합으로 택배 상자부터 에디션 카드까지 실제 치수로 만든 PoC입니다. 모델과 텍스처는 페이지가 열릴 때 코드로 생성됩니다(외부 이미지 없음).</p>
+  <h3>렌더 방식</h3>
+  <ul>
+    <li>단계 진행: three.js 실시간 렌더. 물리 기반 재질, 스튜디오 환경광, 그림자, 피사계 심도</li>
+    <li>무늬목: Poly Haven Black Walnut Veneer 02 스캔(CC0)을 오일 마감 색으로 보정, 250 × 125 mm를 4.1 px/mm로 사용 + 근접 시 미세 물관 노멀</li>
+    <li>디테일 감상의 <b>경로 추적 렌더</b>: 카메라가 멈춘 동안 트레이를 경로 추적으로 계속 다듬습니다(three-gpu-pathtracer). Blender Cycles 정지 컷의 대체 확인용</li>
+    <li>홀로그램 카드: 박막 간섭(iridescence) 재질. 보는 각도에 따라 색이 바뀌는 물리 모델</li>
+    <li>움직임이 없으면 그리지 않고, 그림자도 움직일 때만 다시 계산합니다. 느린 기기에서는 해상도를 자동으로 낮춥니다</li>
+    <li>트레이 본체는 Blender 5.2.3에서 원목 한 덩어리를 CNC로 깎아 낸 형상입니다(안쪽 모서리 R3, 바깥 모서리 R0.5, 칸막이까지 한 몸). 각인을 0.2 mm 실제로 파냈고, 주변광 가림(AO)을 두 번째 UV에 구워 곱합니다. 모델은 양자화해 444 KB입니다</li>
+  </ul>
+  <h3>Cycles 제품 컷 · Blender 5.2.3 · OptiX</h3>
+  <div class="stills">
+    <figure><img src="studio_hero.jpg" alt="밝은 무한 배경 위, 더미 카드 네 장이 꽂힌 월넛 트레이를 낮은 3/4 각도에서 본 대표 컷" loading="lazy"><figcaption>대표 컷 · 낮은 3/4, 85 mm</figcaption></figure>
+    <figure><img src="studio_dark.jpg" alt="어두운 배경에서 뒤쪽 띠 조명이 모서리를 따라 흐르는 월넛 트레이" loading="lazy"><figcaption>다크 · 모서리를 따라 흐르는 빛</figcaption></figure>
+    <figure><img src="studio_profile.jpg" alt="옆에서 정확히 본 트레이 실루엣, 앞 28 mm에서 뒤 66 mm로 오르는 경사" loading="lazy"><figcaption>프로필 · 28 → 66 mm 경사</figcaption></figure>
+    <figure><img src="studio_float.jpg" alt="바닥에서 30 mm 떠 있는 트레이와 아래 부드러운 그림자, 펠트 패드" loading="lazy"><figcaption>플로팅 · 펠트 패드와 그림자</figcaption></figure>
+    <figure><img src="studio_top.jpg" alt="정확히 위에서 내려다본 트레이와 칸마다 꽂힌 카드" loading="lazy"><figcaption>탑다운 · 칸 간격 27.5 mm</figcaption></figure>
+    <figure><img src="studio_edge.jpg" alt="앞 모서리 매크로, R0.5 라운드를 따라 가는 하이라이트" loading="lazy"><figcaption>모서리 R0.5 매크로</figcaption></figure>
+    <figure><img src="pkg_hero.jpg" alt="슬리브를 두른 상자를 낮은 3/4 각도에서 본 컷" loading="lazy"><figcaption>패키지 · 슬리브</figcaption></figure>
+    <figure><img src="pkg_sleeve.jpg" alt="슬리브를 반쯤 밀어 상자가 드러나는 순간" loading="lazy"><figcaption>슬리브를 미는 순간</figcaption></figure>
+    <figure><img src="pkg_seal.jpg" alt="상자 앞면을 거의 가로지르는 절취선 스티커와 살짝 떠 있는 화살표 탭" loading="lazy"><figcaption>절취선 · 떠 있는 탭</figcaption></figure>
+    <figure><img src="pkg_open.jpg" alt="뚜껑을 연 상자 안, 차콜 벨벳 덮개 위에 놓인 감사 엽서" loading="lazy"><figcaption>벨벳 덮개와 엽서</figcaption></figure>
+    <figure><img src="pkg_reveal.jpg" alt="벨벳 덮개를 넘기자 드러난 월넛 트레이" loading="lazy"><figcaption>덮개를 넘기면</figcaption></figure>
+    <figure><img src="pkg_dark.jpg" alt="어두운 배경의 패키지, 모서리를 따라 흐르는 빛" loading="lazy"><figcaption>패키지 · 다크</figcaption></figure>
+    <figure><img src="cycles_engraving.jpg" alt="옆판에 0.2 mm 파인 SN-TR-WN · No.0042 각인과 로고" loading="lazy"><figcaption>각인 0.2 mm · 낮은 조명</figcaption></figure>
+  </div>
+  <h3>실제 치수 (mm)</h3>
+  <table>
+    <tr><th>부품</th><th>크기</th><th>재질</th></tr>
+    <tr><td>택배 상자</td><td class="n">296 × 172 × 116</td><td>골판지 3 t, 크라프트, OPP 테이프 48</td></tr>
+    <tr><td>겉 슬리브</td><td class="n">281.2 × 158.2 × 96.4</td><td>무코팅 매트지 0.6 t, 음각, 은박</td></tr>
+    <tr><td>단단한 상자</td><td class="n">280 × 156 × 94</td><td>판지 2 t, 매트지 감싸기, 유격 0.3</td></tr>
+    <tr><td>절취선 스티커</td><td class="n">200 × 16</td><td>타공 1.5 간격, 뜯는 띠 6</td></tr>
+    <tr><td>벨벳 덮개</td><td class="n">134 × 148 × 3 (2장)</td><td>차콜 벨벳, 새틴 안감, 접어도 처지지 않는 두께</td></tr>
+    <tr><td>Tray</td><td class="n">240 × 116 × 66</td><td>월넛 무늬목 6 t, R0.5, 각인 0.2 깊이(실제 형상), 펠트 4점</td></tr>
+    <tr><td>설명서 · 이름표</td><td class="n">90 × 130</td><td>코튼지 / 키스컷 스티커</td></tr>
+    <tr><td>에디션 카드</td><td class="n">63 × 88 × 0.3</td><td>홀로 박, 라미네이트</td></tr>
+  </table>
+  <h3>이 기기에서 잰 값</h3>
+  <table id="metrics"><tr><td>측정 중…</td></tr></table>
+  <div class="cue-actions"><button type="button" id="bGlb">트레이를 glTF로 내보내 용량 재기</button></div>
+  <h3>한계</h3>
+  <ul>
+    <li>종이·벨벳 결은 절차적 생성입니다. 무늬목만 스캔입니다.</li>
+    <li>조명은 실시간 계산입니다. 구운 조명과 천 시뮬레이션은 Blender에서 만들어야 합니다.</li>
+    <li>구운 AO는 트레이 자체의 가림만 담습니다. 상자·받침대에 드리우는 그림자는 실시간 그림자 맵이 맡습니다.</li>
+    <li>경로 추적은 트레이·받침대·책상만 대상으로 합니다. 첫 실행 때 셰이더 컴파일에 수 초 걸립니다.</li>
+    <li>8단계(책상에 놓기)는 실제 바탕화면이 필요해 앱 안에서 만듭니다.</li>
+  </ul>
+</aside>
+
+<div class="loading" id="loading"><svg aria-hidden="true"><use href="#mk-nf"/></svg><span id="loadMsg">택배를 준비하는 중이에요…</span></div>
+
+<script type="importmap">{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+  "three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.webgpu.js",
+  "three/tsl":"https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.tsl.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
+  "three/examples/jsm/":"https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
+  "three-mesh-bvh":"https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.15/build/index.module.js",
+  "three-gpu-pathtracer":"https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.25/build/index.module.js"
+}}</script>
+<script type="module">
+// Units: 1 = 1 mm. y up. The product box sits at the origin on the desk mat; the plinth for the reveal is to the left.
+const T0 = performance.now(), TIMES = {};
+const mark = (k) => { TIMES[k] = Math.round(performance.now() - T0); };
+const $ = (id) => document.getElementById(id);
+const loadMsg = (t) => { $('loadMsg').textContent = t; };
+let THREE, RoundedBoxGeometry, OrbitControls, EffectComposer, RenderPass, BokehPass, OutputPass, mergeGeometries, GLTFLoader;
+try {
+  THREE = await import('three');
+  [{ RoundedBoxGeometry }, { OrbitControls }, { EffectComposer }, { RenderPass }, { BokehPass }, { OutputPass }, { mergeGeometries }, { GLTFLoader }] = await Promise.all([
+    import('three/addons/geometries/RoundedBoxGeometry.js'), import('three/addons/controls/OrbitControls.js'), import('three/addons/postprocessing/EffectComposer.js'),
+    import('three/addons/postprocessing/RenderPass.js'), import('three/addons/postprocessing/BokehPass.js'), import('three/addons/postprocessing/OutputPass.js'), import('three/addons/utils/BufferGeometryUtils.js'),
+    import('three/addons/loaders/GLTFLoader.js')]);
+} catch (e) { loadMsg('3D 라이브러리를 불러오지 못했어요. 인터넷 연결을 확인해 주세요.'); throw e; }
+mark('libs');
+
+const KO = '당신의책상에자리를하나만들었어요흩어진창들이잠시쉬어갈곳이필요하다고생각했매일조금덜어지러운하루주길바라드림엽서읽고내려놓기들어올리세요첫만남덮개슬리브잡밀빼칼집사용안내책상에놓는법앱에서정리대쇼룸을열고기를누릅니다화면가장자리로끌면착붙습니다더미카드가일정한간격으로꽂힙니다이름표스티커월스프린트결제오류대응주간보고리포트봄캠페인인플루언서여기를당겨여세요네버플로우트레이월넛받는곳당신의위취급주의이쪽창개';
+try { await Promise.all([
+  document.fonts.load('700 40px "Bricolage Grotesque"'), document.fonts.load('400 40px "Bricolage Grotesque"'),
+  document.fonts.load('500 30px "IBM Plex Mono"'), document.fonts.load('500 30px "Noto Sans KR"', KO), document.fonts.load('700 30px "Noto Sans KR"', KO)]); } catch (e) {}
+mark('fonts');
+
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' }); }
+catch (e) { loadMsg('이 기기에서는 3D를 쓸 수 없어요. 앱에서는 단계별 정지 컷으로 보여 줍니다.'); throw e; }
+const stage = $('stage');
+let DPR = Math.min(devicePixelRatio, 1.25);
+renderer.setPixelRatio(DPR);
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;                // r186 folded PCFSoft into PCF
+renderer.shadowMap.autoUpdate = false;                       // shadows are re-rendered only on frames where something moves
+stage.appendChild(renderer.domElement);
+const maxAniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+
+function canvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+const scene = new THREE.Scene();
+const BG = new THREE.Color('#1C1A17'), HORIZON = new THREE.Color('#38322B');
+// studio backdrop: screen-space falloff from the lit horizon up into shadow; the desk fogs into the same tone
+const backdrop = (() => { const c = canvas(4, 256), g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 0, 256);
+  gr.addColorStop(0, '#141210'); gr.addColorStop(0.55, '#2A2621'); gr.addColorStop(1, '#38322B'); g.fillStyle = gr; g.fillRect(0, 0, 4, 256);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
+scene.background = backdrop;
+scene.fog = new THREE.Fog(HORIZON, 1500, 3400);
+const camera = new THREE.PerspectiveCamera(30, 1, 1, 8000);
+
+// ---------- procedural texture helpers ----------
+function hash(x, y) { let h = (x * 374761393 + y * 668265263) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967295; }
+function vnoise(x, y, px = 0, py = px) {
+  let xi = Math.floor(x), yi = Math.floor(y); const xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  let x1 = xi + 1, y1 = yi + 1;
+  if (px) { xi = ((xi % px) + px) % px; x1 = ((x1 % px) + px) % px; yi = ((yi % py) + py) % py; y1 = ((y1 % py) + py) % py; }
+  const a = hash(xi, yi), b = hash(x1, yi), c = hash(xi, y1), d = hash(x1, y1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function fbm(x, y, o = 4, p = 0) { let s = 0, a = 0.5, f = 1; for (let i = 0; i < o; i++) { s += a * vnoise(x * f, y * f, p ? p * f : 0); f *= 2; a *= 0.5; } return s; }
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+let KEEP = false;                                              // textures made while KEEP is on stay readable (path tracer, glTF export)
+const KEEP_ALL = new URLSearchParams(location.search).has('keep');   // ?keep: leave every canvas readable (art export for Blender)
+function tex(c, { srgb = true, repeat = null } = {}) {
+  const t = new THREE.CanvasTexture(c); t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = maxAniso;
+  if (repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(repeat[0], repeat[1]); }
+  // once uploaded, the GPU copy is all the page needs: shrink the source canvas so it stops holding memory
+  if (!KEEP && !KEEP_ALL) t.onUpdate = () => { c.width = c.height = 1; t.onUpdate = null; };
+  return t;
+}
+function normalCanvas(hgt, w, h, strength, wrap = true) {
+  const c = canvas(w, h), g = c.getContext('2d'), img = g.createImageData(w, h), d = img.data;
+  const at = (x, y) => { if (wrap) { x = (x + w) % w; y = (y + h) % h; } else { x = Math.min(w - 1, Math.max(0, x)); y = Math.min(h - 1, Math.max(0, y)); } return hgt[y * w + x]; };
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const dx = (at(x + 1, y) - at(x - 1, y)) * strength, dy = (at(x, y + 1) - at(x, y - 1)) * strength;
+    const l = Math.hypot(dx, dy, 1), i = (y * w + x) * 4;
+    d[i] = (-dx / l * 0.5 + 0.5) * 255; d[i + 1] = (dy / l * 0.5 + 0.5) * 255; d[i + 2] = (1 / l * 0.5 + 0.5) * 255; d[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0); return c;
+}
+function heightFromCanvas(c) { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, h = new Float32Array(c.width * c.height); for (let i = 0; i < h.length; i++) h[i] = d[i * 4] / 255; return h; }
+
+// Walnut veneer generated on the GPU (2048 x 1024 over 240 x 120 mm), read back into canvases so the
+// exporter and the path tracer see ordinary image textures. Quarter-cut streaks, slow figure, open pores.
+function walnutTexturesGPU() {
+  const W = 2048, H = 1024;
+  const rt = new THREE.WebGLRenderTarget(W, H, { depthBuffer: false });
+  // WebGL2 compiles ShaderMaterial as GLSL ES 3.0, so unsigned integer hashing is available
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { mode: { value: 0 } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
+    fragmentShader: `precision highp int; uniform int mode; varying vec2 vUv;
+      uint hh(uint x){ x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16; return x; }
+      float hash(vec2 p){ ivec2 i = ivec2(floor(p)) + 65536; return float(hh(uint(i.x) * 1597334677u ^ hh(uint(i.y)))) / 4294967295.; }
+      float vn(vec2 p){ vec2 i = floor(p), f = fract(p), u = f*f*(3.-2.*f);
+        return mix(mix(hash(i), hash(i+vec2(1,0)), u.x), mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), u.x), u.y); }
+      float fbm(vec2 p, int oc){ float s = 0., a = .5; for (int i = 0; i < 6; i++){ if (i >= oc) break; s += a*vn(p); p *= 2.; a *= .5; } return s; }
+      void wood(vec2 mm, out vec3 col, out float rough, out float hgt){
+        float X = mm.x, Y = mm.y;
+        float warp = fbm(vec2(X*.006, Y*.03), 3)*10. + fbm(vec2(X*.002, Y*.008), 2)*22.;
+        float yy = Y + warp;
+        float streak = fbm(vec2(X*.0035, yy*.28), 5);
+        float late = smoothstep(.42, .72, streak);
+        float lines = smoothstep(.62, .9, vn(vec2(X*.03, yy*2.6)))*.5;
+        float tone = fbm(vec2(X*.004 + 11., yy*.05), 3);
+        float pore = smoothstep(.8, .9, vn(vec2(X*1.7, yy*13.)))*(.55 + late*.45);
+        float fleck = smoothstep(.78, .95, fbm(vec2(X*.08, yy*.9), 2))*.1;
+        vec3 c = vec3(134. - tone*48., 96. - tone*38., 72. - tone*30.)/255.;
+        float dk = late*.42 + lines*.16 + pore*.28 + fleck;
+        col = c*vec3(1. - dk, 1. - dk*1.05, 1. - dk*1.1);
+        rough = .40 + pore*.35 + late*.06; hgt = 1. - pore*.8 - late*.12;
+      }
+      void main(){
+        vec2 mm = vUv*vec2(240., 120.); vec3 c; float r, h;
+        if (mode == 0) { wood(mm, c, r, h); gl_FragColor = vec4(c, 1.); }
+        else if (mode == 1) { wood(mm, c, r, h); gl_FragColor = vec4(1., r, 0., 1.); }
+        else { float e = 240./2048.; vec3 c2; float r2, hx1, hx0, hy1, hy0;
+          wood(mm + vec2(e, 0.), c2, r2, hx1); wood(mm - vec2(e, 0.), c2, r2, hx0); wood(mm + vec2(0., e), c2, r2, hy1); wood(mm - vec2(0., e), c2, r2, hy0);
+          vec3 n = normalize(vec3(-(hx1 - hx0)*1.1, -(hy1 - hy0)*1.1, 1.)); gl_FragColor = vec4(n*.5 + .5, 1.); }
+      }` });
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat), sc = new THREE.Scene(), cam = new THREE.Camera(); sc.add(quad);
+  const buf = new Uint8Array(W * H * 4), out = [];
+  for (let m = 0; m < 3; m++) {
+    mat.uniforms.mode.value = m; renderer.setRenderTarget(rt); renderer.render(sc, cam);
+    renderer.readRenderTargetPixels(rt, 0, 0, W, H, buf);
+    const c = canvas(W, H), g = c.getContext('2d'), img = g.createImageData(W, H), row = W * 4;
+    for (let y = 0; y < H; y++) img.data.set(buf.subarray((H - 1 - y) * row, (H - y) * row), y * row);   // GL rows are bottom-up
+    g.putImageData(img, 0, 0); out.push(c);
+  }
+  renderer.setRenderTarget(null); rt.dispose(); mat.dispose(); quad.geometry.dispose();
+  return { map: tex(out[0]), roughnessMap: tex(out[1], { srgb: false }), normalMap: tex(out[2], { srgb: false }) };
+}
+// tileable fibre heights (paper, felt) and the walnut micro-pore detail used only at macro distance
+function fibreHeight(N, period, streak) {
+  const h = new Float32Array(N * N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const u = x / N * period, v = y / N * period; h[y * N + x] = fbm(u, v, 4, period) * 0.6 + vnoise(u * streak, v * 2, period * streak) * 0.25 + hash(x, y) * 0.15; }
+  return h;
+}
+function poreDetail(N) {
+  const h = new Float32Array(N * N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const u = x / N, v = y / N;
+    const pore = smooth(0.8, 0.92, vnoise(u * 10, v * 90, 10, 90));
+    const fibre = vnoise(u * 3, v * 260, 3, 260) * 0.35;
+    h[y * N + x] = 1 - pore * 0.9 - fibre;
+  }
+  return h;
+}
+KEEP = true;
+const paperN = tex(normalCanvas(fibreHeight(256, 8, 6), 256, 256, 1.2), { srgb: false, repeat: [3, 3] });
+const feltH = fibreHeight(256, 16, 3);
+const feltCol = (() => { const c = canvas(256, 256), g = c.getContext('2d'), im = g.createImageData(256, 256);
+  for (let i = 0; i < feltH.length; i++) { const v = 0.86 + feltH[i] * 0.22; im.data[i * 4] = 92 * v; im.data[i * 4 + 1] = 87 * v; im.data[i * 4 + 2] = 80 * v; im.data[i * 4 + 3] = 255; }
+  g.putImageData(im, 0, 0); return c; })();
+KEEP = false;
+const kraftCol = (() => { const N = 256, c = canvas(N, N), g = c.getContext('2d'), im = g.createImageData(N, N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const n = fbm(x / N * 8, y / N * 8, 4, 8), s = hash(x, y) > 0.985 ? 0.75 : 1, v = (0.9 + n * 0.18) * s, i = (y * N + x) * 4;
+    im.data[i] = 184 * v; im.data[i + 1] = 138 * v; im.data[i + 2] = 92 * v; im.data[i + 3] = 255; }
+  g.putImageData(im, 0, 0); return c; })();
+mark('cpuTextures');
+
+// ---------- studio environment (equirect softboxes; feeds both the rasterizer and the path tracer) ----------
+function studioEnv() {
+  const W = 512, H = 256, data = new Float32Array(W * H * 4);
+  const box = (az, el, a0, a1, e0, e1, s) => smooth(a0 - s, a0 + s, az) * (1 - smooth(a1 - s, a1 + s, az)) * smooth(e0 - s, e0 + s, el) * (1 - smooth(e1 - s, e1 + s, el));
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+    const az = ((i + 0.5) / W - 0.5) * 360, el = ((j + 0.5) / H - 0.5) * 180;
+    let r = 0.035, g = 0.032, b = 0.03;
+    const wall = smooth(-10, 40, el); r += wall * 0.11; g += wall * 0.1; b += wall * 0.095;
+    const key = box(az, el, 95, 150, 48, 84, 6) * 5.0 + smooth(70, 88, el) * 2.2;   // big warm softbox, top front-left, plus a soft dome
+    const strip = box(az, el, -30, -14, 4, 50, 3) * 3.2;                            // tall strip, right side
+    const rim = box(az, el, -125, -60, 8, 28, 5) * 1.6;                             // cool rim from behind
+    const floorBounce = (1 - smooth(-30, -2, el)) * 0.05;
+    r += key + strip * 0.98 + rim * 0.82 + floorBounce; g += key * 0.95 + strip * 0.98 + rim * 0.9 + floorBounce * 0.9; b += key * 0.88 + strip + rim * 1.05 + floorBounce * 0.8;
+    const k = (j * W + i) * 4; data[k] = r; data[k + 1] = g; data[k + 2] = b; data[k + 3] = 1;
+  }
+  const t = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.FloatType);
+  t.mapping = THREE.EquirectangularReflectionMapping; t.magFilter = t.minFilter = THREE.LinearFilter; t.needsUpdate = true; return t;
+}
+const envEquirect = studioEnv();
+const pmrem = new THREE.PMREMGenerator(renderer);
+const envPM = pmrem.fromEquirectangular(envEquirect).texture; pmrem.dispose();
+scene.environment = envPM;
+// Walnut: Poly Haven "Black Walnut Veneer 02" scan (CC0), graded to an oil finish; 250 x 125 mm crop at 4.1 px/mm.
+// The GPU generator stays as the fallback when the files are missing.
+KEEP = true;
+let wood;
+try {
+  const TL = new THREE.TextureLoader();
+  const [map, normalMap, roughnessMap] = await Promise.all(['walnut_diff.jpg', 'walnut_nor.jpg', 'walnut_rough.jpg'].map((u) => TL.loadAsync(u)));
+  map.colorSpace = THREE.SRGBColorSpace; [map, normalMap, roughnessMap].forEach((t) => { t.anisotropy = maxAniso; });
+  wood = { map, normalMap, roughnessMap, scan: true };
+} catch (e) { console.warn('[unbox] walnut scan unavailable, generating the procedural veneer', e); wood = walnutTexturesGPU(); }
+mark('gpuTextures');
+
+// ---------- lights ----------
+const key = new THREE.DirectionalLight('#fff1e0', 1.7);
+key.position.set(-420, 900, 560); key.target.position.set(-180, 0, 0);
+key.castShadow = true; key.shadow.mapSize.set(2048, 2048);
+Object.assign(key.shadow.camera, { left: -760, right: 760, top: 520, bottom: -520, near: 100, far: 2400 });
+key.shadow.bias = -0.0003; key.shadow.normalBias = 0.5;
+scene.add(key, key.target);
+const sweep = new THREE.SpotLight('#ffffff', 0, 0, 0.16, 0.85, 0); sweep.position.set(0, 700, 300); scene.add(sweep, sweep.target);
+const leak = new THREE.PointLight('#ffdcb0', 0, 100, 1); leak.position.set(0, 70, 0);
+const graze = new THREE.DirectionalLight('#ffe9cf', 0); graze.position.set(-470 - 700, 120, 80 + 260); graze.target.position.set(-470, 30, 80); scene.add(graze, graze.target);
+
+// ---------- materials ----------
+const poreN = tex(normalCanvas(poreDetail(512), 512, 512, 1.6), { srgb: false }); poreN.wrapS = poreN.wrapT = THREE.RepeatWrapping;
+// velvet pile: very fine isotropic fibres; the sheen lobe does the rest
+const velvetN = tex(normalCanvas(fibreHeight(256, 48, 1), 256, 256, 1.4), { srgb: false }); velvetN.wrapS = velvetN.wrapT = THREE.RepeatWrapping;
+// crushed-pile mottling: the nap lies in patches, so the colour drifts a few percent across the surface
+const velvetMap = (() => { const N = 256, c = canvas(N, N), g = c.getContext('2d'), im = g.createImageData(N, N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const v = 0.9 + fbm(x / N * 4, y / N * 4, 4, 4) * 0.2, i = (y * N + x) * 4; im.data[i] = im.data[i + 1] = im.data[i + 2] = 255 * v; im.data[i + 3] = 255; }
+  g.putImageData(im, 0, 0); const t = tex(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t; })();
+const feltMap = tex(feltCol, { repeat: [80, 80] }), feltN = tex(normalCanvas(feltH, 256, 256, 1.6), { srgb: false, repeat: [80, 80] });
+KEEP = false;
+const M = {
+  walnut: new THREE.MeshPhysicalMaterial({ map: wood.map, normalMap: wood.normalMap, normalScale: new THREE.Vector2(wood.scan ? 0.9 : 0.6, wood.scan ? 0.9 : 0.6), roughnessMap: wood.roughnessMap, roughness: 1, clearcoat: 0.45, clearcoatRoughness: 0.22 }),   // satin coat: edges catch a thin line of light, as in the Cycles stills
+  greige: new THREE.MeshPhysicalMaterial({ color: '#E4DED3', roughness: 0.9, normalMap: paperN, normalScale: new THREE.Vector2(0.35, 0.35), sheen: 0.35, sheenRoughness: 0.75, sheenColor: '#ffffff' }),
+  white: new THREE.MeshPhysicalMaterial({ color: '#F4F2EC', roughness: 0.92, normalMap: paperN, normalScale: new THREE.Vector2(0.25, 0.25), sheen: 0.2, sheenRoughness: 0.8, sheenColor: '#ffffff' }),
+  core: new THREE.MeshStandardMaterial({ color: '#BDB6A9', roughness: 0.95 }),
+  felt: new THREE.MeshStandardMaterial({ map: feltMap, normalMap: feltN, roughness: 1 }),
+  stone: new THREE.MeshPhysicalMaterial({ color: '#CFC7BA', roughness: 0.62, clearcoat: 0.15, clearcoatRoughness: 0.5 }),
+  adhesive: new THREE.MeshStandardMaterial({ color: '#F1EEE7', roughness: 0.6, side: THREE.BackSide }),
+  // 3 mm charcoal velvet wrap: dense pile (sheen) on top, smooth satin lining underneath
+  velvet: new THREE.MeshPhysicalMaterial({ color: '#3A3A3C', map: velvetMap, roughness: 1, specularIntensity: 0.25, sheen: 1, sheenColor: '#B8B3AD', sheenRoughness: 0.58, normalMap: velvetN, normalScale: new THREE.Vector2(0.6, 0.6) }),
+  lining: new THREE.MeshPhysicalMaterial({ color: '#202023', roughness: 0.36, sheen: 0.5, sheenColor: '#5C5C64', sheenRoughness: 0.3 }),
+  kraft: new THREE.MeshPhysicalMaterial({ map: tex(kraftCol, { repeat: [3, 3] }), roughness: 0.88, normalMap: paperN, normalScale: new THREE.Vector2(0.5, 0.5), sheen: 0.15, sheenRoughness: 0.8, sheenColor: '#fff' }),
+  tape: new THREE.MeshPhysicalMaterial({ color: '#C9A06A', roughness: 0.22, transparent: true, opacity: 0.78, clearcoat: 0.6, clearcoatRoughness: 0.15 }),
+  padFelt: new THREE.MeshStandardMaterial({ color: '#3A3733', roughness: 1, normalMap: paperN, normalScale: new THREE.Vector2(1, 1) }),
+};
+// macro pore detail layered onto the walnut normal (raster only); repeats every 10 mm of veneer
+M.walnut.onBeforeCompile = (sh) => {
+  sh.uniforms.detailN = { value: poreN }; sh.uniforms.detailRepeat = { value: new THREE.Vector2(24, 12) };
+  sh.fragmentShader = 'uniform sampler2D detailN; uniform vec2 detailRepeat;\n' + sh.fragmentShader.replace('#include <normal_fragment_maps>',
+    THREE.ShaderChunk.normal_fragment_maps.replace('normal = normalize( tbn * mapN );',
+      `vec3 dN = texture2D( detailN, vNormalMapUv * detailRepeat ).xyz * 2.0 - 1.0; mapN = normalize( vec3( mapN.xy + dN.xy * ${wood.scan ? '0.14' : '0.32'}, mapN.z ) ); normal = normalize( tbn * mapN );`));
+};
+
+const faces = (base, over) => [0, 1, 2, 3, 4, 5].map((i) => over[i] || base);
+function rbox(w, h, d, x, y, z, mat, r = 0.4, seg = 2) { const m = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, seg, r), mat); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; return m; }
+
+// printed matte paper with blind deboss and foil. draw(g, kind, s): kind = 'color' | 'height' | 'orm' (G roughness, B metal)
+function printed(wmm, hmm, s, draw, { base = '#F4F2EC', rough = 0.92, sheen = 0.3, deboss = false } = {}) {
+  const W = Math.round(wmm * s), H = Math.round(hmm * s);
+  const cc = canvas(W, H), hc = canvas(W, H), oc = canvas(W, H);
+  const g1 = cc.getContext('2d'); g1.fillStyle = base; g1.fillRect(0, 0, W, H); draw(g1, 'color', s);
+  const g2 = hc.getContext('2d'); if (deboss) { g2.fillStyle = '#ffffff'; g2.fillRect(0, 0, W, H); draw(g2, 'height', s); }
+  const g3 = oc.getContext('2d'); g3.fillStyle = `rgb(255,${Math.round(rough * 255)},0)`; g3.fillRect(0, 0, W, H); draw(g3, 'orm', s);
+  const orm = tex(oc, { srgb: false });
+  // only debossed pieces pay for a per-piece normal map; flat prints share the tiled paper fibre
+  const normalMap = deboss ? tex(normalCanvas(heightFromCanvas(hc), W, H, 1.6, false), { srgb: false }) : paperN;
+  return new THREE.MeshPhysicalMaterial({ map: tex(cc), normalMap, normalScale: new THREE.Vector2(deboss ? 1 : 0.3, deboss ? 1 : 0.3), roughnessMap: orm, metalnessMap: orm, roughness: 1, metalness: 1, sheen, sheenRoughness: 0.75, sheenColor: '#ffffff' });
+}
+function drawMark(g, x, y, size, color) {
+  const k = size / 40; g.save(); g.translate(x, y); g.scale(k, k);
+  g.strokeStyle = color; g.fillStyle = color; g.lineWidth = 3.4; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(5, 12); g.lineTo(5, 29); g.arcTo(5, 35, 11, 35, 6); g.lineTo(29, 35); g.arcTo(35, 35, 35, 29, 6); g.lineTo(35, 12); g.stroke();
+  for (const [by, a] of [[26, 1], [19.5, 0.72], [13, 0.45]]) { g.globalAlpha = a; g.beginPath(); g.roundRect(10, by, 20, 5, 1.8); g.fill(); }
+  g.restore();
+}
+const FONT = { disp: (w, px) => `${w} ${px}px "Bricolage Grotesque","Noto Sans KR",sans-serif`, mono: (px) => `500 ${px}px "IBM Plex Mono",Consolas,monospace`, ko: (w, px) => `${w} ${px}px "Noto Sans KR","Malgun Gothic",sans-serif` };
+const WAL = '#7B4B2A', BAND = '#6E4327';
+
+// ---------- desk + plinth ----------
+const desk = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000), M.felt); desk.rotation.x = -Math.PI / 2; desk.receiveShadow = true; scene.add(desk);
+const PLINTH = new THREE.Vector3(-470, 24, 80);
+const plinth = new THREE.Mesh(new THREE.LatheGeometry([[0, 0], [168, 0], [170, 1.5], [170, 22.5], [168.5, 24], [0, 24]].map(([x, y]) => new THREE.Vector2(x, y)), 128), M.stone);
+plinth.position.set(PLINTH.x, 0, PLINTH.z); plinth.castShadow = plinth.receiveShadow = true; plinth.scale.y = 0.001; scene.add(plinth);
+
+// ---------- product: sleeve + rigid box; both ride inside the parcel for the prologue ----------
+const product = new THREE.Group(); scene.add(product);
+const BW = 280, BD = 156, TK = 2;
+const boxRoot = new THREE.Group(); boxRoot.position.y = 0.6; product.add(boxRoot);
+const base = new THREE.Group(); boxRoot.add(base);
+base.add(rbox(BW, TK, BD, 0, TK / 2, 0, faces(M.white, { 3: M.greige })));
+base.add(rbox(BW, 60, TK, 0, 32, BD / 2 - TK / 2, faces(M.white, { 4: M.greige })));
+base.add(rbox(BW, 60, TK, 0, 32, -(BD / 2 - TK / 2), faces(M.white, { 5: M.greige })));
+base.add(rbox(TK, 60, BD - 2 * TK, BW / 2 - TK / 2, 32, 0, faces(M.white, { 0: M.greige })));
+base.add(rbox(TK, 60, BD - 2 * TK, -(BW / 2 - TK / 2), 32, 0, faces(M.white, { 1: M.greige })));
+{ const nz = BD / 2 - TK - 0.3 - 0.75, nx = BW / 2 - TK - 0.3 - 0.75;
+  base.add(rbox(BW - 2 * TK - 0.6, 40, 1.5, 0, 60, nz, M.white, 0.3)); base.add(rbox(BW - 2 * TK - 0.6, 40, 1.5, 0, 60, -nz, M.white, 0.3));
+  base.add(rbox(1.5, 40, BD - 2 * TK - 3.6, nx, 60, 0, M.white, 0.3)); base.add(rbox(1.5, 40, BD - 2 * TK - 3.6, -nx, 60, 0, M.white, 0.3)); }
+const lidTop = printed(BW, BD, 3, (g, kind, s) => {
+  const cx = BW / 2 * s, cy = BD / 2 * s;
+  if (kind === 'height') { drawMark(g, cx - 13 * s, cy - 17 * s, 26 * s, '#9a9a9a'); g.fillStyle = '#a8a8a8'; g.font = FONT.disp(700, 7 * s); g.textAlign = 'center'; g.fillText('Stack Neverflow', cx, cy + 20 * s); }
+}, { base: '#E4DED3', rough: 0.9, deboss: true });
+const lid = new THREE.Group(); boxRoot.add(lid);
+lid.add(rbox(BW, TK, BD, 0, 93, 0, faces(M.white, { 2: lidTop })));
+lid.add(rbox(BW, 30, TK, 0, 77, BD / 2 - TK / 2, faces(M.white, { 4: M.greige })));
+lid.add(rbox(BW, 30, TK, 0, 77, -(BD / 2 - TK / 2), faces(M.white, { 5: M.greige })));
+lid.add(rbox(TK, 30, BD - 2 * TK, BW / 2 - TK / 2, 77, 0, faces(M.white, { 0: M.greige })));
+lid.add(rbox(TK, 30, BD - 2 * TK, -(BW / 2 - TK / 2), 77, 0, faces(M.white, { 1: M.greige })));
+boxRoot.add(leak);
+
+// ---------- perforated seal sticker across the front seam (y = 62) ----------
+const STK = { len: 250, tab: 14, strip: 6, band: 5, pitch: 1.5, z: BD / 2 + 0.06 };   // seals 250 of the 280 mm front
+function bandMat(isUpper) {
+  return printed(STK.len, STK.band, 12, (g, kind, s) => {
+    if (kind === 'color') { g.fillStyle = WAL; g.fillRect(0, 0, STK.len * s, STK.band * s); g.fillStyle = '#E9E3D8';
+      const yEdge = isUpper ? STK.band * s : 0;
+      for (let x = STK.pitch / 2; x < STK.len; x += STK.pitch) { g.beginPath(); g.arc(x * s, yEdge, 0.32 * s, 0, 7); g.fill(); }
+      g.fillStyle = 'rgba(241,236,227,.75)'; g.font = FONT.mono(2 * s); g.textBaseline = 'middle';
+      if (isUpper) g.fillText('SN-TR-WN  ·  SEALED FOR YOU', 6 * s, STK.band * s * 0.42); }
+    if (kind === 'orm') { g.fillStyle = 'rgb(255,110,0)'; g.fillRect(0, 0, STK.len * s, STK.band * s); }
+  }, { base: WAL, rough: 0.45, sheen: 0.1 });
+}
+const bandU = new THREE.Mesh(new THREE.PlaneGeometry(STK.len, STK.band), bandMat(true)); bandU.position.set(0, 62 + STK.strip / 2 + STK.band / 2, STK.z); lid.add(bandU);
+const bandL = new THREE.Mesh(new THREE.PlaneGeometry(STK.len, STK.band), bandMat(false)); bandL.position.set(0, 62 - STK.strip / 2 - STK.band / 2, STK.z); base.add(bandL);
+const stripLen = STK.len + STK.tab;
+const stripFront = printed(stripLen, STK.strip, 12, (g, kind, s) => {
+  if (kind === 'color') {
+    g.fillStyle = WAL; g.fillRect(0, 0, stripLen * s, STK.strip * s);
+    g.fillStyle = '#E9E3D8'; for (let x = STK.pitch / 2; x < STK.len; x += STK.pitch) { g.beginPath(); g.arc(x * s, 0, 0.32 * s, 0, 7); g.arc(x * s, STK.strip * s, 0.32 * s, 0, 7); g.fill(); }
+    // Apple-style: nothing printed along the run, only an arrow on the tab where you start
+    g.fillStyle = '#E9E3D8'; g.beginPath(); g.roundRect(STK.len * s, 0, STK.tab * s, STK.strip * s, [0, 1.6 * s, 1.6 * s, 0]); g.fill();
+    const ax = (STK.len + STK.tab / 2) * s, ay = STK.strip * s / 2, aw = 3.2 * s;
+    g.strokeStyle = WAL; g.lineWidth = 0.55 * s; g.lineCap = 'round'; g.lineJoin = 'round';
+    g.beginPath(); g.moveTo(ax + aw, ay); g.lineTo(ax - aw, ay); g.moveTo(ax - aw + 1.4 * s, ay - 1.3 * s); g.lineTo(ax - aw, ay); g.lineTo(ax - aw + 1.4 * s, ay + 1.3 * s); g.stroke();
+  }
+  if (kind === 'orm') { g.fillStyle = 'rgb(255,110,0)'; g.fillRect(0, 0, stripLen * s, STK.strip * s); }
+}, { base: WAL, rough: 0.45, sheen: 0.1 });
+const stripGeo = new THREE.PlaneGeometry(stripLen, STK.strip, 528, 1);
+stripGeo.translate(stripLen / 2 - STK.len / 2, 0, 0);          // x0 runs -125 .. +139 (tab beyond the sealed run)
+const strip0 = stripGeo.attributes.position.array.slice();
+const strip = new THREE.Group(); strip.position.set(0, 62, STK.z + 0.04); boxRoot.add(strip);
+strip.add(new THREE.Mesh(stripGeo, stripFront), new THREE.Mesh(stripGeo, M.adhesive));
+strip.children.forEach((m) => { m.castShadow = true; });
+let peelP = STK.len / 2;                                         // contact line; everything right of it is lifted
+function layoutStrip(p, pull = 0.35, r = 2.2) {
+  const pos = stripGeo.attributes.position, a = pos.array;
+  for (let i = 0; i < pos.count; i++) {
+    const x0 = strip0[i * 3], y0 = strip0[i * 3 + 1];
+    let x = x0, z = 0;
+    if (p >= STK.len / 2 && x0 > p) z = smooth(0, 3, x0 - p) * 1.6 + Math.max(0, x0 - p - 3) * 0.06;   // untouched: the tab stands 1.6 mm off the box, easy to find
+    else if (x0 > p) { const s = x0 - p; if (s < Math.PI * r) { const t = s / r; x = p + r * Math.sin(t); z = r * (1 - Math.cos(t)); } else { const rest = s - Math.PI * r; x = p - rest * Math.cos(pull); z = 2 * r + rest * Math.sin(pull); } }
+    a[i * 3] = x; a[i * 3 + 1] = y0; a[i * 3 + 2] = z;
+  }
+  pos.needsUpdate = true; stripGeo.computeVertexNormals(); stripGeo.computeBoundingSphere();
+}
+layoutStrip(peelP);
+
+// ---------- sleeve (matte uncoated 350 g/m², blind deboss, silver foil SKU, walnut band) ----------
+const SL = { w: 281.2, d: 158.2, h: 96.4, t: 0.6 };
+const sleeveTop = printed(SL.w, SL.d, 4, (g, kind, s) => {
+  const W = SL.w * s, H = SL.d * s, bx = 22 * s, bw = 16 * s;
+  if (kind === 'color') {
+    g.fillStyle = BAND; g.fillRect(bx, 0, bw, H);
+    g.fillStyle = '#8A857C'; g.font = FONT.mono(3 * s); g.fillText('NEVERFLOW OBJECT No.01', 50 * s, H - 12 * s);
+    g.fillStyle = '#C9C9CC'; g.font = FONT.mono(3.4 * s); g.textAlign = 'right'; g.fillText('SN-TR-WN', W - 14 * s, H - 12 * s);
+  }
+  if (kind === 'height') { drawMark(g, W / 2 + 10 * s - 22 * s, H / 2 - 26 * s, 44 * s, '#8c8c8c'); g.fillStyle = '#9a9a9a'; g.font = FONT.disp(700, 10 * s); g.textAlign = 'center'; g.fillText('Stack Neverflow', W / 2 + 10 * s, H / 2 + 34 * s); }
+  if (kind === 'orm') { g.fillStyle = 'rgb(255,60,255)'; g.font = FONT.mono(3.4 * s); g.textAlign = 'right'; g.fillText('SN-TR-WN', W - 14 * s, H - 12 * s); g.fillStyle = 'rgb(255,200,0)'; g.fillRect(bx, 0, bw, H); }
+}, { base: '#F5F3EE', rough: 0.95, deboss: true });
+const sleeveFront = printed(SL.w, SL.h, 4, (g, kind, s) => {
+  const W = SL.w * s, H = SL.h * s, bx = 22 * s, bw = 16 * s;
+  if (kind === 'color') {
+    g.fillStyle = BAND; g.fillRect(bx, 0, bw, H);
+    g.fillStyle = '#2B2925'; g.font = FONT.disp(700, 11 * s); g.fillText('Neverflow Tray', 50 * s, 40 * s);
+    g.fillStyle = '#6E6A62'; g.font = FONT.disp(400, 7 * s); g.fillText('Walnut', 50 * s, 52 * s);
+    g.font = FONT.ko(500, 3.6 * s); g.fillStyle = '#8A857C'; g.fillText('네버플로우 트레이 · 월넛 무늬목 · 240 × 116 × 66 mm', 50 * s, 74 * s);
+    g.fillStyle = '#C9C9CC'; g.font = FONT.mono(3.4 * s); g.textAlign = 'right'; g.fillText('SN-TR-WN', W - 14 * s, H - 12 * s);
+  }
+  if (kind === 'height') { g.fillStyle = '#b0b0b0'; g.font = FONT.disp(700, 11 * s); g.fillText('Neverflow Tray', 50 * s, 40 * s); }
+  if (kind === 'orm') { g.fillStyle = 'rgb(255,60,255)'; g.font = FONT.mono(3.4 * s); g.textAlign = 'right'; g.fillText('SN-TR-WN', W - 14 * s, H - 12 * s); g.fillStyle = 'rgb(255,200,0)'; g.fillRect(bx, 0, bw, H); }
+}, { base: '#F5F3EE', rough: 0.95, deboss: true });
+const sleeveBack = printed(SL.w, SL.h, 2, (g, kind, s) => { if (kind === 'color') { g.fillStyle = BAND; g.fillRect((SL.w - 38) * s, 0, 16 * s, SL.h * s); } }, { base: '#F5F3EE', rough: 0.95 });
+const SW = new THREE.MeshPhysicalMaterial({ color: '#F5F3EE', roughness: 0.95, normalMap: paperN, normalScale: new THREE.Vector2(0.3, 0.3), sheen: 0.3, sheenRoughness: 0.75, sheenColor: '#fff' });
+const sleeve = new THREE.Group(); product.add(sleeve);
+sleeve.add(rbox(SL.w, SL.t, SL.d, 0, SL.h - SL.t / 2, 0, faces(SW, { 2: sleeveTop }), 0.3));
+sleeve.add(rbox(SL.w, SL.t, SL.d, 0, SL.t / 2, 0, SW, 0.3));
+sleeve.add(rbox(SL.w, SL.h, SL.t, 0, SL.h / 2, SL.d / 2 - SL.t / 2, faces(SW, { 4: sleeveFront }), 0.3));
+sleeve.add(rbox(SL.w, SL.h, SL.t, 0, SL.h / 2, -(SL.d / 2 - SL.t / 2), faces(SW, { 5: sleeveBack }), 0.3));
+
+// ---------- Tray · Walnut (240 x 116 x 66, 6 mm veneered panels, every edge R0.5, 4 felt pads) ----------
+const PAD = 1.2;
+function boxUV(geo, uSize, vSize, min) {
+  const p = geo.attributes.position, n = geo.attributes.normal, uv = new Float32Array(p.count * 2);
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i) - min.x, y = p.getY(i) - min.y, z = p.getZ(i) - min.z;
+    const ax = Math.abs(n.getX(i)), ay = Math.abs(n.getY(i)), az = Math.abs(n.getZ(i));
+    let u, v; if (ay >= ax && ay >= az) { u = x / uSize; v = z / vSize; } else if (az >= ax) { u = x / uSize; v = y / vSize; } else { u = z / uSize; v = y / vSize; }
+    uv[i * 2] = u; uv[i * 2 + 1] = v;
+  }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+}
+function engravingMaterial() {
+  // laser engraving 0.2 mm deep: a soft-walled height field drives the normal map; the burnt floor is darkest under the
+  // upper wall (in its own shadow) and catches a thin highlight on the lower lip, which is what reads as "cut in"
+  const s = 32, Wmm = 52, Hmm = 8, W = Wmm * s, H = Hmm * s;
+  const draw = (g, dy) => { g.fillStyle = '#000'; g.fillRect(0, 0, W, H); g.save(); g.translate(0, dy); drawMark(g, 0.4 * s, 0.6 * s, 6.6 * s, '#fff');
+    g.fillStyle = '#fff'; g.font = FONT.mono(3.9 * s); g.textBaseline = 'middle'; g.fillText('SN-TR-WN · No.0042', 8 * s, H / 2 + 0.2 * s); g.restore(); };
+  const mk = canvas(W, H); draw(mk.getContext('2d'), 0);
+  const up = canvas(W, H); draw(up.getContext('2d'), 0.09 * s);          // mask shifted down: where the upper wall overhangs
+  const bl = canvas(W, H), gb = bl.getContext('2d'); gb.filter = `blur(${0.1 * s}px)`; gb.drawImage(mk, 0, 0);
+  const m = heightFromCanvas(mk), u = heightFromCanvas(up), b = heightFromCanvas(bl), hgt = new Float32Array(W * H);
+  const col = canvas(W, H), gc = col.getContext('2d'), im = gc.createImageData(W, H);
+  for (let i = 0; i < hgt.length; i++) {
+    hgt[i] = 1 - b[i];
+    const shadow = Math.max(0, m[i] - u[i]), lip = Math.max(0, u[i] - m[i]);
+    const a = Math.min(1, b[i] * 1.5 + lip * 0.6);
+    const k = 1 - shadow * 0.55;
+    im.data[i * 4] = (58 + lip * 70) * k; im.data[i * 4 + 1] = (34 + lip * 46) * k; im.data[i * 4 + 2] = (18 + lip * 30) * k; im.data[i * 4 + 3] = a * 255;
+  }
+  gc.putImageData(im, 0, 0);
+  return { geo: new THREE.PlaneGeometry(Wmm, Hmm), mat: new THREE.MeshStandardMaterial({ map: tex(col), normalMap: tex(normalCanvas(hgt, W, H, 9, false), { srgb: false }), transparent: true, roughness: 0.92, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }) };
+}
+function buildTray() {
+  const R = 0.5, parts = [];
+  const rb = (w, h, d, x, y, z) => { const g = new RoundedBoxGeometry(w, h, d, 3, R); g.translate(x, y, z); return g.index ? g.toNonIndexed() : g; };
+  parts.push(rb(228, 6, 116, 0, 3, 0));
+  parts.push(rb(228, 60, 6, 0, 36, -55));
+  parts.push(rb(228, 22, 6, 0, 17, 55));
+  for (const z of [27.5, 0, -27.5]) parts.push(rb(228, 5, 3.5, 0, 8.5, z));
+  const shape = new THREE.Shape([[57.5, 0.5], [57.5, 27.5], [-57.5, 65.5], [-57.5, 0.5]].map(([a, b]) => new THREE.Vector2(a, b)));
+  for (const side of [1, -1]) {
+    const g = new THREE.ExtrudeGeometry(shape, { depth: 5, bevelEnabled: true, bevelThickness: 0.5, bevelSize: 0.5, bevelSegments: 3, curveSegments: 4 });
+    g.rotateY(-Math.PI / 2); g.translate(side > 0 ? 119.5 : -114.5, 0, 0);
+    const ng = g.index ? g.toNonIndexed() : g; ng.clearGroups(); parts.push(ng);
+  }
+  for (const g of parts) { for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k); boxUV(g, 240, 120, { x: -120, y: 0, z: -58 }); }
+  const tray = new THREE.Group();
+  if (BAKED) {
+    // Blender body: the engraving is cut 0.2 mm into the side plate, and ambient light is attenuated by the baked AO (uv1)
+    M.walnut.aoMap = BAKED.ao;
+    const burnt = new THREE.MeshStandardMaterial({ color: '#24140A', roughness: 0.92, aoMap: BAKED.ao });
+    BAKED.meshes.forEach((src, i) => {
+      // KHR_mesh_quantization: expand int16/int8/uint16 attributes to floats, apply the node transform, metres -> mm
+      const g = new THREE.BufferGeometry();
+      for (const [name, at] of Object.entries(src.geometry.attributes)) {
+        const f = new Float32Array(at.count * at.itemSize);
+        for (let n = 0; n < at.count; n++) for (let q = 0; q < at.itemSize; q++) f[n * at.itemSize + q] = at.getComponent(n, q);
+        g.setAttribute(name, new THREE.BufferAttribute(f, at.itemSize));
+      }
+      g.setIndex(src.geometry.index); src.updateWorldMatrix(true, false); g.applyMatrix4(src.matrixWorld); g.scale(1000, 1000, 1000);
+      const uv = g.attributes.uv; for (let k = 0; k < uv.count; k++) uv.setY(k, 1 - uv.getY(k));   // glTF flips v; the page's wood maps don't
+      const m = new THREE.Mesh(g, i === 0 ? M.walnut : burnt); m.castShadow = m.receiveShadow = true; m.position.y = PAD; tray.add(m);
+    });
+  } else {
+    const body = new THREE.Mesh(mergeGeometries(parts, false), M.walnut); body.castShadow = body.receiveShadow = true; body.position.y = PAD; tray.add(body);
+    const e = engravingMaterial(), eng = new THREE.Mesh(e.geo, e.mat);
+    eng.position.set(120.02, PAD + 12, 6); eng.rotation.y = Math.PI / 2; tray.add(eng);
+  }
+  const padGeo = new THREE.CylinderGeometry(5, 5, PAD, 32);
+  for (const [x, z] of [[108, 48], [-108, 48], [108, -48], [-108, -48]]) { const p = new THREE.Mesh(padGeo, M.padFelt); p.position.set(x, PAD / 2, z); p.receiveShadow = true; tray.add(p); }
+  return tray;
+}
+// Blender bake (tray_body.json = glTF with embedded buffer, tray_ao.png; published beside the page); the procedural tray stays as the fallback
+let BAKED = null;
+try {
+  const [gl, ao] = await Promise.all([new GLTFLoader().loadAsync('tray_body.json'), new THREE.TextureLoader().loadAsync('tray_ao.png')]);
+  const meshes = []; gl.scene.traverse((o) => { if (o.isMesh) meshes.push(o); });   // primitive order: walnut, engraving
+  ao.flipY = false; ao.channel = 1; ao.colorSpace = THREE.NoColorSpace; ao.anisotropy = maxAniso;
+  BAKED = { meshes, ao };
+} catch (e) { console.warn('[unbox] baked tray unavailable, using the procedural tray', e); }
+mark('baked');
+KEEP = true; const tray = buildTray();
+tray.position.set(0, 12, 0); boxRoot.add(tray);
+
+// pile cards that slot into the tray in the detail view (190 x 100, lean back 10.5° onto the back wall)
+const LEAN = 10.5 * Math.PI / 180, SLOTS = [40.6, 13.75, -13.75, -40.6];
+function cardFace(name, color, count) {
+  const c = canvas(760, 400), g = c.getContext('2d');
+  g.fillStyle = '#FBFBF9'; g.fillRect(0, 0, 760, 400);
+  g.fillStyle = color; g.fillRect(0, 0, 760, 84);
+  g.fillStyle = '#fff'; g.font = FONT.ko(700, 40); g.textBaseline = 'middle'; g.fillText(name, 32, 44);
+  for (let i = 0; i < 3; i++) { g.fillStyle = '#ECECEE'; g.beginPath(); g.roundRect(32 + i * 236, 116, 212, 160, 12); g.fill(); g.fillStyle = '#E0E0E3'; g.beginPath(); g.roundRect(32 + i * 236, 116, 212, 28, [12, 12, 0, 0]); g.fill(); }
+  g.fillStyle = '#8A867E'; g.font = FONT.ko(500, 30); g.fillText(`창 ${count}개`, 32, 336);
+  return tex(c);
+}
+const pileCards = new THREE.Group(); tray.add(pileCards); pileCards.visible = false;
+const cardPaper = new THREE.MeshPhysicalMaterial({ color: '#F3F2EE', roughness: 0.82 });
+[['3월 스프린트 기획', '#337EA9', 3], ['결제 오류 대응', '#D44C47', 2], ['주간 보고', '#448361', 2], ['월간 리포트', '#9065B0', 4]].forEach(([n, c, k], i) => {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(190, 100, 0.5), [cardPaper, cardPaper, cardPaper, cardPaper, new THREE.MeshPhysicalMaterial({ map: cardFace(n, c, k), roughness: 0.6, clearcoat: 0.1 }), cardPaper]);
+  m.rotation.x = -LEAN; m.userData.home = new THREE.Vector3(0, PAD + 6 + 50 * Math.cos(LEAN), SLOTS[i] - 50 * Math.sin(LEAN));
+  m.position.copy(m.userData.home); m.castShadow = m.receiveShadow = true; pileCards.add(m);
+});
+
+KEEP = false;
+// ---------- insert + velvet wrap + seal ----------
+const insert = new THREE.Group(); boxRoot.add(insert);
+insert.add(rbox(BW - 2 * TK - 3.6, 3, BD - 2 * TK - 3.6, 0, 10.5, 0, M.velvet, 1.2));
+const TS = { hinge: 121.6, y: 81.0, L: 134, Z: 148, nu: 48, nz: 10, T: 3 };          // T: velvet thickness (mm)
+for (const sx of [1, -1]) insert.add(rbox(TS.T, TS.y - 12, TS.Z, sx * TS.hinge, 12 + (TS.y - 12) / 2, 0, M.velvet, 1.2));
+function makeFlap(sx, lift) {
+  // a 3 mm slab: velvet top, satin lining underneath, closed edges along the tip and both sides
+  const cols = TS.nu + 1, rows = TS.nz + 1, N = cols * rows;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 2 * 3), 3));
+  const uv = new Float32Array(N * 2 * 2);
+  for (let l = 0; l < 2; l++) for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) { const i = l * N + r * cols + c; uv[i * 2] = c / TS.nu * TS.L / 7; uv[i * 2 + 1] = r / TS.nz * TS.Z / 7; }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  const top = [], edge = [], bot = [], V = (l, r, c) => l * N + r * cols + c;
+  const quad = (arr, p, q, t, u) => { if (sx > 0) arr.push(p, q, t, p, t, u); else arr.push(p, t, q, p, u, t); };   // the mirrored flap flips winding
+  for (let r = 0; r < TS.nz; r++) for (let c = 0; c < TS.nu; c++) { quad(top, V(0, r, c), V(0, r + 1, c), V(0, r + 1, c + 1), V(0, r, c + 1)); quad(bot, V(1, r, c), V(1, r, c + 1), V(1, r + 1, c + 1), V(1, r + 1, c)); }
+  for (let r = 0; r < TS.nz; r++) quad(edge, V(0, r, TS.nu), V(0, r + 1, TS.nu), V(1, r + 1, TS.nu), V(1, r, TS.nu));
+  for (let c = 0; c < TS.nu; c++) { quad(edge, V(0, 0, c), V(0, 0, c + 1), V(1, 0, c + 1), V(1, 0, c)); quad(edge, V(0, TS.nz, c + 1), V(0, TS.nz, c), V(1, TS.nz, c), V(1, TS.nz, c + 1)); }
+  geo.setIndex([...top, ...edge, ...bot]);
+  geo.addGroup(0, top.length + edge.length, 0); geo.addGroup(top.length + edge.length, bot.length, 1);
+  const wr = new Float32Array(cols * rows);
+  for (let i = 0; i < wr.length; i++) wr[i] = (fbm(i % cols * 0.25, Math.floor(i / cols) * 0.4 + sx * 9, 2) - 0.5) * 0.5;   // thick pile barely wrinkles
+  const m = new THREE.Mesh(geo, [M.velvet, M.lining]); m.castShadow = true; m.receiveShadow = true; insert.add(m);
+  return { sx, lift, geo, mesh: m, wr, k: 0, open: false };
+}
+const flapL = makeFlap(-1, 0.5), flapR = makeFlap(1, 1.1);
+// each flap is a strip of short segments; each segment's bend angle blends from closed (folded over the tray) to open (draped over the box wall)
+const FLAP_N = 40;
+function flapLine(ks) {
+  // one pass integrates the whole strip: [x, y, angle] at FLAP_N + 1 evenly spaced points
+  const out = [[0, 0, Math.PI]], ds = TS.L / FLAP_N; let x = 0, y = 0;
+  for (let i = 0; i < FLAP_N; i++) {
+    const t = (i + 0.5) * ds, u = t / TS.L;
+    const closed = Math.PI - 0.05 + 0.1 * u;                                          // a gentle dome over the tray
+    const open = t < 12 ? 0.12 : t < 60 ? 0.12 - (t - 12) / 48 * 1.32 : -1.2;          // stiff velvet: one wide bend, no droop
+    const kk = Math.min(1, Math.max(0, ks * 1.35 - u * 0.35));
+    const a = closed + (open - closed) * (kk * kk * (3 - 2 * kk));
+    x += Math.cos(a) * ds; y += Math.sin(a) * ds; out.push([x, y, a]);
+  }
+  return out;
+}
+function sampleLine(line, s) { const f = Math.min(FLAP_N, Math.max(0, s / TS.L * FLAP_N)), i = Math.min(FLAP_N - 1, Math.floor(f)), t = f - i, p = line[i], q = line[i + 1]; return [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, q[2]]; }
+function flapAt(ks, s) { return sampleLine(flapLine(ks), s); }
+function layoutFlap(f) {
+  const pos = f.geo.attributes.position, a = pos.array, cols = TS.nu + 1, rows = TS.nz + 1, N = cols * rows, pts = flapLine(f.k), h = TS.T / 2;
+  for (let c = 0; c < cols; c++) {
+    const [lx, ly, ang] = sampleLine(pts, c / TS.nu * TS.L), nx = Math.sin(ang), ny = -Math.cos(ang);   // strip normal (up when closed)
+    for (let r = 0; r < rows; r++) {
+      const w = f.wr[r * cols + c] * (0.3 + 0.7 * f.k), z = (r / TS.nz - 0.5) * TS.Z;
+      for (let l = 0; l < 2; l++) {
+        const o = l ? -h : h, i = (l * N + r * cols + c) * 3;
+        a[i] = f.sx * (TS.hinge + lx + nx * o); a[i + 1] = Math.max(TS.y + ly + ny * o + f.lift + w, 0.4 + (l ? 0 : TS.T)); a[i + 2] = z;
+      }
+    }
+  }
+  pos.needsUpdate = true; f.geo.computeVertexNormals(); f.geo.computeBoundingSphere();
+}
+layoutFlap(flapL); layoutFlap(flapR);
+const sealMat = (() => { const c = canvas(512, 512), g = c.getContext('2d');
+  g.fillStyle = WAL; g.beginPath(); g.arc(256, 256, 256, 0, 7); g.fill();
+  g.strokeStyle = 'rgba(241,236,227,.5)'; g.lineWidth = 3; g.beginPath(); g.arc(256, 256, 226, 0, 7); g.stroke();
+  drawMark(g, 256 - 95, 256 - 110, 190, '#F1ECE3');
+  g.fillStyle = 'rgba(241,236,227,.8)'; g.font = FONT.mono(30); g.textAlign = 'center';
+  const txt = 'STACK NEVERFLOW · WALNUT · ';
+  for (let i = 0; i < txt.length; i++) { const ang = -Math.PI / 2 + (i / txt.length) * Math.PI * 2; g.save(); g.translate(256 + Math.cos(ang) * 196, 256 + Math.sin(ang) * 196); g.rotate(ang + Math.PI / 2); g.fillText(txt[i], 0, 10); g.restore(); }
+  return new THREE.MeshPhysicalMaterial({ map: tex(c), roughness: 0.42, clearcoat: 0.4, clearcoatRoughness: 0.25 }); })();
+const seal = new THREE.Mesh(new THREE.CircleGeometry(16, 48).rotateX(-Math.PI / 2), sealMat);
+seal.castShadow = true; insert.add(seal);
+let sealLifted = 0, sealPeel = 0;                              // sealPeel: 0 stuck down .. 1 peeled back
+function placeSeal() {
+  const [lx, ly, a] = flapAt(flapR.k, TS.hinge), o = TS.T / 2 + 0.25 + sealLifted * 3;
+  const phi = Math.min(1, sealPeel) * 0.85, base = a - Math.PI + 0.07;   // hinged at its right edge
+  const ex = TS.hinge + lx + Math.sin(a) * o + Math.cos(base) * 16, ey = TS.y + ly - Math.cos(a) * o + flapR.lift + Math.sin(base) * 16;
+  seal.position.set(ex - Math.cos(base - phi) * 16, ey - Math.sin(base - phi) * 16, 0);
+  seal.rotation.set(0, 0, base - phi);
+}
+placeSeal();
+
+// ---------- bottom compartment: manual card, name-label sheet, holographic edition card ----------
+function cardArt(wmm, hmm, s, draw, base) { const c = canvas(wmm * s, hmm * s), g = c.getContext('2d'); g.fillStyle = base; g.fillRect(0, 0, c.width, c.height); draw(g, s, c.width, c.height); return c; }
+const manualArt = cardArt(90, 130, 8, (g, s, W) => {
+  drawMark(g, 9 * s, 9 * s, 12 * s, WAL);
+  g.fillStyle = '#1A1917'; g.font = FONT.disp(700, 8 * s); g.fillText('Neverflow Tray', 9 * s, 34 * s);
+  g.fillStyle = '#6E6A62'; g.font = FONT.ko(500, 3.6 * s); g.fillText('네버플로우 트레이 · 월넛', 9 * s, 41 * s);
+  g.fillStyle = '#1A1917'; g.font = FONT.ko(700, 4.4 * s); g.fillText('책상에 놓는 법', 9 * s, 60 * s);
+  const steps = ['앱에서 정리대 쇼룸을 열고', '"책상에 놓기"를 누릅니다.', '화면 가장자리로 끌면', '착 붙습니다.', '더미 카드가 일정한', '간격으로 꽂힙니다.'];
+  for (let i = 0; i < 3; i++) {
+    const y = (72 + i * 15) * s; g.fillStyle = WAL; g.font = FONT.mono(4 * s); g.fillText(String(i + 1), 9 * s, y);
+    g.fillStyle = '#3A3833'; g.font = FONT.ko(500, 3.6 * s); g.fillText(steps[i * 2], 16 * s, y); g.fillText(steps[i * 2 + 1], 16 * s, y + 5 * s);
+  }
+  g.strokeStyle = '#D8D3C8'; g.lineWidth = 2; g.beginPath(); g.moveTo(9 * s, 118 * s); g.lineTo(W - 9 * s, 118 * s); g.stroke();
+  g.fillStyle = '#8A857C'; g.font = FONT.mono(3 * s); g.fillText('STACK NEVERFLOW · SN-TR-WN', 9 * s, 124 * s);
+}, '#F4F1EA');
+const labelArt = cardArt(90, 130, 8, (g, s) => {
+  g.fillStyle = '#1A1917'; g.font = FONT.ko(700, 4.4 * s); g.fillText('이름표 스티커', 8 * s, 14 * s);
+  g.fillStyle = '#8A857C'; g.font = FONT.mono(2.8 * s); g.fillText('NAME LABELS · 10', 8 * s, 20 * s);
+  const L = [['3월 스프린트', '#337EA9'], ['결제 오류 대응', '#D44C47'], ['주간 보고', '#448361'], ['월간 리포트', '#9065B0'], ['봄 캠페인', '#D9730D'], ['인플루언서', '#C14C8A'], ['', '#337EA9'], ['', '#448361'], ['', '#D9730D'], ['', '#9065B0']];
+  L.forEach(([t, c], i) => {
+    const x = (8 + (i % 2) * 38) * s, y = (27 + Math.floor(i / 2) * 20) * s;
+    g.fillStyle = '#FFFFFF'; g.beginPath(); g.roundRect(x, y, 36 * s, 16 * s, 2.4 * s); g.fill();
+    g.strokeStyle = 'rgba(0,0,0,.16)'; g.lineWidth = 2; g.stroke();
+    g.fillStyle = c; g.beginPath(); g.roundRect(x, y, 36 * s, 5.5 * s, [2.4 * s, 2.4 * s, 0, 0]); g.fill();
+    if (t) { g.fillStyle = '#2B2925'; g.font = FONT.ko(500, 3.2 * s); g.fillText(t, x + 2.5 * s, y + 12 * s); }
+  });
+}, '#ECE8E0');
+const backArt = (txt) => cardArt(90, 130, 3, (g, s, W, H) => { g.fillStyle = '#B8B2A6'; g.font = FONT.mono(3 * s); g.textAlign = 'center'; g.fillText(txt, W / 2, H / 2); }, '#EFECE5');
+const paperCard = (art) => new THREE.MeshPhysicalMaterial({ map: tex(art), roughness: 0.85, sheen: 0.25, sheenRoughness: 0.7, sheenColor: '#fff' });
+const comp = new THREE.Group(); boxRoot.add(comp);
+comp.add(rbox(BW - 2 * TK - 1.2, 1.2, BD - 2 * TK - 1.2, 0, 2.6, 0, M.velvet, 0.6));                 // velvet-lined compartment
+const manual = rbox(90, 0.4, 130, -86, 3.4, 0, faces(M.white, { 2: paperCard(manualArt), 3: paperCard(backArt('STACK NEVERFLOW')) }), 0.15); manual.rotation.y = 0.02;
+const labels = rbox(90, 0.5, 130, 14, 3.45, 2, faces(M.white, { 2: paperCard(labelArt), 3: paperCard(backArt('KISS-CUT · 10 LABELS')) }), 0.15); labels.rotation.y = -0.015;
+comp.add(manual, labels);
+
+function roundedRect(w, h, r) { const s = new THREE.Shape(), x = -w / 2, y = -h / 2; s.moveTo(x + r, y); s.lineTo(x + w - r, y); s.quadraticCurveTo(x + w, y, x + w, y + r); s.lineTo(x + w, y + h - r); s.quadraticCurveTo(x + w, y + h, x + w - r, y + h); s.lineTo(x + r, y + h); s.quadraticCurveTo(x, y + h, x, y + h - r); s.lineTo(x, y + r); s.quadraticCurveTo(x, y, x + r, y); return s; }
+function holoMaterials() {
+  const W = 630, H = 880;
+  const col = canvas(W, H), orm = canvas(W, H), thk = canvas(W, H);
+  const gc = col.getContext('2d'), go = orm.getContext('2d'), gt = thk.getContext('2d');
+  gc.fillStyle = '#C9CDD3'; gc.fillRect(0, 0, W, H);
+  go.fillStyle = 'rgb(255,72,255)'; go.fillRect(0, 0, W, H);
+  const ti = gt.createImageData(W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const dx = x - W / 2, dy = y - H * 0.4, ang = Math.atan2(dy, dx), r = Math.hypot(dx, dy);
+    let v = 0.5 + 0.28 * Math.sin(ang * 36) * smooth(20, 160, r) + 0.12 * Math.sin(x * 0.7 + y * 0.45) + (vnoise(x * 0.02, y * 0.02) - 0.5) * 0.4 + r / H * 0.4;
+    v = Math.min(1, Math.max(0, v)); const k = (y * W + x) * 4; ti.data[k] = ti.data[k + 1] = ti.data[k + 2] = v * 255; ti.data[k + 3] = 255;
+  }
+  gt.putImageData(ti, 0, 0);
+  const ink = (fn) => { fn(gc, false); go.save(); fn(go, true); go.restore(); };
+  ink((g, isO) => { g.fillStyle = isO ? 'rgb(0,140,0)' : '#F1ECE3'; g.beginPath(); g.roundRect(34, 34, W - 68, 92, 10); g.fill(); });
+  gc.fillStyle = '#1A1917'; gc.font = FONT.disp(700, 46); gc.fillText('Neverflow Tray', 58, 92);
+  gc.fillStyle = '#7B4B2A'; gc.font = FONT.mono(20); gc.textAlign = 'right'; gc.fillText('OBJECT No.01', W - 58, 92); gc.textAlign = 'left';
+  const tx = W / 2, ty = 400;
+  const poly = (g, pts, fill) => { g.fillStyle = fill; g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (const p of pts.slice(1)) g.lineTo(p[0], p[1]); g.closePath(); g.fill(); };
+  const P = (x, y, z) => [tx + (x - z) * 1.05, ty + (x + z) * 0.42 - y * 1.25];
+  const trayDraw = (g, isO) => {
+    const c = (a) => isO ? 'rgb(0,120,0)' : a;
+    poly(g, [P(-110, 0, -55), P(110, 0, -55), P(110, 0, 55), P(-110, 0, 55)], c('#5A3823'));
+    poly(g, [P(-110, 0, -55), P(110, 0, -55), P(110, 60, -55), P(-110, 60, -55)], c('#7A5134'));
+    if (!isO) for (const [cc, z] of [['#337EA9', -30], ['#D44C47', -5], ['#448361', 20]]) { poly(g, [P(-80, 8, z), P(80, 8, z), P(80, 92, z - 8), P(-80, 92, z - 8)], '#FBFBF9'); poly(g, [P(-80, 80, z - 7), P(80, 80, z - 7), P(80, 92, z - 8), P(-80, 92, z - 8)], cc); }
+    poly(g, [P(110, 0, -55), P(110, 66, -55), P(110, 28, 55), P(110, 0, 55)], c('#4A2E1D'));
+    poly(g, [P(-110, 0, 55), P(110, 0, 55), P(110, 22, 55), P(-110, 22, 55)], c('#6B4429'));
+  };
+  trayDraw(gc, false); trayDraw(go, true);
+  ink((g, isO) => { g.fillStyle = isO ? 'rgb(0,120,0)' : '#191816'; g.beginPath(); g.roundRect(34, 612, W - 68, 234, 12); g.fill(); });
+  const foilText = (txt, x, y, font, align = 'left') => { gc.font = font; gc.textAlign = align; gc.fillStyle = '#D5D8DE'; gc.fillText(txt, x, y); go.font = font; go.textAlign = align; go.fillStyle = 'rgb(255,50,255)'; go.fillText(txt, x, y); };
+  foilText('FOUNDERS EDITION', 62, 666, FONT.mono(22));
+  foilText('No. 0042', 58, 770, FONT.disp(700, 92));
+  foilText('/ 500', W - 62, 770, FONT.disp(400, 44), 'right');
+  gc.fillStyle = '#8A857C'; gc.font = FONT.mono(18); gc.textAlign = 'left'; gc.fillText('SN-TR-WN · WALNUT · 2026', 62, 818);
+  gc.textAlign = 'right'; gc.fillText('STACK NEVERFLOW', W - 62, 818); gc.textAlign = 'left';
+  gc.strokeStyle = 'rgba(25,24,22,.6)'; gc.lineWidth = 3; gc.beginPath(); gc.roundRect(22, 22, W - 44, H - 44, 16); gc.stroke();
+  const ormT = tex(orm, { srgb: false });
+  const front = new THREE.MeshPhysicalMaterial({ map: tex(col), roughnessMap: ormT, metalnessMap: ormT, iridescenceMap: ormT, roughness: 1, metalness: 1,
+    iridescence: 1, iridescenceIOR: 1.75, iridescenceThicknessRange: [160, 900], iridescenceThicknessMap: tex(thk, { srgb: false }), clearcoat: 1, clearcoatRoughness: 0.05 });
+  const bc = canvas(315, 440), gb = bc.getContext('2d'); gb.fillStyle = '#6A4126'; gb.fillRect(0, 0, 315, 440); drawMark(gb, 157 - 50, 200 - 60, 100, '#E9DCCB');
+  gb.fillStyle = 'rgba(233,220,203,.7)'; gb.font = FONT.mono(13); gb.textAlign = 'center'; gb.fillText('NEVERFLOW OBJECT No.01', 157, 300);
+  return { front, back: new THREE.MeshPhysicalMaterial({ map: tex(bc), roughness: 0.5, clearcoat: 0.8, clearcoatRoughness: 0.1 }) };
+}
+const holoM = holoMaterials();
+const holo = new THREE.Group();
+{
+  const shp = roundedRect(63, 88, 3);
+  const edge = new THREE.Mesh(new THREE.ExtrudeGeometry(shp, { depth: 0.3, bevelEnabled: false, curveSegments: 6 }).rotateX(-Math.PI / 2).translate(0, -0.15, 0), M.core);
+  const fg = new THREE.ShapeGeometry(shp, 8); const uv = fg.attributes.uv, p = fg.attributes.position;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, (p.getX(i) + 31.5) / 63, (p.getY(i) + 44) / 88);
+  const bgGeo = fg.clone();
+  const fm = new THREE.Mesh(fg.rotateX(-Math.PI / 2).translate(0, 0.16, 0), holoM.front);
+  const bm = new THREE.Mesh(bgGeo.rotateX(Math.PI / 2).translate(0, -0.16, 0), holoM.back);
+  [edge, fm, bm].forEach((m) => { m.castShadow = m.receiveShadow = true; holo.add(m); });
+}
+holo.position.set(104, 3.7, -8); holo.rotation.y = 0.03; comp.add(holo);
+
+// ---------- parcel: kraft shipping box, OPP tape, label (296 x 172 x 116, 3 mm corrugated) ----------
+const PC = { w: 296, d: 172, h: 116, t: 3 };
+const parcel = new THREE.Group(); scene.add(parcel);
+const kraftSide = printed(PC.w, PC.h - PC.t, 2, (g, kind, s) => {
+  if (kind !== 'color') return;
+  const W = PC.w * s, H = (PC.h - PC.t) * s; g.globalAlpha = 0.78;
+  drawMark(g, 22 * s, H - 46 * s, 22 * s, '#3B2A1C');
+  g.fillStyle = '#3B2A1C'; g.font = FONT.disp(700, 9 * s); g.fillText('Stack Neverflow', 48 * s, H - 30 * s);
+  g.font = FONT.mono(3.4 * s); g.fillText('DESK OBJECT · HANDLE WITH CARE · 취급 주의', 48 * s, H - 21 * s);
+  g.textAlign = 'right'; g.font = FONT.mono(6 * s); g.fillText('↑↑', W - 20 * s, 22 * s); g.globalAlpha = 1;
+}, { base: '#B88A5C', rough: 0.9, sheen: 0.1 });
+parcel.add(rbox(PC.w, PC.t, PC.d, 0, PC.t / 2, 0, M.kraft, 0.6));
+parcel.add(rbox(PC.w, PC.h - PC.t, PC.t, 0, PC.t + (PC.h - PC.t) / 2, PC.d / 2 - PC.t / 2, faces(M.kraft, { 4: kraftSide }), 0.6));
+parcel.add(rbox(PC.w, PC.h - PC.t, PC.t, 0, PC.t + (PC.h - PC.t) / 2, -(PC.d / 2 - PC.t / 2), M.kraft, 0.6));
+parcel.add(rbox(PC.t, PC.h - PC.t, PC.d - 2 * PC.t, PC.w / 2 - PC.t / 2, PC.t + (PC.h - PC.t) / 2, 0, M.kraft, 0.6));
+parcel.add(rbox(PC.t, PC.h - PC.t, PC.d - 2 * PC.t, -(PC.w / 2 - PC.t / 2), PC.t + (PC.h - PC.t) / 2, 0, M.kraft, 0.6));
+const pflap = (pivot, w, d, off, y) => { const g = new THREE.Group(); g.position.copy(pivot); const m = rbox(w, PC.t, d, off.x, y, off.z, M.kraft, 0.6); g.add(m); parcel.add(g); return g; };
+const pfF = pflap(new THREE.Vector3(0, PC.h, PC.d / 2), PC.w, PC.d / 2, { x: 0, z: -PC.d / 4 }, PC.t / 2);
+const pfB = pflap(new THREE.Vector3(0, PC.h, -PC.d / 2), PC.w, PC.d / 2, { x: 0, z: PC.d / 4 }, PC.t / 2);
+const pfR = pflap(new THREE.Vector3(PC.w / 2, PC.h - PC.t, 0), 140, PC.d - 2 * PC.t, { x: -70, z: 0 }, PC.t / 2);
+const pfL = pflap(new THREE.Vector3(-PC.w / 2, PC.h - PC.t, 0), 140, PC.d - 2 * PC.t, { x: 70, z: 0 }, PC.t / 2);
+// tape halves ride their flaps; the knife line is a thin dark strip that grows along the seam
+const tapeF = new THREE.Mesh(new THREE.PlaneGeometry(PC.w + 2, 24).rotateX(-Math.PI / 2), M.tape); tapeF.position.set(0, PC.t + 0.15, -PC.d / 2 + 12); pfF.add(tapeF);
+const tapeB = new THREE.Mesh(new THREE.PlaneGeometry(PC.w + 2, 24).rotateX(-Math.PI / 2), M.tape); tapeB.position.set(0, PC.t + 0.15, PC.d / 2 - 12); pfB.add(tapeB);
+for (const sx of [1, -1]) { const t = new THREE.Mesh(new THREE.PlaneGeometry(48, 50), M.tape); t.rotation.y = sx * Math.PI / 2; t.position.set(sx * (PC.w / 2 + 0.15), PC.h - 25, 0); parcel.add(t); }
+const cut = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.7).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#2A2016' }));
+cut.position.set(0, PC.h + PC.t + 0.3, 0); cut.scale.x = 0.001; parcel.add(cut);
+const labelTex = cardArt(100, 64, 6, (g, s) => {
+  g.fillStyle = '#1A1917'; g.font = FONT.mono(3.2 * s); g.fillText('STACK NEVERFLOW · SHIP TO', 6 * s, 9 * s);
+  g.font = FONT.ko(700, 6 * s); g.fillText('받는 곳: 당신의 책상 위', 6 * s, 22 * s);
+  g.font = FONT.mono(3 * s); g.fillStyle = '#5A5650'; g.fillText('SN-TR-WN · 1 / 1 · 2026-10-24', 6 * s, 30 * s);
+  for (let i = 0; i < 64; i++) { const w = hash(i, 7) > 0.6 ? 2.2 : 1; g.fillStyle = '#111'; g.fillRect((6 + i * 1.35) * s, 38 * s, w * 0.5 * s, 18 * s); }
+}, '#F7F6F2');
+const label = new THREE.Mesh(new THREE.PlaneGeometry(100, 64).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: tex(labelTex), roughness: 0.55 }));
+label.position.set(-70, PC.t + 0.12, PC.d / 4 + 6); label.rotation.y = 0.04; pfB.add(label);
+product.position.y = PC.t;                                        // the sleeved box rests on the parcel floor
+
+// stainless utility knife with a walnut inlay; its blade tip is the group origin
+const knife = new THREE.Group(); knife.visible = false; scene.add(knife);
+{
+  const steel = new THREE.MeshPhysicalMaterial({ color: '#D3D6DA', metalness: 1, roughness: 0.28, anisotropy: 0.85, clearcoat: 0.25, clearcoatRoughness: 0.2 });
+  const polished = new THREE.MeshPhysicalMaterial({ color: '#ECEEF0', metalness: 1, roughness: 0.06 });
+  const pose = new THREE.Group(); pose.rotation.z = 0.62; knife.add(pose); knife.userData.pose = pose;
+  const blade = new THREE.Mesh(new THREE.ExtrudeGeometry(new THREE.Shape([[0, 0], [18, 4.6], [18, 9.5], [6.5, 9.5]].map(([a, b]) => new THREE.Vector2(a, b))), { depth: 0.5, bevelEnabled: false }).translate(0, 0, -0.25), polished);
+  pose.add(blade);
+  pose.add(rbox(92, 11, 9, 18 + 46, 8.5, 0, steel, 2.6, 3));
+  pose.add(rbox(56, 6, 9.4, 18 + 52, 8.5, 0, M.walnut, 1.6, 2));
+  pose.add(rbox(10, 3, 9.6, 18 + 14, 14.4, 0, steel, 1.2, 2));          // thumb slider
+  pose.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+}
+// thank-you postcard (A6, letterpress) resting on the velvet; the reader can pick it up
+const postcardFront = printed(148, 100, 6, (g, kind, s) => {
+  const ink = kind === 'color' ? '#3A2A1E' : '#8a8a8a';
+  if (kind === 'orm') return;
+  drawMark(g, 12 * s, 11 * s, 9 * s, kind === 'color' ? WAL : '#909090');
+  g.fillStyle = ink; g.font = FONT.ko(700, 6.4 * s); g.fillText('당신의 책상에', 12 * s, 36 * s); g.fillText('자리를 하나 만들었어요.', 12 * s, 45 * s);
+  if (kind === 'color') {
+    g.fillStyle = '#5A4B40'; g.font = FONT.ko(500, 3.3 * s);
+    ['흩어진 창들이 잠시 쉬어 갈 곳이 필요하다고 생각했어요.', '이 트레이가 매일 조금 덜 어지러운 하루를', '만들어 주길 바라요.'].forEach((l, i) => g.fillText(l, 12 * s, (58 + i * 5.4) * s));
+    g.fillStyle = '#3A2A1E'; g.font = FONT.disp(400, 4.4 * s); g.fillText('— Stack Neverflow 드림', 12 * s, 86 * s);
+    g.fillStyle = '#9A8F84'; g.font = FONT.mono(2.6 * s); g.textAlign = 'right'; g.fillText('No. 0042 / 500 · 2026.10', 136 * s, 90 * s);
+  }
+}, { base: '#F3EEE4', rough: 0.9, sheen: 0.3, deboss: true });
+const postcardBack = (() => { const c = canvas(444, 300), g = c.getContext('2d'); g.fillStyle = '#6A4126'; g.fillRect(0, 0, 444, 300); drawMark(g, 222 - 40, 150 - 48, 80, '#E9DCCB');
+  return new THREE.MeshPhysicalMaterial({ map: tex(c), roughness: 0.6 }); })();
+const postcard = new THREE.Group(); boxRoot.add(postcard);
+postcard.add(rbox(148, 0.6, 100, 0, 0, 0, faces(M.white, { 2: postcardFront, 3: postcardBack }), 0.2));
+const POSTCARD_HOME = new THREE.Vector3(-56, TS.y + TS.T / 2 + 2.6, 4), POSTCARD_DESK = new THREE.Vector3(-232, 0.3, 70);
+postcard.position.copy(POSTCARD_HOME); postcard.rotation.set(0, 0.07, 0);
+// one warm spot for the reveal; everything else dims around it
+const spot = new THREE.SpotLight('#FFF1DF', 0, 0, 0.26, 1, 0); spot.position.set(0, 560, 140); scene.add(spot, spot.target);
+mark('models');
+// ---------- post: MSAA target -> render -> depth of field -> output (tone map + sRGB) ----------
+const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+const composer = new EffectComposer(renderer, rt);
+// RenderPass draws into readBuffer (renderTarget2), the only buffer that needs MSAA; the ping-pong buffer for DOF does not
+composer.renderTarget1.samples = 0;
+composer.addPass(new RenderPass(scene, camera));
+const bokeh = new BokehPass(scene, camera, { focus: 600, aperture: 0.00004, maxblur: 0.006 });
+composer.addPass(bokeh);
+composer.addPass(new OutputPass());
+const bokehU = bokeh.uniforms || bokeh.materialBokeh.uniforms;
+
+// ---------- camera rig, tweens, render-on-demand ----------
+const rig = { pos: new THREE.Vector3(760, 820, 980), tgt: new THREE.Vector3(0, 60, 0), focus: new THREE.Vector3(0, 80, 0), aperture: 0.00004 };
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enabled = false; controls.enableDamping = true; controls.dampingFactor = 0.08; controls.enablePan = false; controls.zoomToCursor = true;
+controls.minDistance = 16; controls.maxDistance = 1100; controls.maxPolarAngle = 1.52; controls.zoomSpeed = 1.1;
+let lastAct = performance.now(), pending = 3;
+const poke = () => { lastAct = performance.now(); pending = 3; };   // pending: frames still owed even if rAF was paused in the background
+controls.addEventListener('change', poke);
+let RM = false;                                                // still frames only on request (the 정지 컷 button); the OS setting alone made every move snap
+const ease = { io: (k) => k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2, out: (k) => 1 - Math.pow(1 - k, 3), in: (k) => k * k * k, lin: (k) => k };
+const tweens = [];
+function tween(dur, fn, e = ease.io) { return new Promise((res) => { if (RM || dur <= 0) { fn(1); poke(); res(); return; } tweens.push({ t0: performance.now(), dur, fn, e, res }); }); }
+function runTweens(now) { for (let i = tweens.length - 1; i >= 0; i--) { const t = tweens[i], k = Math.min(1, (now - t.t0) / t.dur); t.fn(t.e(k)); if (k >= 1) { tweens.splice(i, 1); t.res(); } } }
+const wait = (ms) => new Promise((r) => setTimeout(r, RM ? Math.min(ms, 150) : ms));
+let camToken = null;
+function camTo(pos, tgt, dur = null, focus = null, e = ease.io) {
+  // the camera swings on an arc around what it looks at (no straight cuts through the box); a new move replaces the old one
+  const p0 = rig.pos.clone(), t0 = rig.tgt.clone(), f0 = rig.focus.clone(), p1 = new THREE.Vector3(...pos), t1 = new THREE.Vector3(...tgt), f1 = focus ? new THREE.Vector3(...focus) : t1.clone();
+  const o0 = p0.clone().sub(t0), o1 = p1.clone().sub(t1), r0 = o0.length(), r1 = o1.length(), d0 = o0.clone().normalize();
+  const qEnd = new THREE.Quaternion().setFromUnitVectors(d0, o1.clone().normalize()), qI = new THREE.Quaternion(), qK = new THREE.Quaternion(), off = new THREE.Vector3();
+  if (dur == null) dur = Math.min(2800, Math.max(1100, 650 + (p0.distanceTo(p1) + t0.distanceTo(t1) * 0.6) * 1.5));
+  const token = {}; camToken = token;
+  return tween(dur, (k) => {
+    if (camToken !== token) return;
+    rig.tgt.lerpVectors(t0, t1, k); qK.slerpQuaternions(qI, qEnd, k);
+    rig.pos.copy(rig.tgt).add(off.copy(d0).applyQuaternion(qK).multiplyScalar(r0 + (r1 - r0) * k)); rig.focus.lerpVectors(f0, f1, k);
+  }, e);
+}
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+
+// ---------- sound: synthesized, quiet, one cue per beat ----------
+let AC = null, soundOn = true, noiseBuf = null;
+function ac() { if (!soundOn) return null; if (!AC) { try { AC = new AudioContext(); } catch (e) { return null; } } if (AC.state === 'suspended') AC.resume(); return AC; }
+function nbuf(a) { if (!noiseBuf) { noiseBuf = a.createBuffer(1, a.sampleRate, a.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; } return noiseBuf; }
+// a looping filtered noise whose level follows how fast the hand moves (tearing, sliding, brushing velvet)
+function loopNoise({ f = 1200, q = 0.8, type = 'bandpass' } = {}) {
+  const a = ac(); if (!a) return { set() {}, stop() {} };
+  const src = a.createBufferSource(), fl = a.createBiquadFilter(), g = a.createGain();
+  src.buffer = nbuf(a); src.loop = true; fl.type = type; fl.frequency.value = f; fl.Q.value = q; g.gain.value = 0;
+  src.connect(fl).connect(g).connect(a.destination); src.start();
+  return { set(v, fr) { g.gain.setTargetAtTime(v, a.currentTime, 0.04); if (fr) fl.frequency.setTargetAtTime(fr, a.currentTime, 0.06); },
+           stop() { g.gain.setTargetAtTime(0, a.currentTime, 0.05); src.stop(a.currentTime + 0.4); } };
+}
+function noise({ dur = 0.1, f = 2000, q = 1, gain = 0.05, type = 'bandpass', f2 = null, attack = 0.004 }) {
+  const a = ac(); if (!a) return; nbuf(a);
+  const s = a.createBufferSource(), fl = a.createBiquadFilter(), g = a.createGain(), t = a.currentTime;
+  s.buffer = noiseBuf; fl.type = type; fl.frequency.setValueAtTime(f, t); if (f2) fl.frequency.exponentialRampToValueAtTime(f2, t + dur); fl.Q.value = q;
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(gain, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  s.connect(fl).connect(g).connect(a.destination); s.start(t, Math.random() * 0.5); s.stop(t + dur + 0.05);
+}
+function tone(freq, dur, gain, delay = 0) { const a = ac(); if (!a) return; const o = a.createOscillator(), g = a.createGain(), t = a.currentTime + delay; o.frequency.value = freq; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(gain, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g).connect(a.destination); o.start(t); o.stop(t + dur + 0.05); }
+const SND = {
+  thud: () => { tone(62, 0.28, 0.12); noise({ dur: 0.12, f: 260, type: 'lowpass', gain: 0.08 }); },
+  slide: () => noise({ dur: 1.3, f: 900, f2: 1600, q: 0.6, gain: 0.03, attack: 0.25 }),
+  tick: () => noise({ dur: 0.018, f: 3200, q: 2.5, gain: 0.035 }),
+  slit: () => noise({ dur: 0.03, f: 1800, q: 1.2, gain: 0.03 }),
+  snap: () => { noise({ dur: 0.04, f: 4200, q: 3, gain: 0.08 }); tone(1800, 0.05, 0.015); },
+  rub: () => noise({ dur: 0.5, f: 1200, f2: 700, q: 0.8, gain: 0.03, attack: 0.12 }),
+  huff: () => noise({ dur: 0.45, f: 500, f2: 260, type: 'lowpass', gain: 0.06, attack: 0.08 }),
+  rustle: () => noise({ dur: 0.42, f: 1300, f2: 700, q: 0.6, gain: 0.035, attack: 0.07 }),   // velvet: a soft, low brush
+  flap: () => noise({ dur: 0.3, f: 700, f2: 300, q: 0.8, gain: 0.05, attack: 0.03 }),
+  chord: () => { [392, 493.9, 587.3].forEach((f, i) => tone(f, 1.8, 0.03, i * 0.04)); },
+  pick: () => { noise({ dur: 0.05, f: 2600, q: 2, gain: 0.04 }); },
+  tick2: () => noise({ dur: 0.014, f: 2600 + Math.random() * 1400, q: 3, gain: 0.03 }),
+  card: () => { noise({ dur: 0.12, f: 1800, f2: 900, q: 1, gain: 0.03, attack: 0.01 }); },
+};
+
+// ---------- UI ----------
+const STEPS = [
+  { name: '택배 도착', cam: '하이앵글', hint: '칼을 테이프 위에 대고 끝에서 끝까지 끌어 칼집을 내세요.', act: '자동으로 열기' },
+  { name: '슬리브 벗기기', cam: '끝면 로우앵글', hint: '슬리브를 잡고 오른쪽으로 밀어 빼세요.', act: '버튼으로 벗기기' },
+  { name: '절취선 스티커', cam: '매크로', hint: '살짝 떠 있는 화살표 탭을 잡고 왼쪽으로 끌어 뜯으세요. 손을 뗐다가 뜯긴 부분을 다시 잡아도 이어집니다.', act: '자동으로 뜯기' },
+  { name: '뚜껑 들기', cam: '로우앵글', hint: '뚜껑을 위로 끌어 올리세요. 처음엔 살짝 버팁니다.', act: '뚜껑 열기' },
+  { name: '첫인상', cam: '탑다운', hint: '벨벳 덮개 위에 엽서가 놓여 있어요. 눌러서 읽어 보세요.', act: '엽서 읽기' },
+  { name: '벨벳 덮개 펼치기', cam: '30° · 근접', hint: '먼저 씰 스티커를 끌어 떼세요.', act: '버튼으로 펼치기' },
+  { name: '첫 만남', cam: '로우앵글 · 스폿', hint: '트레이를 잡고 천천히 위로 들어 올리세요.', act: '버튼으로 들어 올리기' },
+  { name: '구성품', cam: '탑다운 · 플랫레이', hint: '구성품을 눌러 손에 들어 보세요. 마우스로 좌우·앞뒤로 돌려 볼 수 있어요.', act: '디테일 감상으로' },
+  { name: '책상에 놓기', cam: '내 바탕화면', app: true },
+  { name: '디테일 감상', cam: '매크로 · 낮은 조명', hint: '끌어서 돌리고, 휠로 커서 쪽을 확대하세요. 번호를 누르면 마감 설명이 나옵니다.' },
+];
+$('rail').innerHTML = STEPS.map((s, i) => `<li class="${s.app ? 'app' : ''}"><i></i><span><em>${String(i).padStart(2, '0')}</em>${s.name}${s.app ? ' · 앱' : ''}</span></li>`).join('');
+let step = -1;
+function setCue(i, hint) {
+  const s = STEPS[i];
+  $('cueNo').textContent = String(i).padStart(2, '0'); $('cueCam').textContent = s.cam; $('cueName').textContent = s.name;
+  $('cueHint').textContent = hint || s.hint;
+  [...$('rail').children].forEach((li, j) => { li.classList.toggle('done', j < i); li.classList.toggle('now', j === i); });
+}
+function actions(list) {
+  const box = $('cueActions'); box.innerHTML = '';
+  for (const [label, fn, primary] of list) { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (primary) b.className = 'primary'; b.addEventListener('click', fn); box.appendChild(b); }
+}
+
+// ---------- pointer plumbing ----------
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+function setNdc(e) { const r = renderer.domElement.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, camera); }
+function hitPlane(normal, c) { const pl = new THREE.Plane(normal, -c), p = new THREE.Vector3(); return ray.ray.intersectPlane(pl, p) ? p : null; }
+let H = {};
+let down = null;
+renderer.domElement.addEventListener('pointerdown', (e) => { ac(); poke(); setNdc(e); down = { x: e.clientX, y: e.clientY, t: performance.now() }; renderer.domElement.setPointerCapture(e.pointerId); H.down && H.down(e); });
+renderer.domElement.addEventListener('pointermove', (e) => { setNdc(e); if (down) { poke(); H.drag && H.drag(e, e.clientX - down.x, e.clientY - down.y); } else H.hover && H.hover(e); });
+renderer.domElement.addEventListener('pointerup', (e) => { const d = down; down = null; if (!d) return; poke(); setNdc(e); const moved = Math.hypot(e.clientX - d.x, e.clientY - d.y); H.up && H.up(e, e.clientX - d.x, e.clientY - d.y); if (moved < 6) H.click && H.click(e); });
+const mouse = new THREE.Vector2();
+window.addEventListener('pointermove', (e) => { mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); if (step === 7) poke(); });
+
+// ---------- steps ----------
+const S = { busy: false };
+async function enter(i) { step = i; H = {}; S.follow = null; setCue(i); actions([]); stage.className = ''; poke(); ENTER[i](); }
+const ENTER = [];
+// 00 parcel: the courier box is set down; a stainless knife follows the hand and slits the tape end to end
+ENTER[0] = async () => {
+  setCue(0, '택배가 왔어요.');
+  parcel.position.y = 260; product.position.y = PC.t + 260;
+  camTo([520, 520, 640], [0, 60, 0], 2400, [0, 110, 40], ease.out);
+  await tween(1100, (k) => { parcel.position.y = 260 * (1 - k); product.position.y = PC.t + 260 * (1 - k); }, ease.in);
+  SND.thud();
+  await camTo([40, 560, 380], [0, 110, 10], null, [0, 118, 0]);
+  const TOP = PC.h + PC.t + 0.2, LEN = PC.w, pose = knife.userData.pose;
+  knife.visible = true; knife.position.set(260, TOP + 160, 120); knife.rotation.set(0, 0, 0);
+  const kt = V(-LEN / 2 + 6, TOP + 8, 0);
+  await tween(900, (k) => { knife.position.lerpVectors(V(260, TOP + 160, 120), kt, k); }, ease.out);
+  setCue(0); stage.className = 'ew';
+  let lo = Infinity, hi = -Infinity, cutting = false, opened = false, lastX = null;
+  const slit = loopNoise({ f: 2200, q: 1.4 });
+  const show = () => { const a = Math.max(lo, -LEN / 2), b = Math.min(hi, LEN / 2); if (b > a) { cut.scale.x = b - a; cut.position.x = (a + b) / 2; } };
+  const aim = () => { const p = hitPlane(new THREE.Vector3(0, 1, 0), TOP); if (!p) return null; p.x = Math.max(-LEN / 2 - 10, Math.min(LEN / 2 + 10, p.x)); p.z = Math.max(-40, Math.min(40, p.z)); return p; };
+  S.follow = () => {                                                 // the knife trails the hand a touch, like a held tool
+    const d = knife.position.distanceTo(kt); knife.position.lerp(kt, 0.3);
+    pose.rotation.z += ((cutting ? 0.78 : 0.62) - pose.rotation.z) * 0.2;
+    return d > 0.02;
+  };
+  const open = async () => {
+    if (opened) return; opened = true; H = {}; actions([]); stage.className = ''; slit.stop(); lo = -LEN / 2; hi = LEN / 2; show(); S.follow = null;
+    // the knife is set down beside the parcel, flat, before the flaps open
+    const k0 = knife.position.clone();
+    tween(900, (k) => { knife.position.set(k0.x + (200 - k0.x) * k, k0.y + (4.5 - k0.y) * k + 60 * Math.sin(k * Math.PI), k0.z + (150 - k0.z) * k); knife.rotation.set(-Math.PI / 2 * k, 0.5 * k, 0); pose.rotation.z = 0.62 * (1 - k); }, ease.io).then(SND.pick);
+    SND.flap();
+    await tween(950, (k) => { pfF.rotation.x = 3.5 * k; pfB.rotation.x = -3.5 * k; cut.visible = k < 0.05; }, ease.io);
+    SND.flap();
+    await tween(750, (k) => { pfR.rotation.z = -3.4 * k; pfL.rotation.z = 3.4 * k; }, ease.io);
+    camTo([380, 360, 560], [0, 120, 0], null, [0, 120, 0]);
+    await tween(1100, (k) => { product.position.y = PC.t + 190 * k; }, ease.io);
+    tween(1000, (k) => { parcel.position.z = -720 * k; parcel.position.x = -200 * k; }, ease.in).then(() => { parcel.visible = false; });
+    await tween(900, (k) => { product.position.y = PC.t + 190 - (PC.t + 190) * k; }, ease.out);
+    SND.thud(); enter(1);
+  };
+  H.hover = () => { const p = aim(); if (p) kt.set(p.x, TOP + 8, p.z); };
+  H.down = () => { cutting = true; lastX = null; };
+  H.drag = () => {
+    const p = aim(); if (!p) return; kt.set(p.x, TOP - 1.4, p.z);                 // the tip sinks into the seam while cutting
+    if (Math.abs(p.z) > 30) { slit.set(0); return; }
+    const x = Math.max(-LEN / 2, Math.min(LEN / 2, p.x));
+    const speed = lastX == null ? 0 : Math.abs(x - lastX); lastX = x;
+    if (lo === Infinity) { lo = hi = x; }
+    lo = Math.min(lo, x); hi = Math.max(hi, x); show();
+    slit.set(Math.min(0.06, speed * 0.004), 1800 + speed * 40);
+    if (hi - lo > LEN - 24) open();
+  };
+  H.up = () => { cutting = false; slit.set(0); const p = aim(); if (p) kt.set(p.x, TOP + 8, p.z); };
+  actions([[STEPS[0].act, async () => { H = {}; actions([]); const x0 = knife.position.x; cutting = true; await tween(1800, (k) => { const x = -LEN / 2 + LEN * k; kt.set(x, TOP - 1.4, 0); lo = -LEN / 2; hi = x; show(); slit.set(0.04); }, ease.io); open(); }, true]]);
+};
+// 01 sleeve: the camera starts low at the box's end, looking down its length; the hand pushes the sleeve off toward the lens
+ENTER[1] = async () => {
+  const A = { pos: V(470, 46, 190), tgt: V(60, 52, 0) }, B = { pos: V(480, 320, 560), tgt: V(10, 42, 0) };
+  await camTo(A.pos.toArray(), A.tgt.toArray(), null, [140, 60, 40]);
+  sweep.position.set(-160, 260, -60); sweep.target.position.set(-160, 96, 0); sweep.angle = 0.22; sweep.penumbra = 1;
+  tween(700, (k) => { sweep.intensity = k * 4.5; });
+  tween(2600, (k) => { const x = -160 + 300 * k; sweep.position.x = x - 20; sweep.target.position.x = x; }, ease.io).then(() => tween(700, (k) => { sweep.intensity = 4.5 * (1 - k); }));
+  setCue(1); stage.className = 'ew';
+  let target = 0, grab = null, done = false;
+  const slide = loopNoise({ f: 900, q: 0.6 });
+  const END = 300;
+  S.follow = () => {
+    const before = sleeve.position.x; sleeve.position.x += (target - sleeve.position.x) * 0.22;
+    const v = Math.abs(sleeve.position.x - before); slide.set(Math.min(0.05, v * 0.012), 700 + v * 60);
+    const k = ease.io(Math.min(1, sleeve.position.x / END));          // the camera rises and swings to the front as the sleeve comes away
+    rig.pos.lerpVectors(A.pos, B.pos, k); rig.tgt.lerpVectors(A.tgt, B.tgt, k); rig.focus.set(140 + sleeve.position.x * 0.4, 60, 40);
+    if (!done && sleeve.position.x > END - 4) finish();
+    return v > 0.01;
+  };
+  const finish = async () => {
+    done = true; H = {}; actions([]); stage.className = ''; S.follow = null; slide.stop();
+    const x0 = sleeve.position.x;
+    await tween(700, (k) => { sleeve.position.x = x0 + (452 - x0) * k; rig.pos.lerpVectors(rig.pos.clone(), B.pos, k); }, ease.out);
+    SND.thud(); tween(240, (k) => { boxRoot.position.y = 0.6 * (1 - k); }, ease.out);
+    enter(2);
+  };
+  const along = () => { const p = hitPlane(new THREE.Vector3(0, 0, 1), SL.d / 2); return p ? p.x : null; };
+  H.down = () => { const x = along(); if (x != null) grab = { x, s: target }; };
+  H.drag = () => { if (!grab) return; const x = along(); if (x == null) return; let d = x - grab.x; if (grab.s < 4) d = d < 4 ? d * 0.35 : d - 2.6; target = Math.max(0, Math.min(END + 10, grab.s + d)); };   // a little static friction first
+  H.up = () => { grab = null; };
+  actions([[STEPS[1].act, async () => { H = {}; actions([]); const t0 = target; await tween(1600, (k) => { target = t0 + (END - t0) * k; }, ease.io); }]]);
+};
+// 02 tear strip: the camera stays on the tab; any part already lifted can be grabbed again
+let lastTick = 0;
+ENTER[2] = async () => {
+  S.follow = null;
+  await camTo([200, 150, 300], [96, 62, 78], null, [128, 62, 80]);
+  stage.className = 'grab';
+  let grab = null, done = false, target = peelP;
+  const tear = loopNoise({ f: 2800, q: 1.2 });
+  const finish = async () => {
+    if (done) return; done = true; H = {}; actions([]); SND.snap(); tear.stop(); stage.className = ''; S.follow = null; layoutStrip(1e4);
+    const g0 = strip.position.clone();
+    await tween(800, (k) => { strip.position.set(g0.x + 170 * k, g0.y + 34 * Math.sin(k * Math.PI) - (g0.y - 3) * k, g0.z + 130 * k); strip.rotation.x = -Math.PI / 2 * k; strip.rotation.z = 0.35 * k; }, ease.io);
+    enter(3);
+  };
+  const along = () => { const p = hitPlane(new THREE.Vector3(0, 0, 1), STK.z); return p ? p.x : null; };
+  H.down = () => { const x = along(); if (x != null) grab = { x, p: target }; };           // wherever the hand lands, the pull continues from here
+  H.drag = () => { if (!grab) return; const x = along(); if (x == null) return; target = Math.max(-STK.len / 2, Math.min(grab.p, grab.p + (x - grab.x) / 2)); };
+  H.up = () => { grab = null; };
+  S.follow = () => {
+    const before = peelP, p = Math.max(target, peelP - 6);           // the strip gives at most 6 mm per frame: you feel it resist
+    if (p < peelP) {
+      const now = performance.now();
+      if (Math.floor(peelP / STK.pitch) !== Math.floor(p / STK.pitch) && now - lastTick > 12) { SND.tick2(); lastTick = now; }
+      peelP = p; layoutStrip(peelP);
+    }
+    const v = before - peelP; tear.set(Math.min(0.07, v * 0.02), 2400 + v * 260);
+    if (peelP <= -STK.len / 2 + 0.01) finish();
+    const fx = Math.max(-100, Math.min(110, peelP - 14)), tp = V(fx + 100, 150, 300);
+    const moving = rig.pos.distanceTo(tp) > 0.05 || v > 0;
+    rig.tgt.lerp(V(fx, 62, 78), 0.07); rig.pos.lerp(tp, 0.07); rig.focus.lerp(V(peelP, 64, 80), 0.15);
+    return moving;
+  };
+  actions([[STEPS[2].act, async () => { H = {}; actions([]); const p0 = target; await tween(2600, (k) => { target = p0 + (-STK.len / 2 - p0) * k; }, ease.lin); }]]);
+};
+// 03 lid: low angle at seam height; drag up against a short air resistance; light leaks from the gap
+ENTER[3] = async () => {
+  S.follow = null;
+  await camTo([-330, 66, 430], [0, 74, 40], null, [0, 66, 78]);
+  stage.className = 'grab';
+  let lift = 0, target = 0, t0 = 0, dragging = false, released = false;
+  H.down = () => { dragging = true; t0 = performance.now(); SND.rub(); };
+  H.drag = (e, dx, dy) => { if (dragging) target = Math.max(0, -dy * 0.32); };
+  const away = async () => {
+    released = true; S.lidTick = null; H = {}; actions([]); stage.className = ''; SND.huff();
+    const y0 = lift;
+    camTo([-180, 300, 420], [0, 80, 0], 1700, [0, 85, 0]);
+    await tween(700, (k) => { lid.position.y = y0 + (130 - y0) * k; leak.intensity = 9; }, ease.out);
+    await tween(1200, (k) => { lid.position.set(-40 * k, 130 - (130 + 62) * k + 40 * Math.sin(k * Math.PI), -300 * k); lid.rotation.y = 0.15 * k; leak.intensity = 9 * (1 - k); }, ease.io);
+    SND.thud(); enter(4);
+  };
+  H.up = () => { dragging = false; if (lift > 42 || target > 80) away(); else target = 0; };
+  S.lidTick = (dt) => {
+    if (released) return false;
+    const tt = (performance.now() - t0) / 1000;
+    const vmax = dragging ? (tt < 0.4 ? 14 : Math.min(320, 14 + (tt - 0.4) * 700)) : 200;
+    const d = target - lift; if (Math.abs(d) < 0.01) return false;
+    lift += Math.sign(d) * Math.min(Math.abs(d), vmax * dt);
+    lid.position.y = lift; leak.intensity = smooth(0, 26, lift) * 9; return true;
+  };
+  actions([[STEPS[3].act, () => { lift = 0; away(); }]]);
+};
+// 04 first impression: top-down; a postcard lies on the velvet; pick it up, read it, set it aside on the desk
+const POST_CAM = V(0, 560, 90), POST_TGT = V(0, 70, 6);
+ENTER[4] = async () => {
+  await camTo(POST_CAM.toArray(), POST_TGT.toArray(), null, [-40, 86, 0]);
+  sweep.angle = 0.06; sweep.penumbra = 1; sweep.position.set(-60, 400, 160); sweep.target.position.set(-40, 84, 0);
+  tween(1600, (k) => { sweep.intensity = Math.sin(k * Math.PI) * 8; sweep.target.position.x = -40 + 80 * k; sweep.position.x = -60 + 80 * k; }, ease.io);
+  stage.className = 'point';
+  let reading = false, busy = false;
+  const held = POST_CAM.clone().add(POST_TGT.clone().sub(POST_CAM).normalize().multiplyScalar(300));
+  S.flatTick = () => {
+    if (!reading) return false;
+    const rx = 0.16 - mouse.y * 0.3, rz = -mouse.x * 0.35, d = Math.abs(rx - postcard.rotation.x) + Math.abs(rz - postcard.rotation.z);
+    postcard.rotation.x += (rx - postcard.rotation.x) * 0.12; postcard.rotation.z += (rz - postcard.rotation.z) * 0.12; return d > 1e-3;
+  };
+  const read = async () => {
+    if (busy) return; busy = true; SND.card(); const from = postcard.position.clone();
+    rig.focus.copy(held); $('holoTag').textContent = '엽서 · 148 × 100 mm · 레터프레스'; $('holoTag').hidden = false;
+    await tween(800, (k) => { postcard.position.lerpVectors(from, held, k); postcard.rotation.y = 0.07 * (1 - k); }, ease.io);
+    reading = true; busy = false; setCue(4, '천천히 읽어 보세요. 다 읽었으면 눌러서 책상에 내려놓아요.'); actions([['내려놓기', setDown, true]]);
+  };
+  const setDown = async () => {
+    if (busy) return; busy = true; reading = false; S.flatTick = null; $('holoTag').hidden = true; SND.card(); actions([]); stage.className = '';
+    const from = postcard.position.clone(), r0 = postcard.rotation.clone();
+    camTo([-60, 520, 260], [-60, 40, 20], null, [-120, 40, 40]);
+    await tween(1100, (k) => { postcard.position.set(from.x + (POSTCARD_DESK.x - from.x) * k, from.y + (POSTCARD_DESK.y - from.y) * k + 40 * Math.sin(k * Math.PI), from.z + (POSTCARD_DESK.z - from.z) * k);
+      postcard.rotation.set(r0.x * (1 - k), -0.28 * k, r0.z * (1 - k)); }, ease.io);
+    SND.pick(); enter(5);
+  };
+  H.click = () => { if (reading) setDown(); else if (ray.intersectObject(postcard, true)[0]) read(); };
+  actions([[STEPS[4].act, read, true]]);
+};
+// 05 velvet wrap in three moves: peel the seal, then lift the heavy right flap, then the left one
+ENTER[5] = async () => {
+  await camTo([0, 300, 270], [0, 74, 14], null, [0, 84, 0]);
+  stage.className = 'grab';
+  let stageV = 0, grab = null, f = null, kTarget = 0, settling = false;
+  const brush = loopNoise({ f: 900, q: 0.5 });
+  const hint = ['먼저 씰 스티커를 끌어 떼세요.', '두꺼운 오른쪽 덮개를 잡고 오른쪽으로 넘기세요.', '이제 왼쪽 덮개를 왼쪽으로 넘기세요.'];
+  const next = () => {
+    stageV++;
+    if (stageV === 1) { camTo([70, 300, 260], [20, 74, 14], null, [40, 84, 0]); setCue(5, hint[1]); stage.className = 'ew'; }
+    else if (stageV === 2) { camTo([-70, 300, 260], [-20, 74, 14], null, [-40, 84, 0]); setCue(5, hint[2]); }
+    else { H = {}; actions([]); stage.className = ''; S.follow = null; brush.stop(); enter(6); }
+  };
+  S.follow = () => {
+    if (stageV === 0) { const d = (grab ? grab.t : (sealPeel >= 1 ? 1 : 0)) - sealPeel; sealPeel += d * 0.18; placeSeal(); if (sealPeel > 0.985 && !settling) { settling = true; SND.snap(); next(); settling = false; } return Math.abs(d) > 1e-3; }
+    if (!f) return false;
+    const before = f.k; f.k += (kTarget - f.k) * (grab ? 0.1 : 0.14);   // heavy cloth: it follows the hand with weight
+    layoutFlap(f); if (f === flapR) placeSeal();
+    if (grab && f.k > 0.97) grab = null;                            // past the fold it falls open on its own
+    const v = Math.abs(f.k - before); brush.set(Math.min(0.05, v * 1.4), 600 + v * 4000);
+    if (!grab && !settling) {
+      if (f.k > 0.985) { f.k = 1; f.open = true; layoutFlap(f); SND.flap(); const was = f; f = null; grab = null; if (was === flapR) placeSeal(); next(); }
+      else if (kTarget === 0 && f.k < 0.01) { f.k = 0; layoutFlap(f); f = null; }
+    }
+    return v > 1e-4;
+  };
+  H.down = () => {
+    if (stageV === 0) { grab = { x: down.x, y: down.y, t: sealPeel }; SND.tick2(); return; }
+    f = stageV === 1 ? flapR : flapL; grab = { k: f.k };
+  };
+  H.drag = (e, dx, dy) => {
+    if (!grab || (stageV > 0 && !f)) return;                        // the flap already finished opening under the hand
+    if (stageV === 0) { grab.t = Math.min(1, Math.max(0, (Math.hypot(dx, dy)) / 120)); if (Math.random() < 0.25) SND.tick2(); return; }
+    const span = renderer.domElement.clientWidth * 0.45, raw = Math.max(0, (f.sx * dx) / span);
+    kTarget = Math.min(1, grab.k + Math.pow(raw, 1.25));               // the first part takes more effort, then it rolls over
+  };
+  H.up = () => {
+    if (stageV === 0) { if (grab && grab.t < 0.98) grab = null; else grab = null; return; }
+    if (!f) return; grab = null; kTarget = f.k > 0.5 ? 1 : 0; if (!kTarget) SND.rustle();
+  };
+  actions([[STEPS[5].act, async () => {
+    if (stageV === 0) { await tween(500, (k) => { sealPeel = k; placeSeal(); }); SND.snap(); next(); return; }
+    f = stageV === 1 ? flapR : flapL; grab = null; kTarget = 1; SND.rustle();
+  }]]);
+};
+// 06 first meeting: lift the tray out of the velvet by hand; the room dims to one spot, then it settles on the plinth
+const LIGHTS = { key: 1.7, env: 1, bg: 1 };
+function setDim(k) { key.intensity = LIGHTS.key * (1 - 0.82 * k); scene.environmentIntensity = LIGHTS.env * (1 - 0.72 * k); scene.backgroundIntensity = LIGHTS.bg * (1 - 0.75 * k); }
+ENTER[6] = async () => {
+  await camTo([250, 140, 330], [0, 86, 0], null, [0, 90, 20]);
+  stage.className = 'grab';
+  let lift = 0, target = 0, grabbing = false, gone = false;
+  const p0 = tray.position.clone();
+  spot.target.position.set(0, 80, 0); spot.position.set(0, 560, 140); spot.angle = 0.26;
+  S.follow = () => {
+    if (gone) return false;
+    const before = lift, resist = lift < 8 ? 0.06 : 0.16;              // velvet holds it for the first few millimetres
+    lift += (target - lift) * resist;
+    tray.position.y = p0.y + lift;
+    const k = Math.min(1, lift / 120); setDim(k); spot.intensity = 7 * k; spot.target.position.set(0, tray.position.y + 30, 0);
+    if (k > 0.55) { plinth.visible = true; plinth.scale.y = Math.max(0.001, (k - 0.55) / 0.45); }
+    rig.pos.set(250 - 40 * k, 140 + 60 * k, 330 + 40 * k); rig.tgt.set(0, 86 + lift * 0.6, 0); rig.focus.set(0, 90 + lift, 20);
+    if (!grabbing && lift > 110) reveal();
+    return Math.abs(lift - before) > 0.01;
+  };
+  H.down = () => { grabbing = true; SND.rub(); };
+  H.drag = (e, dx, dy) => { if (grabbing) target = Math.max(0, Math.min(150, -dy * 0.5)); };
+  H.up = () => { grabbing = false; if (lift < 110) target = 0; };
+  const reveal = async () => {
+    if (gone) return; gone = true; S.follow = null; H = {}; actions([]); stage.className = '';
+    scene.attach(tray);
+    const a = tray.position.clone(), top = PLINTH.y;
+    plinth.visible = true; tween(800, (k) => { plinth.scale.y = Math.max(plinth.scale.y, k); });
+    camTo([PLINTH.x + 140, 210, PLINTH.z + 540], [PLINTH.x, 70, PLINTH.z], 2200, [PLINTH.x, 70, PLINTH.z]);
+    await tween(2000, (k) => {
+      tray.position.set(a.x + (PLINTH.x - a.x) * k, a.y + (top + 2 - a.y) * k + 80 * Math.sin(k * Math.PI), a.z + (PLINTH.z - a.z) * k);
+      tray.rotation.y = -0.35 * Math.sin(k * Math.PI) + 0.25 * k;
+      spot.target.position.copy(tray.position); spot.position.set(tray.position.x, 560, tray.position.z + 140);
+    }, ease.io);
+    await tween(240, (k) => { tray.position.y = top + 2 - 2 * k; }, ease.out);
+    SND.chord();
+    let skip = false; H.click = () => { skip = true; };
+    setCue(6, '잠시 감상하세요. 누르면 다음으로 넘어갑니다.');
+    sweep.angle = 0.1; sweep.penumbra = 0.9;
+    const R = 540, a0 = Math.atan2(540, 140), t0 = performance.now(), D = 8000;
+    S.orbit = () => {
+      const k = Math.min(1, (performance.now() - t0) / D), ang = a0 + ease.io(k) * Math.PI * 2;
+      rig.pos.set(PLINTH.x + Math.cos(ang) * R, 210 + Math.sin(k * Math.PI) * 50, PLINTH.z + Math.sin(ang) * R);
+      rig.tgt.set(PLINTH.x, 60, PLINTH.z); rig.focus.copy(rig.tgt);
+      const ex = PLINTH.x - 120 + 240 * k; sweep.position.set(ex, 380, PLINTH.z + 220); sweep.target.position.set(ex, 40, PLINTH.z + 58); sweep.intensity = Math.sin(k * Math.PI) * 6;
+      if (k >= 1 || skip) { S.orbit = null; sweep.intensity = 0; enter(7); }
+      return true;
+    };
+  };
+  actions([[STEPS[6].act, () => { grabbing = false; target = 150; }]]);
+};
+// 07 flat lay: insert lifts away; every item can be picked up and turned in the hand
+let hovered = null, held = null;
+const ITEMS = [
+  { obj: manual, dist: 400, tag: '설명서 · 90 × 130 mm · 코튼지' },
+  { obj: labels, dist: 400, tag: '이름표 스티커 · 키스컷 10장' },
+  { obj: holo, dist: 320, tag: 'FOUNDERS EDITION · No. 0042 / 500' },
+];
+ITEMS.forEach((it) => { it.home = it.obj.position.clone(); it.homeRot = it.obj.rotation.clone(); });
+const itemOf = (o) => { while (o && !ITEMS.some((it) => it.obj === o)) o = o.parent; return ITEMS.find((it) => it.obj === o) || null; };
+const FLAT_CAM = V(0, 600, 110), FLAT_TGT = V(0, 0, 8);
+function heldPos(it) { return FLAT_CAM.clone().add(FLAT_TGT.clone().sub(FLAT_CAM).normalize().multiplyScalar(it.dist)); }
+async function hold(it) {
+  const prev = held; SND.pick();
+  if (prev) { held = null; const from = prev.obj.position.clone(); tween(600, (k) => { prev.obj.position.lerpVectors(from, prev.home, k); prev.obj.rotation.x *= 1 - k; prev.obj.rotation.z *= 1 - k; }, ease.io); }
+  if (!it || it === prev) { $('holoTag').hidden = true; rig.focus.copy(V(0, 3, 0)); setCue(7); return; }
+  held = it; $('holoTag').textContent = it.tag; $('holoTag').hidden = false;
+  const from = it.obj.position.clone(), to = comp.worldToLocal(heldPos(it));
+  rig.focus.copy(heldPos(it));
+  await tween(700, (k) => { it.obj.position.lerpVectors(from, to, k); }, ease.io);
+  setCue(7, '마우스를 좌우로 움직이면 돌아가고, 위아래로 움직이면 앞뒤로 기울어요. 다시 누르면 내려놓습니다.');
+}
+ENTER[7] = async () => {
+  S.orbit = null; sweep.intensity = 0;
+  const s0 = spot.intensity; tween(1600, (k) => { setDim(1 - k); spot.intensity = s0 * (1 - k); });   // lights come back up
+  camTo(FLAT_CAM.toArray(), FLAT_TGT.toArray(), 1700, [0, 3, 0]);
+  await tween(1200, (k) => { insert.position.set(380 * k, 340 * k, -40 * k); insert.rotation.z = -0.25 * k; }, ease.io);
+  insert.visible = false;
+  H.hover = () => {
+    if (held) return;
+    const hit = ray.intersectObjects(ITEMS.map((it) => it.obj), true)[0], it = hit ? itemOf(hit.object) : null;
+    if (it !== hovered) { hovered = it; if (it) SND.pick(); stage.className = it ? 'point' : ''; poke(); }
+  };
+  S.flatTick = () => {
+    let moving = false;
+    for (const it of ITEMS) {
+      const o = it.obj;
+      if (it === held) {
+        const rx = 0.17 - mouse.y * 0.5, rz = -mouse.x * 1.05;
+        moving = moving || Math.abs(rx - o.rotation.x) + Math.abs(rz - o.rotation.z) > 1e-3;
+        o.rotation.x += (rx - o.rotation.x) * 0.12; o.rotation.z += (rz - o.rotation.z) * 0.12; continue;
+      }
+      const ty = it.home.y + (it === hovered ? 14 : 0), t = it === hovered && o === holo ? 0.22 : 0;
+      const tx = -mouse.y * t, tz = -mouse.x * t;
+      moving = moving || Math.abs(ty - o.position.y) > 0.02 || Math.abs(tx - o.rotation.x) + Math.abs(tz - o.rotation.z) > 1e-3;
+      if (!tweens.length) o.position.y += (ty - o.position.y) * 0.15;
+      o.rotation.x += (tx - o.rotation.x) * 0.1; o.rotation.z += (tz - o.rotation.z) * 0.1;
+    }
+    if (hovered && !held) rig.focus.lerp(hovered.obj.getWorldPosition(new THREE.Vector3()), 0.1);
+    return moving;
+  };
+  H.click = () => {
+    const hit = ray.intersectObjects(ITEMS.map((it) => it.obj), true)[0], it = hit ? itemOf(hit.object) : null;
+    if (held) hold(it && it !== held ? it : null); else if (it) hold(it);
+  };
+  actions([[STEPS[7].act, () => { if (held) { held.obj.position.copy(held.home); held.obj.rotation.copy(held.homeRot); held = null; $('holoTag').hidden = true; } enter(9); }, true]]);
+};
+// 09 detail: macro orbit with zoom-to-cursor, grazing light, numbered hotspots, cards slotted to show the lean, optional path tracing
+const HOTSPOTS = [
+  { p: V(120, PAD + 28, 58), n: V(0.6, 0.3, 0.75), cam: [40, 24, 62], spec: 'R 0.5 mm', title: '모서리 라운드', body: '모든 모서리를 0.5 mm로 굴렸습니다. 빛이 모서리를 따라 가늘게 한 줄로 흐릅니다.', who: '손끝에 걸리지 않고, 카드를 빼고 넣을 때 종이 모서리가 긁히지 않아요.' },
+  { p: V(40, PAD + 17, 58), n: V(0, 0.1, 1), cam: [16, 10, 64], spec: '월넛 무늬목 0.6 t · 오일 반광', title: '나뭇결과 물관', body: '곧은 결의 월넛 무늬목입니다. 가까이 보면 결을 따라 길쭉한 물관 자국이 보입니다.', who: '오일 마감이라 지문이 덜 남고, 손에 닿는 감촉이 따뜻합니다.' },
+  { p: V(120, PAD + 12, 6), n: V(1, 0, 0), cam: [88, 10, 6], spec: '레이저 각인 · 깊이 0.2 mm', title: '품번과 일련번호', body: '오른쪽 옆판에 SN-TR-WN과 에디션 번호를 새겨 넣었습니다. 낮은 조명에서 홈의 벽이 그림자를 만듭니다.', who: '상자, 에디션 카드와 같은 번호라 내 물건이라는 표시가 남습니다.' },
+  { p: V(80, PAD + 104, 22), n: V(0, 0.25, 1), cam: [150, 40, 210], spec: '기울기 10.5°', title: '꽂은 메모의 각도', body: '카드가 10.5° 뒤로 기대어 서도록 칸과 뒤판 높이를 맞췄습니다. 맨 뒤 카드는 뒤판 위 모서리에 닿습니다.', who: '앞에서 봤을 때 카드 앞면이 화면 쪽을 향해 이름이 읽히고, 위로 쏙 뽑힙니다.', needsCards: true },
+  { p: V(-80, PAD + 11, 13.75), n: V(0, 1, 0.3), cam: [-30, 120, 120], spec: '칸 간격 27.5 mm · 4칸', title: '일정한 칸', body: '칸막이 높이 11 mm, 칸 간격 27.5 mm로 카드 네 장이 같은 간격으로 섭니다.', who: '카드가 서로 기대어 쓰러지지 않고, 몇 장이 꽂혔는지 한눈에 보여요.' },
+  { p: V(-60, PAD + 28, 58), n: V(0, 0.7, 0.7), cam: [-24, 40, 100], spec: '앞턱 높이 28 mm', title: '낮은 앞턱', body: '앞쪽은 28 mm로 낮추고 옆판을 뒤로 갈수록 높게 잘랐습니다.', who: '카드 아래쪽을 손가락으로 바로 집을 수 있어요.' },
+  { p: V(-80, PAD + 66, -55), n: V(0, 1, -0.3), cam: [-50, 70, -120], spec: '뒤판 높이 66 mm', title: '받쳐 주는 뒤판', body: '뒤판이 가장 높아 카드 묶음 전체를 받칩니다.', who: '카드를 넣다가 뒤로 넘어가지 않아요.' },
+  { p: V(108, PAD / 2, 48), n: V(0.5, -0.2, 0.8), cam: [70, 4, 90], spec: '펠트 패드 Ø10 · 4점', title: '바닥 펠트', body: '바닥 네 모서리에 1.2 mm 펠트를 붙였습니다.', who: '책상에 소리 없이 놓이고, 긁히거나 미끄러지지 않아요.' },
+];
+const hsEls = HOTSPOTS.map((h, i) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'hs off'; b.textContent = String(i + 1); b.setAttribute('aria-label', h.title); b.setAttribute('aria-pressed', 'false');
+  b.addEventListener('click', () => focusHotspot(i)); $('hotspots').appendChild(b); return b; });
+let hsOn = false, hsActive = -1;
+const hsAvail = () => HOTSPOTS.map((h, i) => i).filter((i) => !HOTSPOTS[i].needsCards || pileCards.visible);
+async function focusHotspot(i) {
+  hsActive = i; hsEls.forEach((b, j) => b.setAttribute('aria-pressed', String(j === i)));
+  const h = HOTSPOTS[i], wp = tray.localToWorld(h.p.clone()), list = hsAvail();
+  $('hsSpec').textContent = h.spec; $('hsTitle').textContent = h.title; $('hsBody').textContent = h.body; $('hsWho').textContent = h.who;
+  $('hsIdx').textContent = `${list.indexOf(i) + 1} / ${list.length}`; $('hsCard').hidden = false;
+  controls.enabled = false; rig.pos.copy(camera.position); rig.tgt.copy(controls.target);
+  const cp = tray.localToWorld(V(...h.cam).add(h.p));
+  await camTo(cp.toArray(), wp.toArray(), 1200, wp.toArray());
+  toControls(wp);
+}
+// hand the camera from the scripted rig back to the orbit controls without a jump
+function toControls(t) { camera.position.copy(rig.pos); controls.target.copy(t); controls.update(); controls.enabled = true; poke(); }
+function stepHotspot(d) { const list = hsAvail(), at = Math.max(0, list.indexOf(hsActive)); focusHotspot(list[(at + d + list.length) % list.length]); }
+$('hsPrev').addEventListener('click', () => stepHotspot(-1));
+$('hsNext').addEventListener('click', () => stepHotspot(1));
+const DETAIL_C = () => PLINTH.clone().add(V(0, 40, 0));
+$('hsClose').addEventListener('click', async () => {
+  hsActive = -1; hsEls.forEach((b) => b.setAttribute('aria-pressed', 'false')); $('hsCard').hidden = true;
+  controls.enabled = false; rig.pos.copy(camera.position); rig.tgt.copy(controls.target);
+  const c = DETAIL_C(); await camTo([c.x + 260, 150, c.z + 230], c.toArray(), 1100); toControls(c);
+});
+async function setCards(on) {
+  if (on === pileCards.visible) return;
+  // cards slide along their own leaning plane, like dropping them into the slots
+  const along = (m, d) => { const h = m.userData.home; m.position.set(h.x, h.y + d, h.z - d * Math.tan(LEAN)); };
+  if (on) { pileCards.visible = true; pileCards.children.forEach((m) => along(m, 140)); for (const m of pileCards.children) { tween(520, (k) => along(m, 140 * (1 - k)), ease.out).then(SND.tick); await wait(140); } }
+  else { await Promise.all(pileCards.children.map((m) => tween(420, (k) => along(m, 140 * k), ease.in))); pileCards.visible = false; }
+  if (ptOn && PT) PT.setScene(scene, camera);
+}
+// product-photo angles, the same ones the Cycles stills use (tray-local mm, so they follow the tray on the plinth)
+const VIEWS = {
+  hero: { label: '대표 각도', cam: [300, 95, 400], look: [0, 40, 0] },
+  profile: { label: '측면 프로필', cam: [560, 34, 0], look: [0, 34, 0] },
+  top: { label: '탑다운', cam: [0, 560, 2], look: [0, 0, 0] },
+  edge: { label: '모서리 매크로', cam: [205, 75, 150], look: [112, 27, 50] },
+};
+async function viewPreset(k) {
+  const v = VIEWS[k], c = tray.localToWorld(V(...v.cam)), t = tray.localToWorld(V(...v.look));
+  hsActive = -1; hsEls.forEach((b) => b.setAttribute('aria-pressed', 'false')); $('hsCard').hidden = true;
+  controls.enabled = false; rig.pos.copy(camera.position); rig.tgt.copy(controls.target);
+  await camTo(c.toArray(), t.toArray(), 1200, t.toArray()); toControls(t);
+}
+ENTER[9] = async () => {
+  S.flatTick = null; hovered = null; stage.className = '';
+  $('bAgain').hidden = false; $('bSkip').hidden = true; $('bPT').hidden = false;
+  tween(1200, (k) => { graze.intensity = k * 2.2; key.intensity = 1.7 - k * 0.6; scene.environmentIntensity = 1 - k * 0.35; });
+  const c = DETAIL_C();
+  await camTo([c.x + 260, 150, c.z + 230], c.toArray(), 1600, c.toArray());
+  toControls(c); stage.className = 'grab'; hsOn = true;
+  setCue(9);
+  setCards(true);
+  actions([['메모 카드 빼기', function () { const on = !pileCards.visible; setCards(on); this.textContent = on ? '메모 카드 빼기' : '메모 카드 꽂기'; }],
+           ['다음 디테일', () => stepHotspot(1)],
+           ...Object.keys(VIEWS).map((k) => [VIEWS[k].label, () => viewPreset(k)])]);
+};
+ENTER[8] = () => enter(9);
+
+// skip to the end state
+function finalState() {
+  tweens.length = 0; S.follow = S.lidTick = S.orbit = S.flatTick = null; S.busy = false;
+  parcel.visible = false; product.position.set(0, 0, 0);
+  sleeve.position.x = 452; boxRoot.position.y = 0;
+  peelP = -STK.len / 2; layoutStrip(1e4); strip.position.set(150, 3, STK.z + 120); strip.rotation.set(-Math.PI / 2, 0, 0.3);
+  lid.position.set(-40, -62, -300); lid.rotation.y = 0.15; leak.intensity = 0;
+  flapL.k = flapR.k = 1; flapL.open = flapR.open = true; layoutFlap(flapL); layoutFlap(flapR); placeSeal();
+  scene.attach(tray); tray.position.copy(PLINTH); tray.rotation.set(0, 0.25, 0); plinth.scale.y = 1; plinth.visible = true;
+  insert.visible = false; held = null; $('holoTag').hidden = true; sealPeel = 1;
+  setDim(0); spot.intensity = 0; knife.visible = true; knife.position.set(200, 4.5, 150); knife.rotation.set(-Math.PI / 2, 0.5, 0); knife.userData.pose.rotation.z = 0;
+  postcard.position.copy(POSTCARD_DESK); postcard.rotation.set(0, -0.28, 0);
+  ITEMS.forEach((it) => { it.obj.position.copy(it.home); it.obj.rotation.copy(it.homeRot); });
+  rig.pos.copy(camera.position);
+}
+
+// ---------- path tracing (loaded only when asked) ----------
+let PT = null, ptOn = false, ptLoading = false;
+const lastCam = new THREE.Matrix4();
+async function togglePT() {
+  if (ptLoading) return;
+  if (!PT) {
+    ptLoading = true; $('bPT').textContent = '경로 추적 불러오는 중…';
+    try { const m = await import('three-gpu-pathtracer'); PT = new m.WebGLPathTracer(renderer); PT.tiles.set(1, 1); PT.minSamples = 1; PT.filterGlossyFactor = 0.5; }
+    catch (e) { console.error(e); $('bPT').textContent = '경로 추적을 쓸 수 없어요'; ptLoading = false; return; }
+    ptLoading = false;
+  }
+  ptOn = !ptOn; $('bPT').setAttribute('aria-pressed', String(ptOn)); $('bPT').textContent = '경로 추적 렌더';
+  // ponytail: path-trace only the product, plinth and desk; the packaging's ~40 canvas textures overflow the tracer's texture array (maps drop out)
+  const extras = [product, parcel];
+  if (ptOn) { extras.forEach((o) => { o.userData.vis = o.visible; o.visible = false; }); scene.environment = envEquirect; scene.fog = null; scene.background = BG; key.visible = false; sweep.visible = false; renderer.shadowMap.needsUpdate = true; PT.setScene(scene, camera); }
+  else { extras.forEach((o) => { o.visible = o.userData.vis; }); scene.environment = envPM; scene.fog = new THREE.Fog(HORIZON, 1500, 3400); scene.background = backdrop; key.visible = true; sweep.visible = true; $('cuePT').textContent = ''; }
+  poke();
+}
+
+// ---------- buttons ----------
+$('bSound').addEventListener('click', (e) => { soundOn = !soundOn; e.currentTarget.setAttribute('aria-pressed', String(soundOn)); if (!soundOn && AC) AC.suspend(); });
+$('bStill').setAttribute('aria-pressed', String(RM));
+$('bStill').addEventListener('click', (e) => { RM = !RM; e.currentTarget.setAttribute('aria-pressed', String(RM)); });
+$('bSkip').addEventListener('click', () => { finalState(); enter(9); });
+$('bAgain').addEventListener('click', () => location.reload());
+$('bPT').addEventListener('click', togglePT);
+$('bNotes').addEventListener('click', () => { $('notes').hidden = false; updateMetrics(); });
+$('bNotesClose').addEventListener('click', () => { $('notes').hidden = true; });
+let glbBytes = null;
+$('bGlb').addEventListener('click', async (e) => {
+  const b = e.currentTarget; b.textContent = '내보내는 중…';
+  try { const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
+    const buf = await new GLTFExporter().parseAsync(tray, { binary: true, maxTextureSize: 2048 });
+    glbBytes = buf.byteLength; b.textContent = 'glTF 용량 다시 재기'; updateMetrics();
+  } catch (err) { console.error(err); b.textContent = '내보내기 실패'; }
+});
+let fpsAvg = 0;
+function updateMetrics() {
+  const info = renderer.info, mem = performance.memory;
+  let tris = 0; scene.traverse((o) => { if (o.isMesh) { const g = o.geometry; tris += (g.index ? g.index.count : g.attributes.position.count) / 3; } });
+  const rows = [
+    ['첫 화면까지', `${(TIMES.first / 1000).toFixed(2)} s`],
+    ['  라이브러리 / 글꼴', `${TIMES.libs} / ${TIMES.fonts} ms`],
+    ['  텍스처 생성 CPU / GPU', `${TIMES.cpuTextures - TIMES.fonts} / ${TIMES.gpuTextures - TIMES.cpuTextures} ms`],
+    ['  모델 / 셰이더 컴파일', `${TIMES.models - TIMES.gpuTextures} / ${TIMES.first - TIMES.models} ms (${renderer.info.programs.length}개)`],
+    ['움직일 때 프레임', `${fpsAvg.toFixed(0)} fps (해상도 ×${DPR.toFixed(2)})`],
+    ['삼각형', Math.round(tris).toLocaleString('ko-KR')],
+    ['GPU 텍스처 / 지오메트리', `${info.memory.textures} / ${info.memory.geometries}`],
+    ['JS 힙', mem ? `${(mem.usedJSHeapSize / 1048576).toFixed(0)} MB` : '이 브라우저에서 측정 불가'],
+    ['트레이 glTF(.glb)', glbBytes ? `${(glbBytes / 1048576).toFixed(1)} MB (텍스처 PNG 포함)` : '버튼을 눌러 측정'],
+  ];
+  $('metrics').innerHTML = rows.map(([a, b]) => `<tr><th>${a}</th><td class="n">${b}</td></tr>`).join('');
+}
+
+// ---------- loop: draw only while something moves; adapt resolution to the device ----------
+function resize() { const w = stage.clientWidth, h = stage.clientHeight; renderer.setSize(w, h, false); composer.setSize(w, h); camera.aspect = w / h; camera.fov = w / h < 0.9 ? 42 : 30; camera.updateProjectionMatrix(); if (ptOn && PT) PT.updateCamera(); poke(); }
+new ResizeObserver(resize).observe(stage); resize();
+let last = performance.now(), busyFrames = 0, busyT = 0;
+const tmpV = new THREE.Vector3(), hsRay = new THREE.Raycaster();
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (document.hidden) return;
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  runTweens(now);
+  let moving = tweens.length > 0 || !!down;
+  if (S.follow && S.follow()) moving = true;
+  if (S.lidTick && S.lidTick(dt)) moving = true;
+  if (S.orbit && S.orbit()) moving = true;
+  if (S.flatTick && S.flatTick()) moving = true;
+  if (controls.enabled) controls.update();
+  if (moving) poke();
+  const busy = now - lastAct < 350 || pending > 0;
+  if (!busy && !ptOn && TIMES.first) return;                    // nothing changed: keep the last frame
+  pending = Math.max(0, pending - 1);
+  if (!controls.enabled) { camera.position.copy(rig.pos); camera.lookAt(rig.tgt); }
+  camera.updateMatrixWorld();
+  const fd = controls.enabled ? camera.position.distanceTo(controls.target) : camera.position.distanceTo(rig.focus);
+  bokehU.focus.value += (fd - bokehU.focus.value) * 0.25;
+  bokehU.aperture.value = step === 9 ? rig.aperture * Math.min(5, Math.max(1, 260 / fd)) : held ? rig.aperture * 0.4 : rig.aperture;
+  if (hsOn) for (let i = 0; i < HOTSPOTS.length; i++) {
+    const h = HOTSPOTS[i], wp = tray.localToWorld(h.p.clone()), n = h.n.clone().applyQuaternion(tray.quaternion);
+    let facing = n.dot(tmpV.copy(camera.position).sub(wp).normalize()) > 0.05 && (!h.needsCards || pileCards.visible);
+    if (facing) { const d = camera.position.distanceTo(wp); hsRay.set(camera.position, tmpV.copy(wp).sub(camera.position).normalize()); hsRay.far = d - 1.5; facing = hsRay.intersectObject(tray, true).length === 0; }
+    wp.project(camera); const x = (wp.x * 0.5 + 0.5) * innerWidth, y = (-wp.y * 0.5 + 0.5) * innerHeight;
+    hsEls[i].style.transform = `translate(${x}px,${y}px)`; hsEls[i].classList.toggle('off', !facing || wp.z > 1);
+  }
+  if (ptOn && PT) {
+    if (camera.matrixWorld.elements.some((v, i) => Math.abs(v - lastCam.elements[i]) > 0.01)) { PT.updateCamera(); lastCam.copy(camera.matrixWorld); }
+    PT.renderSample(); $('cuePT').textContent = PT.samples < 1 ? '경로 추적 준비 중 (셰이더 컴파일)' : `경로 추적 ${Math.floor(PT.samples)} spp`;
+  } else {
+    renderer.shadowMap.needsUpdate = true;
+    composer.render();
+  }
+  // adaptive resolution: measure only frames where things move
+  if (busy && TIMES.first && !ptOn) {
+    busyFrames++; busyT += dt;
+    if (busyFrames >= 90) {
+      fpsAvg = busyFrames / busyT;
+      if (fpsAvg < 40 && DPR > 0.75) { DPR = Math.max(0.75, DPR - 0.25); renderer.setPixelRatio(DPR); resize(); }
+      busyFrames = 0; busyT = 0;
+    }
+  }
+  if (!TIMES.first) { mark('first'); $('loading').classList.add('off'); console.info('[unbox] timings ms', TIMES); }
+}
+// compile every program up front so later steps don't hitch on first use
+loadMsg('셰이더를 준비하는 중이에요…');
+camera.position.copy(rig.pos); camera.lookAt(rig.tgt); camera.updateMatrixWorld();
+try { await renderer.compileAsync(scene, camera); } catch (e) {}
+pileCards.visible = true; try { await renderer.compileAsync(pileCards, camera, scene); } catch (e) {} pileCards.visible = false; plinth.visible = false;
+requestAnimationFrame(frame);
+enter(0);
+window.__unbox = { art: { postcard: postcardFront, sleeveTop, sleeveFront, sleeveBack, lidTop, seal: sealMat, bandU: bandU.material, bandL: bandL.material, strip: stripFront }, scene, renderer, camera, rig, composer, bokeh, enter, finalState, STK, TIMES, get peelP() { return peelP; }, get pt() { return PT; } };
+</script>
