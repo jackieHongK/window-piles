@@ -52,6 +52,24 @@ float Generic(const Texture& t, int x, int y, float k) {
     return n;
 }
 
+// The scanned walnut veneer (scripts/gen_walnut.py), as the 3D unboxing uses it.
+#include "ui/walnut_data.inc"
+
+// Walnut at canvas pixel (x, y): one tile pixel per DIP, bilinear, colored along the scan's dark-to-light ramp.
+COLORREF Walnut(int x, int y, float k) {
+    float u = x / k, v = y / k;
+    int x0 = (int)u, y0 = (int)v;
+    float fx = u - x0, fy = v - y0;
+    auto at = [](int tx, int ty) { return (float)kWalnut[(size_t)(ty % kWalnutH) * kWalnutW + tx % kWalnutW]; };
+    float t = ((at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) +
+               (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy) / 255;
+    auto mix = [t](int shift) {
+        int a = (kWalnutDark >> shift) & 255, b = (kWalnutLight >> shift) & 255;
+        return (int)(a + (b - a) * t + 0.5f);
+    };
+    return RGB(mix(0), mix(8), mix(16));
+}
+
 COLORREF Hue(float h) {  // h in [0, 1): a soft pastel rainbow
     float r = 0.5f + 0.5f * std::cos(6.2832f * (h + 0.00f)), g = 0.5f + 0.5f * std::cos(6.2832f * (h + 0.33f)),
           b = 0.5f + 0.5f * std::cos(6.2832f * (h + 0.67f));
@@ -93,7 +111,7 @@ float Pattern(const char* id, int x, int y, float k, COLORREF& tint, float& tint
         bool over = ((x / t) + (y / t)) & 1;
         return (over ? row : col) * 0.10f + (ValueNoise(x, y, (int)(30 * k), (int)(3 * k), 13) - 0.5f) * 0.06f;
     }
-    if (is("oak") || is("walnut")) {
+    if (is("oak")) {
         // Long grain lines along x, wavy, with darker latewood bands.
         float g = std::sin(y / (2.2f * k) + 9.0f * Fbm(x / 6, y, (int)(40 * k), 21));
         return 0.06f * g - 0.08f * std::pow(std::max(0.0f, g), 8.0f) +
@@ -134,6 +152,17 @@ void FillMaterial(Canvas& c, const RECT& r, int radius, int m, UINT dpi) {
         c.StrokeRoundRect(r, radius, std::max(1, (int)std::lround(1.5f * k)), RGB(255, 255, 255), 220);
         RECT inner{r.left + 2, r.top + 2, r.right - 2, r.bottom - 2};
         c.StrokeRoundRect(inner, std::max(0, radius - 2), 1, RGB(170, 190, 215), 60);
+        return;
+    }
+    if (std::strcmp(mat.id, "walnut") == 0) {  // the scan itself, not a pattern over the base color
+        for (int y = y0; y < y1; ++y)
+            for (int x = x0; x < x1; ++x) {
+                uint32_t& p = px[(size_t)y * c.width() + x];
+                uint32_t a = p >> 24;
+                if (!a) continue;
+                COLORREF w = Walnut(x, y, k);
+                p = (a << 24) | (GetRValue(w) * a / 255 << 16) | (GetGValue(w) * a / 255 << 8) | (GetBValue(w) * a / 255);
+            }
         return;
     }
 

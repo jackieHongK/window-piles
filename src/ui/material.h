@@ -1,6 +1,7 @@
 // Materials for the pile card's body (everything below the title bar). Papers are free; the others are
 // paid materials (all selectable during the beta; prices come later), several of them experimental.
-// Textures are generated (no image files) and fixed per screen position, so redraws don't shimmer.
+// Textures are generated (walnut: a small tile baked from a veneer scan) and fixed per screen position,
+// so redraws don't shimmer.
 #pragma once
 
 #include <windows.h>
@@ -36,7 +37,7 @@ constexpr Material kMaterials[] = {
     {L"황동 (실험)", "brass", RGB(196, 162, 96), false, true, false},
     {L"콘크리트 (실험)", "concrete", RGB(178, 176, 171), false, true, false},
     {L"오크 원목 (실험)", "oak", RGB(198, 160, 116), false, true, false},
-    {L"월넛 원목 (실험)", "walnut", RGB(104, 66, 42), true, true, false},
+    {L"월넛 원목 (실험)", "walnut", RGB(114, 80, 57), true, true, false},  // the scan's middle tone
 };
 constexpr int kMaterialCount = sizeof(kMaterials) / sizeof(kMaterials[0]);
 
