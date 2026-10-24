@@ -646,7 +646,7 @@ void App::OnPileMoved(Pile& pile) {
     if (organizer_) {
         POINT c;
         GetCursorPos(&c);
-        bool dock = organizer_->IsDropTarget(c);
+        bool dock = organizer_->IsDropTarget(c) && !organizer_->Full();  // a full tray: it stays where it was let go
         organizer_->DragEnd();
         if (dock) {
             Dock(pile, true);
@@ -788,7 +788,11 @@ void App::OnPileMenu(Pile& pile, POINT pt) {
     std::vector<MenuItem> items;
     if (!pile.members.empty()) items.push_back({kMenuToggle, pile.folded ? L"펼치기" : L"접기", L"클릭"});
     items.push_back({kMenuStyle, L"이름·색 바꾸기…"});
-    if (organizer_) items.push_back({kMenuDock, pile.docked ? L"오거나이저에서 빼기" : L"오거나이저에 꽂기"});
+    if (organizer_) {
+        bool full = !pile.docked && organizer_->Full();
+        items.push_back({kMenuDock, pile.docked ? L"오거나이저에서 빼기" : L"오거나이저에 꽂기",
+                         full ? std::to_wstring(organizer_->Capacity()) + L"칸이 다 찼어요" : L"", full});
+    }
     if (!pile.members.empty()) items.push_back({kMenuDissolve, L"더미 풀기", L"창은 그대로"});
     if (!pile.missing.empty())
         items.push_back({kMenuClearMissing, L"닫힌 창 목록 지우기", std::to_wstring(pile.missing.size()) + L"개"});
@@ -1458,7 +1462,7 @@ void App::SetOrganizer(bool on) {
 }
 
 void App::Dock(Pile& pile, bool on, const POINT* at) {
-    if (!organizer_ || pile.docked == on) return;
+    if (!organizer_ || pile.docked == on || (on && organizer_->Full())) return;
     pile.docked = on;
     if (on) {
         // On top of the tray, like a card put on a stack.

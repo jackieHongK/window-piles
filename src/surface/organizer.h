@@ -49,6 +49,10 @@ public:
     void DragOver(POINT pt);
     void DragEnd();
     bool IsDropTarget(POINT pt) const;  // dropping a card here keeps it in the tray
+    // How many piles it holds: like a real tray it has a fixed number of slots, as many as fit in 60% of
+    // the screen's height (at least 2). A card dropped on a full tray stays on the desktop.
+    int Capacity() const;
+    bool Full() const;
     void Raise();                // back on top of other always-on-top windows (an open pile's frame)
     void SetVisible(bool show);  // "숨기기" in the tray icon menu
     RECT HandleRect() const;            // screen px: where folding/opening animations meet the tray

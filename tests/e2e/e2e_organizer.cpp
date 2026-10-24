@@ -206,6 +206,13 @@ int wmain(int argc, wchar_t** argv) {
     HWND tray = nullptr;
     PumpUntil([&] { return (tray = FindWindowW(L"WindowPilesOrganizerTray", nullptr)) && IsWindowVisible(tray); }, 3000);
     Check(tray && IsWindowVisible(tray), "2) 막대를 누르면 카드가 쌓인 트레이가 열림");
+    if (tray) {
+        RECT tr;
+        GetWindowRect(tray, &tr);
+        MONITORINFO mi{sizeof(mi)};
+        GetMonitorInfoW(MonitorFromWindow(tray, MONITOR_DEFAULTTONEAREST), &mi);
+        Check(tr.bottom - tr.top <= (mi.rcWork.bottom - mi.rcWork.top) * 60 / 100 + 2, "2) 트레이는 화면 높이의 60%를 넘지 않음");
+    }
 
     // 3) clicking A in the tray opens it
     if (tray) {

@@ -22,7 +22,9 @@ namespace {
 constexpr int kHandleW = 14, kHandleHoverW = 18, kHandleH = 128;
 constexpr int kTrayPad = 12, kTrayLabelH = 24, kCardW = 260, kCardHeader = 26, kCardStrip = 40, kCardGap = 8;
 constexpr int kCardH = kCardHeader + kCardStrip;
-constexpr int kMemoLabelH = 22, kMemoH = 44, kMemoMax = 5, kPlusH = 36, kMoreH = 22;
+constexpr int kMemoLabelH = 22, kMemoH = 44, kMemoMax = 2, kPlusH = 36, kMoreH = 22;
+constexpr int kMaxHeightPercent = 60;  // of the work area: the tray never gets taller than this
+constexpr int kMinSlots = 2;
 // Hit codes for what isn't a pile card (pile cards are their index).
 constexpr int kItemMemo = 1000, kItemPlus = 2000, kItemMemoMore = 2001;
 const COLORREF kNotePaper = RGB(255, 252, 240);  // as the memo window
@@ -129,6 +131,17 @@ void Organizer::Layout() {
 }
 
 RECT Organizer::HandleRect() const { return handleRect_; }
+
+int Organizer::Capacity() const {
+    auto S = [this](int v) { return Scale(v, dpi_); };
+    // Counted with the memo block at its largest, so the number of slots doesn't move as memos come and go.
+    int maxH = (work_.bottom - work_.top) * kMaxHeightPercent / 100;
+    int fixed = S(kTrayPad * 2 + kTrayLabelH);
+    int memoBlock = S(kCardGap * 2 + kMemoLabelH + kMemoMax * (kMemoH + kCardGap) + kMoreH + kPlusH);
+    return std::max(kMinSlots, (maxH - fixed - memoBlock + S(kCardGap)) / S(kCardH + kCardGap));
+}
+
+bool Organizer::Full() const { return (int)host_.OrganizerPiles().size() >= Capacity(); }
 
 void Organizer::Raise() {
     SetWindowPos(handle_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -286,17 +299,17 @@ void Organizer::RenderTray() {
     auto S = [this](int v) { return Scale(v, dpi_); };
     std::vector<Pile*> piles = host_.OrganizerPiles();
     int w = S(kTrayPad * 2 + kCardW + kLift);
-    int maxH = (work_.bottom - work_.top) - S(32);
     int fixed = S(kTrayPad * 2 + kTrayLabelH);
+    int slots = Capacity();
     // The memo block: a label and the newest few, then the button for a new one.
     int memoShown = std::min<int>((int)memos_.size(), kMemoMax);
     bool memoMore = (int)memos_.size() > memoShown;
     int memoBlock = S(kCardGap * 2) + (memoShown ? S(kMemoLabelH) + memoShown * S(kMemoH + kCardGap) : 0) +
                     (memoMore ? S(kMoreH) : 0) + S(kPlusH);
-    int fit = std::max(0, (maxH - fixed - memoBlock + S(kCardGap)) / S(kCardH + kCardGap));
-    int shown = std::min<int>((int)piles.size(), fit);
-    bool more = (int)piles.size() > shown;
-    int contentH = shown ? shown * S(kCardH + kCardGap) - S(kCardGap) : S(64);
+    // Every slot is drawn, filled or not: the tray holds that many and no more.
+    int shown = std::min<int>((int)piles.size(), slots);
+    bool more = (int)piles.size() > shown;  // kept from before (a smaller screen, an older version)
+    int contentH = slots * S(kCardH + kCardGap) - S(kCardGap);
     int h = fixed + contentH + (more ? S(kMoreH) : 0) + memoBlock;
     int cy = (handleRect_.top + handleRect_.bottom) / 2;
     int top = std::clamp<int>(cy - h / 2, work_.top + S(16), std::max<int>(work_.top + S(16), work_.bottom - S(16) - h));
@@ -311,10 +324,12 @@ void Organizer::RenderTray() {
     RECT rim = body;
     InflateRect(&rim, -1, -1);
     c.StrokeRoundRect(rim, r - 1, std::max(1, S(1)), RGB(255, 255, 255), 50);
-    std::wstring label = dropMode_ ? L"여기에 놓으면 꽂혀요" : L"오거나이저 · " + std::to_wstring(piles.size()) + L"개";
+    bool full = (int)piles.size() >= slots;
+    std::wstring label = dropMode_ ? (full ? L"자리가 없어요 · " + std::to_wstring(slots) + L"칸이 다 찼어요" : L"여기에 놓으면 꽂혀요")
+                                   : L"오거나이저 · " + std::to_wstring(piles.size()) + L" / " + std::to_wstring(slots) + L"칸";
     c.Text(label, {S(kTrayPad), S(kTrayPad), w - S(kTrayPad), S(kTrayPad + kTrayLabelH)}, kCream, S(12), true,
            DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    if (dropMode_) {
+    if (dropMode_ && !full) {
         RECT o{S(4), S(4), w - S(4), h - S(4)};
         c.DashedRoundRect(o, S(10), S(2), S(6), S(4), kCream, 200);
     }
@@ -339,9 +354,14 @@ void Organizer::RenderTray() {
     cardIds_.clear();
     cardRects_.clear();
     int y = S(kTrayPad + kTrayLabelH), unit = S(kCardH + kCardGap);
-    if (piles.empty())
-        c.Text(L"바탕화면의 더미 카드를 이 막대로 끌어 오면 여기에 꽂혀요.",
-               {S(kTrayPad), y, w - S(kTrayPad), y + S(64)}, RGB(222, 206, 190), S(12), false, DT_LEFT | DT_WORDBREAK);
+    for (int i = shown; i < slots; ++i) {  // empty slots
+        int yy = y + i * unit;
+        RECT slot{cardX, yy, cardX + S(kCardW), yy + S(kCardH)};
+        c.DashedRoundRect(slot, S(8), S(1), S(5), S(4), kCream, 70);
+        if (i == 0)
+            c.Text(L"바탕화면의 더미 카드를 이 막대로 끌어 오면 여기에 꽂혀요.", {slot.left + S(12), slot.top, slot.right - S(12), slot.bottom},
+                   RGB(222, 206, 190), S(12), false, DT_LEFT | DT_VCENTER | DT_WORDBREAK);
+    }
     if (draggedPile >= 0) land(y, unit, shown);
     for (int i = 0; i < shown; ++i) {
         int yy = slotY(i, y, unit, draggedPile);
