@@ -32,6 +32,9 @@ add_executable(WindowPiles WIN32
     src/preview/snapshot.cpp
     src/surface/pile_window.cpp
     src/surface/organizer.cpp
+    src/notes/memo_format.cpp
+    src/notes/memo_store.cpp
+    src/notes/memo_window.cpp
     src/interaction/drag_watcher.cpp
     src/ui/popup_base.cpp
     src/ui/menu.cpp
@@ -98,6 +101,10 @@ target_include_directories(unread_test PRIVATE src)
 add_executable(icon_preview tests/tools/icon_preview.cpp src/app/app_icon.cpp src/common/canvas.cpp src/ui/wordmark.cpp)
 target_include_directories(icon_preview PRIVATE src)
 target_link_libraries(icon_preview PRIVATE user32 gdi32 advapi32)
+
+# Unit test: memo formatting rules (headings, lists, Enter continuing a list, titles).
+add_executable(memo_test tests/unit/memo_test.cpp src/notes/memo_format.cpp)
+target_include_directories(memo_test PRIVATE src)
 
 # Unit test: Canvas fast paths draw exactly what the plain per-pixel loops draw.
 add_executable(canvas_test tests/unit/canvas_test.cpp src/common/canvas.cpp)

@@ -14,6 +14,8 @@
 #include "groups/pile_store.h"
 #include "recovery/journal.h"
 #include "groups/unread.h"
+#include "notes/memo_store.h"
+#include "notes/memo_window.h"
 #include "ui/inline_rename.h"
 #include "ui/menu.h"
 #include "ui/pile_editor.h"
@@ -60,6 +62,7 @@ enum MenuId : UINT {
     kMenuDock,
     kMenuOrganizer,
     kMenuOrganizerSide,
+    kMenuMemoFolder,
 };
 
 std::wstring FileName(const std::wstring& path) {
@@ -1464,10 +1467,12 @@ void App::OnOrganizerMenu(Pile* pile, POINT pt) {
     if (!organizer_) return;
     bool right = organizer_->place().right;
     std::vector<MenuItem> items = {
+        {kMenuMemoFolder, L"메모 폴더 열기", L".txt 파일"},
         {kMenuOrganizerSide, right ? L"왼쪽 가장자리로 옮기기" : L"오른쪽 가장자리로 옮기기"},
         {kMenuOrganizer, L"가장자리 오거나이저 끄기", L"카드는 바탕화면으로"},
     };
     UINT id = ShowMenu(items, pt);
+    if (id == kMenuMemoFolder) ShellExecuteW(nullptr, L"open", MemoDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     if (id == kMenuOrganizerSide && organizer_) {
         Organizer::Place place = organizer_->place();
         place.right = !right;
@@ -1484,6 +1489,7 @@ void App::Quit() {
     if (quitting_) return;
     PauseActivity(L"exit");
     quitting_ = true;
+    CloseAllMemoWindows();  // writes what was typed since the last autosave
     // Remember the piles exactly as they are (folded stays folded) for the next start/update,
     // then bring every window back so nothing stays hidden while the app is not running.
     PersistNow();
@@ -1502,6 +1508,7 @@ void App::Quit() {
 void App::EndSessionNow() {
     Log("end session: frozen=%d", stateFrozen_);
     PauseActivity(L"exit");
+    CloseAllMemoWindows();
     // Logoff, shutdown, restart or an installer closing us (Restart Manager). The piles were saved
     // in WM_QUERYENDSESSION and every window was handed back; finish within Windows' time limit and
     // skip any cleanup that talks to other processes (Explorer may already be gone or frozen).

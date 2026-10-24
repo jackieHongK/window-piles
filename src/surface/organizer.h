@@ -3,7 +3,7 @@
 // kept in it, stacked top to bottom; their cards are off the desktop, so the screen stays clear.
 // Cards go in by dragging them onto the bookmark (or "오거나이저에 꽂기") and out by dragging them
 // off the tray (the card follows the pointer, as it does going in). The bookmark itself can be
-// dragged along the edge, to the other side or monitor.
+// dragged along the edge, to the other side or monitor. Below the piles: memos, and "＋ 새 메모".
 #pragma once
 
 #include <windows.h>
@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "groups/pile.h"
+#include "notes/memo_store.h"
 
 namespace wp {
 
@@ -57,7 +58,10 @@ private:
     void RenderTray();
     void ShowTray();
     void HideTray();
-    int CardAt(POINT client) const;
+    int ItemAt(POINT client) const;  // a pile card's index, or one of the kItem* codes; -1 for none
+    Pile* PileAt(int item);
+    void Activate(int item, POINT screenPt);  // a click on an item
+    void MemoMenu(int memo, POINT screenPt);
 
     OrganizerHost& host_;
     Place place_;
@@ -74,11 +78,15 @@ private:
     // pressing on the bookmark: a click opens the tray, a drag moves the bookmark
     bool handlePressed_ = false, handleDragging_ = false;
     POINT pressAt_{};
-    // pressing on a card in the tray: a click opens the pile, a drag takes the card out
-    int pressedCard_ = -1;
-    int hoverCard_ = -1;
+    // pressing on a pile card in the tray: a click opens the pile, a drag takes the card out
+    int pressed_ = -1;
+    int hover_ = -1;
     std::vector<int> cardIds_;    // pile ids, in drawing order
     std::vector<RECT> cardRects_;  // tray client coords
+    // Memos (notes/memo_store.h) below the piles, listed from their folder when the tray opens.
+    std::vector<MemoInfo> memos_;
+    std::vector<RECT> memoRects_;
+    RECT plusRect_{}, memoMoreRect_{};
 };
 
 }  // namespace wp

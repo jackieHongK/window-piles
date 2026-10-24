@@ -7,6 +7,8 @@
 //   3. click A in the tray                   → A opens (W1, W2 shown)
 //   4. fold A from its top tab               → its windows go away and no card appears on the desktop
 //   5. quit and start again                  → still kept in the organizer (saved)
+//   6. "＋ 새 메모" at the bottom of the tray   → a memo window and a .txt file in the memo folder; what is
+//      typed is in the file after closing; a memo closed empty leaves no file
 #include "poc_common.h"
 
 #include <string>
@@ -65,6 +67,44 @@ std::string ReadState() {
 void Click(HWND h, LPARAM pt) {
     PostMessageW(h, WM_LBUTTONDOWN, MK_LBUTTON, pt);
     PostMessageW(h, WM_LBUTTONUP, 0, pt);
+}
+
+std::vector<std::wstring> Memos() {
+    std::vector<std::wstring> out;
+    WIN32_FIND_DATAW fd;
+    HANDLE f = FindFirstFileW((DataDir() + L"\\memos\\*.txt").c_str(), &fd);
+    if (f == INVALID_HANDLE_VALUE) return out;
+    do out.push_back(DataDir() + L"\\memos\\" + fd.cFileName);
+    while (FindNextFileW(f, &fd));
+    FindClose(f);
+    return out;
+}
+
+std::string ReadAll(const std::wstring& path) {
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return {};
+    std::string s(1 << 16, '\0');
+    DWORD n = 0;
+    ReadFile(f, s.data(), (DWORD)s.size(), &n, nullptr);
+    CloseHandle(f);
+    s.resize(n);
+    return s;
+}
+
+// Opens the tray from the bookmark and clicks "＋ 새 메모" (the last thing in it); returns the memo window.
+HWND NewMemoFromTray() {
+    HWND handle = FindWindowW(L"WindowPilesOrganizerHandle", nullptr), tray = nullptr;
+    if (!handle) return nullptr;
+    Click(handle, MAKELPARAM(4, 40));
+    PumpUntil([&] { return (tray = FindWindowW(L"WindowPilesOrganizerTray", nullptr)) && IsWindowVisible(tray); }, 3000);
+    if (!tray) return nullptr;
+    RECT tr;
+    GetClientRect(tray, &tr);
+    Click(tray, MAKELPARAM(tr.right / 2, tr.bottom - MulDiv(12 + 18, GetDpiForWindow(tray), 96)));  // padding + half the button
+    HWND memo = nullptr;
+    PumpUntil([&] { return (memo = FindWindowW(L"WindowPilesMemo", nullptr)) && IsWindowVisible(memo); }, 3000);
+    return memo;
 }
 
 int Visible(const wchar_t* cls) {
@@ -164,6 +204,27 @@ int wmain(int argc, wchar_t** argv) {
     PumpFor(1000);
     Check(Visible(L"WindowPilesPile") == 1 && FindWindowW(L"WindowPilesOrganizerHandle", nullptr),
           "5) 다시 시작해도 A는 오거나이저에 있음");
+
+    // 6) memos
+    for (const auto& m : Memos()) DeleteFileW(m.c_str());
+    HWND memo = NewMemoFromTray();
+    Check(memo != nullptr, "6) 트레이의 ＋ 버튼을 누르면 메모 창이 열림");
+    Check(Memos().size() == 1, "6) 메모 폴더에 .txt 파일이 생김");
+    if (memo) {
+        HWND edit = FindWindowExW(memo, nullptr, L"RICHEDIT50W", nullptr);
+        SendMessageW(edit, WM_SETTEXT, 0, (LPARAM)L"# 장보기\r- 우유\r- 계란");
+        PostMessageW(memo, WM_CLOSE, 0, 0);
+        PumpUntil([&] { return !IsWindow(memo); }, 3000);
+    }
+    std::vector<std::wstring> files = Memos();
+    std::string text = files.size() == 1 ? ReadAll(files[0]) : "";
+    Check(text == Utf8(L"# 장보기\r\n- 우유\r\n- 계란"), "6) 쓴 내용이 그대로 .txt에 저장됨 (줄바꿈은 CRLF)");
+    memo = NewMemoFromTray();
+    if (memo) {
+        PostMessageW(memo, WM_CLOSE, 0, 0);
+        PumpUntil([&] { return !IsWindow(memo); }, 3000);
+    }
+    Check(memo && Memos().size() == 1, "6) 아무것도 안 쓰고 닫은 메모는 파일이 남지 않음");
 
     PostMessageW(FindWindowW(L"WindowPilesMain", nullptr), WM_ENDSESSION, TRUE, 0);
     WaitForSingleObject(app, 5000);

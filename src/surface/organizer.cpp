@@ -1,5 +1,6 @@
 #include "organizer.h"
 
+#include <shellapi.h>
 #include <windowsx.h>
 
 #include <algorithm>
@@ -7,7 +8,10 @@
 
 #include "common/canvas.h"
 #include "common/win_util.h"
+#include "notes/memo_store.h"
+#include "notes/memo_window.h"
 #include "ui/material.h"
+#include "ui/menu.h"
 #include "ui/theme.h"
 
 namespace wp {
@@ -18,6 +22,10 @@ namespace {
 constexpr int kHandleW = 14, kHandleHoverW = 18, kHandleH = 128;
 constexpr int kTrayPad = 12, kTrayLabelH = 24, kCardW = 260, kCardHeader = 26, kCardStrip = 40, kCardGap = 8;
 constexpr int kCardH = kCardHeader + kCardStrip;
+constexpr int kMemoLabelH = 22, kMemoH = 44, kMemoMax = 5, kPlusH = 36, kMoreH = 22;
+// Hit codes for what isn't a pile card (pile cards are their index).
+constexpr int kItemMemo = 1000, kItemPlus = 2000, kItemMemoMore = 2001;
+const COLORREF kNotePaper = RGB(255, 252, 240);  // as the memo window
 constexpr int kLift = 10;            // a hovered card slides this far out of the tray
 constexpr double kHideAfterMs = 350;  // the pointer left the bookmark and tray this long ago: put it away
 constexpr UINT_PTR kTimerWatch = 1, kTimerOpen = 2;
@@ -139,11 +147,16 @@ void Organizer::RenderTray() {
     int w = S(kTrayPad * 2 + kCardW + kLift);
     int maxH = (work_.bottom - work_.top) - S(32);
     int fixed = S(kTrayPad * 2 + kTrayLabelH);
-    int fit = std::max(0, (maxH - fixed + S(kCardGap)) / S(kCardH + kCardGap));
+    // The memo block: a label and the newest few, then the button for a new one.
+    int memoShown = std::min<int>((int)memos_.size(), kMemoMax);
+    bool memoMore = (int)memos_.size() > memoShown;
+    int memoBlock = S(kCardGap * 2) + (memoShown ? S(kMemoLabelH) + memoShown * S(kMemoH + kCardGap) : 0) +
+                    (memoMore ? S(kMoreH) : 0) + S(kPlusH);
+    int fit = std::max(0, (maxH - fixed - memoBlock + S(kCardGap)) / S(kCardH + kCardGap));
     int shown = std::min<int>((int)piles.size(), fit);
     bool more = (int)piles.size() > shown;
     int contentH = shown ? shown * S(kCardH + kCardGap) - S(kCardGap) : S(64);
-    int h = fixed + contentH + (more ? S(22) : 0);
+    int h = fixed + contentH + (more ? S(kMoreH) : 0) + memoBlock;
     int cy = (handleRect_.top + handleRect_.bottom) / 2;
     int top = std::clamp<int>(cy - h / 2, work_.top + S(16), std::max<int>(work_.top + S(16), work_.bottom - S(16) - h));
     int left = place_.right ? monitor_.right - w : monitor_.left;
@@ -174,7 +187,7 @@ void Organizer::RenderTray() {
     }
     for (int i = 0; i < shown; ++i) {
         Pile& p = *piles[i];
-        bool hot = i == hoverCard_;
+        bool hot = i == hover_;
         // Cards sit toward the screen edge; the hovered one slides out toward the desktop.
         int x = S(kTrayPad) + (place_.right ? S(kLift) : 0) + (hot ? (place_.right ? -S(kLift) : S(kLift)) : 0);
         RECT card{x, y, x + S(kCardW), y + S(kCardH)};
@@ -214,9 +227,57 @@ void Organizer::RenderTray() {
         if (hot) c.StrokeRoundRect(card, S(8), S(2), kCream);
         y += S(kCardH + kCardGap);
     }
-    if (more)
-        c.Text(L"외 " + std::to_wstring(piles.size() - shown) + L"개 더", {S(kTrayPad), y, w - S(kTrayPad), y + S(22)},
+    if (shown) y -= S(kCardGap);
+    else y += S(64);
+    if (more) {
+        c.Text(L"외 " + std::to_wstring(piles.size() - shown) + L"개 더", {S(kTrayPad), y, w - S(kTrayPad), y + S(kMoreH)},
                kCream, S(12), false, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        y += S(kMoreH);
+    }
+
+    // Memos, newest first: plain .txt files in the memo folder.
+    y += S(kCardGap * 2);
+    int cardX = S(kTrayPad) + (place_.right ? S(kLift) : 0);
+    int slide = place_.right ? -S(kLift) : S(kLift);
+    memoRects_.clear();
+    if (memoShown) {
+        c.Text(L"메모 · " + std::to_wstring(memos_.size()) + L"개", {S(kTrayPad), y, w - S(kTrayPad), y + S(kMemoLabelH)},
+               kCream, S(12), true, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        y += S(kMemoLabelH);
+    }
+    for (int i = 0; i < memoShown; ++i) {
+        const MemoInfo& mi = memos_[i];
+        bool hot = hover_ == kItemMemo + i;
+        int x = cardX + (hot ? slide : 0);
+        RECT card{x, y, x + S(kCardW), y + S(kMemoH)};
+        memoRects_.push_back({S(kTrayPad), y, w - S(kTrayPad), y + S(kMemoH)});
+        c.Shadow(card, S(8), S(hot ? 10 : 6), S(2), hot ? 90 : 60, RGB(20, 10, 4));
+        c.FillRoundRect(card, S(8), kNotePaper);
+        RECT t{card.left + S(12), card.top + S(5), card.right - S(12), card.top + S(23)};
+        c.Text(mi.title.empty() ? L"빈 메모" : mi.title, t, mi.title.empty() ? kMutedFg : kForeground, S(12), true,
+               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        if (!mi.excerpt.empty())
+            c.Text(mi.excerpt, {t.left, t.bottom, t.right, card.bottom - S(4)}, kMutedFg, S(11), false,
+                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        if (hot) c.StrokeRoundRect(card, S(8), S(2), kCream);
+        y += S(kMemoH + kCardGap);
+    }
+    memoMoreRect_ = {};
+    if (memoMore) {
+        memoMoreRect_ = {S(kTrayPad), y - S(kCardGap), w - S(kTrayPad), y - S(kCardGap) + S(kMoreH)};
+        c.Text(L"메모 " + std::to_wstring(memos_.size() - memoShown) + L"개 더 · 폴더 열기", memoMoreRect_, kCream, S(12),
+               hover_ == kItemMemoMore, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        y += S(kMoreH) - S(kCardGap);
+    } else if (memoShown) {
+        y -= S(kCardGap);
+    }
+    if (memoShown || memoMore) y += S(kCardGap);
+    // "＋ 새 메모", as wide as a card.
+    plusRect_ = {cardX, y, cardX + S(kCardW), y + S(kPlusH)};
+    if (hover_ == kItemPlus) c.FillRoundRect(plusRect_, S(8), RGB(255, 255, 255), 36);
+    c.DashedRoundRect(plusRect_, S(8), S(1) + (hover_ == kItemPlus), S(5), S(4), kCream, hover_ == kItemPlus ? 230 : 150);
+    c.Text(L"＋  새 메모", plusRect_, kCream, S(12), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    plusRect_ = {S(kTrayPad), y, w - S(kTrayPad), y + S(kPlusH)};
     c.Present(tray_, {trayRect_.left, trayRect_.top});
 }
 
@@ -231,7 +292,8 @@ void Organizer::ShowTray() {
     trayOpen_ = true;
     seenInside_ = false;
     outsideSince_ = 0;
-    hoverCard_ = -1;
+    hover_ = -1;
+    memos_ = ListMemos();
     RenderTray();
     SetWindowPos(tray_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     SetTimer(tray_, kTimerWatch, 100, nullptr);
@@ -242,7 +304,7 @@ void Organizer::HideTray() {
     trayOpen_ = false;
     KillTimer(tray_, kTimerWatch);
     ShowWindow(tray_, SW_HIDE);
-    hoverCard_ = -1;
+    hover_ = -1;
 }
 
 void Organizer::DragOver(POINT pt) {
@@ -278,10 +340,55 @@ bool Organizer::IsDropTarget(POINT pt) const {
     return trayOpen_ && PtInRect(&trayRect_, pt);
 }
 
-int Organizer::CardAt(POINT client) const {
+int Organizer::ItemAt(POINT client) const {
     for (size_t i = 0; i < cardRects_.size(); ++i)
         if (PtInRect(&cardRects_[i], client)) return (int)i;
+    for (size_t i = 0; i < memoRects_.size(); ++i)
+        if (PtInRect(&memoRects_[i], client)) return kItemMemo + (int)i;
+    if (PtInRect(&plusRect_, client)) return kItemPlus;
+    if (PtInRect(&memoMoreRect_, client)) return kItemMemoMore;
     return -1;
+}
+
+Pile* Organizer::PileAt(int item) {
+    if (item < 0 || item >= (int)cardIds_.size()) return nullptr;
+    for (Pile* p : host_.OrganizerPiles())
+        if (p->id == cardIds_[item]) return p;
+    return nullptr;
+}
+
+void Organizer::Activate(int item, POINT screenPt) {
+    // A memo opens beside the tray, on the desktop side.
+    POINT anchor{place_.right ? trayRect_.left : trayRect_.right, screenPt.y};
+    if (item == kItemPlus) {
+        HideTray();
+        std::wstring path = NewMemo();
+        if (!path.empty()) OpenMemoWindow(path, anchor);
+    } else if (item >= kItemMemo && item - kItemMemo < (int)memos_.size()) {
+        std::wstring path = memos_[item - kItemMemo].path;
+        HideTray();
+        OpenMemoWindow(path, anchor);
+    } else if (item == kItemMemoMore) {
+        HideTray();
+        ShellExecuteW(nullptr, L"open", MemoDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    } else if (Pile* pile = PileAt(item)) {
+        HideTray();
+        host_.OnOrganizerOpen(*pile);  // may change the tray: nothing may touch it afterwards
+    }
+}
+
+void Organizer::MemoMenu(int memo, POINT screenPt) {
+    if (memo < 0 || memo >= (int)memos_.size()) return;
+    std::wstring path = memos_[memo].path;
+    POINT anchor{place_.right ? trayRect_.left : trayRect_.right, screenPt.y};
+    HideTray();
+    enum { kOpen = 1, kReveal, kRecycle };
+    UINT id = ShowMenu({{kOpen, L"열기"}, {kReveal, L"파일 위치 열기"}, {0, L""},
+                        {kRecycle, L"휴지통으로 버리기", L"되살릴 수 있어요"}},
+                       screenPt);
+    if (id == kOpen) OpenMemoWindow(path, anchor);
+    else if (id == kReveal) RevealInExplorer(path);
+    else if (id == kRecycle) RecycleMemo(path);
 }
 
 LRESULT CALLBACK Organizer::HandleProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
@@ -398,60 +505,54 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
         }
         case WM_MOUSEMOVE: {
             POINT p{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
-            if (pressedCard_ >= 0) {
+            if (pressed_ >= 0 && pressed_ < kItemMemo) {
                 POINT c;
                 GetCursorPos(&c);
                 if (abs(c.x - pressAt_.x) > GetSystemMetrics(SM_CXDRAG) || abs(c.y - pressAt_.y) > GetSystemMetrics(SM_CYDRAG)) {
                     // Dragging a card out: from here its desktop card follows the pointer (as going in).
-                    int idx = pressedCard_;
-                    pressedCard_ = -1;
+                    Pile* pile = PileAt(pressed_);
+                    pressed_ = -1;
                     ReleaseCapture();
-                    Pile* pile = nullptr;
-                    if (idx < (int)cardIds_.size())
-                        for (Pile* q : host_.OrganizerPiles())
-                            if (q->id == cardIds_[idx]) pile = q;
                     HideTray();
                     if (pile) host_.OnOrganizerCarryOut(*pile, c);  // may change the tray: nothing may touch it after
                     return 0;
                 }
             }
-            int hc = CardAt(p);
-            if (hc != hoverCard_) {
-                hoverCard_ = hc;
+            int hc = ItemAt(p);
+            if (hc != hover_) {
+                hover_ = hc;
                 RenderTray();
             }
             return 0;
         }
         case WM_LBUTTONDOWN: {
             POINT p{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
-            pressedCard_ = CardAt(p);
+            pressed_ = ItemAt(p);
             GetCursorPos(&pressAt_);
             SetCapture(tray_);
             return 0;
         }
         case WM_LBUTTONUP: {
-            int idx = pressedCard_;
-            pressedCard_ = -1;
+            POINT p{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            int item = pressed_;
+            pressed_ = -1;
             ReleaseCapture();
-            if (idx < 0 || idx >= (int)cardIds_.size()) return 0;
-            int id = cardIds_[idx];
-            Pile* pile = nullptr;
-            for (Pile* p : host_.OrganizerPiles())
-                if (p->id == id) pile = p;
-            if (!pile) return 0;
-            HideTray();
-            host_.OnOrganizerOpen(*pile);  // may change the tray: nothing may touch it afterwards
+            if (item < 0 || item != ItemAt(p)) return 0;
+            POINT c;
+            GetCursorPos(&c);
+            Activate(item, c);  // may change the tray: nothing may touch it afterwards
             return 0;
         }
         case WM_RBUTTONUP: {
             POINT p{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
-            int idx = CardAt(p);
-            Pile* pile = nullptr;
-            if (idx >= 0)
-                for (Pile* q : host_.OrganizerPiles())
-                    if (q->id == cardIds_[idx]) pile = q;
+            int item = ItemAt(p);
             POINT c;
             GetCursorPos(&c);
+            if (item >= kItemMemo && item < kItemPlus) {
+                MemoMenu(item - kItemMemo, c);
+                return 0;
+            }
+            Pile* pile = PileAt(item);
             HideTray();
             host_.OnOrganizerMenu(pile, c);
             return 0;
