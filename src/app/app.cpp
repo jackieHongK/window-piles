@@ -347,6 +347,7 @@ int App::RestoreSavedPiles() {
         p->color = sp.color;
         p->material = sp.material;
         p->docked = sp.docked;
+        p->dockOrder = sp.dockOrder;
         p->pos = sp.pos;
         p->missing = sp.missing;
         p->files = sp.files;
@@ -445,6 +446,7 @@ void App::PersistNow(bool background) {
         sp.color = p->color;
         sp.material = p->material;
         sp.docked = p->docked;
+        sp.dockOrder = p->dockOrder;
         sp.pos = p->pos;
         sp.folded = p->folded;
         sp.missing = p->missing;
@@ -1425,6 +1427,10 @@ void App::Dock(Pile& pile, bool on, const POINT* at) {
     if (!organizer_ || pile.docked == on) return;
     pile.docked = on;
     if (on) {
+        // On top of the tray, like a card put on a stack.
+        int top = 0;
+        for (Pile* p : OrganizerPiles()) top = std::min(top, p->dockOrder);
+        pile.dockOrder = top - 1;
         pile.view->SetVisible(false);
     } else {
         // Out of the tray: the card lands where it was let go, or just inside the bookmark.
@@ -1445,7 +1451,15 @@ std::vector<Pile*> App::OrganizerPiles() {
     std::vector<Pile*> out;
     for (auto& p : piles_)
         if (p->docked) out.push_back(p.get());
+    std::stable_sort(out.begin(), out.end(), [](Pile* a, Pile* b) { return a->dockOrder < b->dockOrder; });
     return out;
+}
+
+void App::OnOrganizerReorder(const std::vector<int>& pileIds) {
+    for (size_t i = 0; i < pileIds.size(); ++i)
+        if (Pile* p = FindPile(pileIds[i])) p->dockOrder = (int)i;
+    if (organizer_) organizer_->Refresh();
+    PersistSoon();
 }
 
 void App::OnOrganizerOpen(Pile& pile) { OnPileClick(pile); }

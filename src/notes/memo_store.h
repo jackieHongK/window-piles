@@ -19,7 +19,8 @@ struct MemoInfo {
 };
 
 std::wstring MemoDir();                // created if missing
-std::vector<MemoInfo> ListMemos();     // newest first
+std::vector<MemoInfo> ListMemos();     // in the order the user arranged them; ones not placed yet on top, newest first
+void SaveMemoOrder(const std::vector<MemoInfo>& memos);  // remembered by file name in organizer.ini ([memo] order)
 std::wstring NewMemo();                // creates an empty memo file, returns its path ("" on failure)
 std::wstring ReadMemo(const std::wstring& path);
 bool WriteMemo(const std::wstring& path, const std::wstring& text);  // replaces the file safely

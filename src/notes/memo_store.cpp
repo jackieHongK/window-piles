@@ -57,7 +57,22 @@ std::vector<MemoInfo> ListMemos() {
     } while (FindNextFileW(f, &fd));
     FindClose(f);
     std::sort(out.begin(), out.end(), [](const MemoInfo& a, const MemoInfo& b) { return CompareFileTime(&a.created, &b.created) > 0; });
+    // Then the order they were dragged into; memos not in it (new, or added outside the app) stay on top.
+    std::vector<wchar_t> buf(32768);
+    GetPrivateProfileStringW(L"memo", L"order", L"", buf.data(), (DWORD)buf.size(), IniPath().c_str());
+    std::wstring order = L"|" + std::wstring(buf.data()) + L"|";
+    auto rank = [&](const MemoInfo& m) {
+        size_t at = order.find(L"|" + m.path.substr(m.path.find_last_of(L'\\') + 1) + L"|");
+        return at == std::wstring::npos ? -1 : (int)at;
+    };
+    std::stable_sort(out.begin(), out.end(), [&](const MemoInfo& a, const MemoInfo& b) { return rank(a) < rank(b); });
     return out;
+}
+
+void SaveMemoOrder(const std::vector<MemoInfo>& memos) {
+    std::wstring order;
+    for (const MemoInfo& m : memos) order += (order.empty() ? L"" : L"|") + m.path.substr(m.path.find_last_of(L'\\') + 1);
+    WritePrivateProfileStringW(L"memo", L"order", order.c_str(), IniPath().c_str());
 }
 
 std::wstring NewMemo() {
@@ -107,6 +122,7 @@ bool WriteMemo(const std::wstring& path, const std::wstring& text) {
 }
 
 bool RecycleMemo(const std::wstring& path) {
+    if (UsingTestDataDir()) return DeleteFileW(path.c_str()) != FALSE;  // tests don't fill the user's Recycle Bin
     std::wstring from = path + L'\0';  // double-null terminated list
     SHFILEOPSTRUCTW op{};
     op.wFunc = FO_DELETE;

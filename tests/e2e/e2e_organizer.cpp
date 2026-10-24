@@ -9,8 +9,12 @@
 //   5. quit and start again                  → still kept in the organizer (saved)
 //   6. "＋ 새 메모" at the bottom of the tray   → a memo window and a .txt file in the memo folder; what is
 //      typed is in the file after closing; a memo closed empty leaves no file
+//   7. drag a memo card below the next one   → their order is remembered; drag one onto the trash can
+//      (what "＋ 새 메모" becomes while a memo is carried) → its file is gone
+//   8. with A and B both in the organizer, drag A below B → the new order is saved
 #include "poc_common.h"
 
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -93,11 +97,39 @@ std::string ReadAll(const std::wstring& path) {
 }
 
 // Opens the tray from the bookmark and clicks "＋ 새 메모" (the last thing in it); returns the memo window.
-HWND NewMemoFromTray() {
+HWND OpenTray() {
     HWND handle = FindWindowW(L"WindowPilesOrganizerHandle", nullptr), tray = nullptr;
     if (!handle) return nullptr;
     Click(handle, MAKELPARAM(4, 40));
     PumpUntil([&] { return (tray = FindWindowW(L"WindowPilesOrganizerTray", nullptr)) && IsWindowVisible(tray); }, 3000);
+    return tray && IsWindowVisible(tray) ? tray : nullptr;
+}
+
+// Presses at `from`, moves past the drag threshold to `to` (twice: starting the drag, then over the target),
+// and lets go there; tray client coordinates in DIPs.
+void DragInTray(HWND tray, POINT from, POINT to) {
+    UINT dpi = GetDpiForWindow(tray);
+    auto at = [&](POINT p) { return MAKELPARAM(MulDiv(p.x, dpi, 96), MulDiv(p.y, dpi, 96)); };
+    PostMessageW(tray, WM_LBUTTONDOWN, MK_LBUTTON, at(from));
+    PumpFor(80);
+    PostMessageW(tray, WM_MOUSEMOVE, MK_LBUTTON, at(to));
+    PumpFor(80);
+    PostMessageW(tray, WM_MOUSEMOVE, MK_LBUTTON, at(to));
+    PumpFor(80);
+    PostMessageW(tray, WM_LBUTTONUP, 0, at(to));
+    PumpFor(300);
+}
+
+std::wstring MemoOrder() {
+    wchar_t buf[4096] = {};
+    GetPrivateProfileStringW(L"memo", L"order", L"", buf, 4096, (DataDir() + L"\\organizer.ini").c_str());
+    return buf;
+}
+
+std::wstring FileName(const std::wstring& path) { return path.substr(path.find_last_of(L'\\') + 1); }
+
+HWND NewMemoFromTray() {
+    HWND tray = OpenTray();
     if (!tray) return nullptr;
     RECT tr;
     GetClientRect(tray, &tr);
@@ -187,7 +219,10 @@ int wmain(int argc, wchar_t** argv) {
     Check(!tray || !IsWindowVisible(tray), "3) 펼치면 트레이는 닫힘");
 
     // 4) fold A from the top tab: windows go away, and A stays in the organizer (no desktop card)
-    HWND tab = FindWindowW(L"WindowPilesFrameTab", nullptr);
+    // The tab comes up once the opening animation (240 ms) is over.
+    HWND tab = nullptr;
+    PumpUntil([&] { return (tab = FindWindowW(L"WindowPilesFrameTab", nullptr)) && IsWindowVisible(tab); }, 3000);
+    PumpFor(300);
     if (tab) PostMessageW(tab, WM_LBUTTONUP, 0, MAKELPARAM(10, 10));
     bool folded = PumpUntil([&] { return !IsWindowVisible(w[0]) && !IsWindowVisible(w[1]); }, 4000);
     PumpFor(600);
@@ -225,6 +260,61 @@ int wmain(int argc, wchar_t** argv) {
         PumpUntil([&] { return !IsWindow(memo); }, 3000);
     }
     Check(memo && Memos().size() == 1, "6) 아무것도 안 쓰고 닫은 메모는 파일이 남지 않음");
+
+    // 7) a second memo (newest, so on top), then: drag the top one below the other, and one into the trash
+    std::wstring first = files.size() == 1 ? files[0] : L"";
+    memo = NewMemoFromTray();
+    if (memo) {
+        SendMessageW(FindWindowExW(memo, nullptr, L"RICHEDIT50W", nullptr), WM_SETTEXT, 0, (LPARAM)L"할 일");
+        PostMessageW(memo, WM_CLOSE, 0, 0);
+        PumpUntil([&] { return !IsWindow(memo); }, 3000);
+    }
+    PumpFor(400);
+    // Tray layout (DIPs, from the bottom): 12 padding, the 36-high button, then memo rows 44 high every 52.
+    tray = OpenTray();
+    RECT tr{};
+    if (tray) GetClientRect(tray, &tr);
+    int bottom = tray ? MulDiv(tr.bottom, 96, GetDpiForWindow(tray)) : 0, mid = tray ? MulDiv(tr.right / 2, 96, GetDpiForWindow(tray)) : 0;
+    int plusY = bottom - 12 - 18, memo2Y = bottom - 12 - 36 - 52 + 22, memo1Y = memo2Y - 52;
+    if (tray) DragInTray(tray, {mid, memo1Y}, {mid, memo2Y});
+    Check(!first.empty() && MemoOrder().rfind(FileName(first) + L"|", 0) == 0, "7) 메모 카드를 끌어 순서를 바꾸면 그 순서가 기억됨");
+    if (tray) DragInTray(tray, {mid, memo1Y}, {mid, plusY});
+    PumpFor(900);  // the crumple animation
+    files = Memos();
+    Check(files.size() == 1 && files[0] != first, "7) 메모 카드를 휴지통(새 메모 자리)에 끌어 넣으면 버려짐");
+
+    // 8) both piles in the organizer: drag A (top) below B
+    PostMessageW(FindWindowW(L"WindowPilesMain", nullptr), WM_ENDSESSION, TRUE, 0);
+    WaitForSingleObject(app, 5000);
+    CloseHandle(app);
+    PumpUntil([&] { return (state = ReadState()).find("\"id\":2,") != std::string::npos; }, 3000);
+    size_t b = state.find("\"id\":2,");
+    size_t d = b == std::string::npos ? b : state.find("\"docked\":false", b);
+    if (d != std::string::npos) {  // B goes into the organizer too
+        state.replace(d, std::strlen("\"docked\":false"), "\"docked\":true");
+        f = CreateFileW((DataDir() + L"\\piles.json").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+        WriteFile(f, state.data(), (DWORD)state.size(), &n, nullptr);
+        CloseHandle(f);
+    }
+    app = Launch(appExe, L"--autostart");
+    PumpUntil([&] { return FindWindowW(L"WindowPilesMain", nullptr) && !IsWindowVisible(w[2]); }, 8000);
+    PumpFor(1000);
+    tray = OpenTray();
+    if (tray) DragInTray(tray, {mid, 12 + 24 + 33}, {mid, 12 + 24 + 33 + 74});
+    PostMessageW(FindWindowW(L"WindowPilesMain", nullptr), WM_ENDSESSION, TRUE, 0);
+    WaitForSingleObject(app, 5000);
+    CloseHandle(app);
+    PumpUntil([&] { return (state = ReadState()).find("\"id\":1,") != std::string::npos; }, 3000);
+    size_t a = state.find("\"id\":1,");
+    b = state.find("\"id\":2,");
+    bool reordered = a != std::string::npos && b != std::string::npos &&
+                     state.substr(a, b > a ? b - a : std::string::npos).find("\"dockOrder\":1") != std::string::npos &&
+                     state.find("\"dockOrder\":0", b) != std::string::npos;
+    if (!reordered) Print("   state: %s\n", state.c_str());
+    Check(d != std::string::npos && reordered, "8) 오거나이저 안에서 더미 카드를 끌어 순서를 바꾸면 저장됨");
+    app = Launch(appExe, L"--autostart");
+    PumpUntil([&] { return FindWindowW(L"WindowPilesMain", nullptr) != nullptr; }, 8000);
+    PumpFor(500);
 
     PostMessageW(FindWindowW(L"WindowPilesMain", nullptr), WM_ENDSESSION, TRUE, 0);
     WaitForSingleObject(app, 5000);

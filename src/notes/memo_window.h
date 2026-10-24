@@ -10,7 +10,7 @@
 namespace wp {
 
 // Opens the memo at `path` near `anchor` (screen), or brings its window forward if it is already open.
-void OpenMemoWindow(const std::wstring& path, POINT anchor);
+HWND OpenMemoWindow(const std::wstring& path, POINT anchor);  // nullptr if it could not open
 // Saves and closes every memo window (quitting).
 void CloseAllMemoWindows();
 // Shows the file selected in Explorer.

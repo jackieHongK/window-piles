@@ -72,7 +72,7 @@ bool SavePileState(const std::vector<SavedPile>& piles, bool background) {
         s += "{\"id\":" + Num((long long)p.id) + ",\"name\":" + json::Quote(p.name) +
              ",\"customName\":" + (p.customName ? "true" : "false") + ",\"color\":" + Num((uint64_t)p.color) +
              ",\"material\":\"" + std::string(kMaterials[ClampMaterial(p.material)].id) + "\"" +
-             ",\"docked\":" + (p.docked ? "true" : "false") +
+             ",\"docked\":" + (p.docked ? "true" : "false") + ",\"dockOrder\":" + Num((long long)p.dockOrder) +
              ",\"x\":" + Num((long long)p.pos.x) + ",\"y\":" + Num((long long)p.pos.y) +
              ",\"folded\":" + (p.folded ? "true" : "false") + ",\"members\":[";
         for (size_t k = 0; k < p.members.size(); ++k) {
@@ -148,6 +148,7 @@ bool LoadPileState(std::vector<SavedPile>& piles) {
         if (auto* x = pv.Get("color")) p.color = (COLORREF)x->U64();
         if (auto* x = pv.Get("material")) p.material = MaterialFromId(Utf8(x->WStr()).c_str());
         if (auto* x = pv.Get("docked")) p.docked = x->Bool();
+        if (auto* x = pv.Get("dockOrder")) p.dockOrder = (int)x->Int();
         if (auto* x = pv.Get("x")) p.pos.x = (LONG)x->Int();
         if (auto* x = pv.Get("y")) p.pos.y = (LONG)x->Int();
         if (auto* x = pv.Get("folded")) p.folded = x->Bool(true);

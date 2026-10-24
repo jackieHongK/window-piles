@@ -325,14 +325,14 @@ LRESULT CALLBACK Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 }  // namespace
 
-void OpenMemoWindow(const std::wstring& path, POINT anchor) {
+HWND OpenMemoWindow(const std::wstring& path, POINT anchor) {
     for (Memo* m : g_memos)
         if (_wcsicmp(m->path.c_str(), path.c_str()) == 0) {
             SetForegroundWindow(m->hwnd);
-            return;
+            return m->hwnd;
         }
     static HMODULE richEdit = LoadLibraryW(L"Msftedit.dll");  // RichEdit 4.1+, part of Windows
-    if (!richEdit) return;
+    if (!richEdit) return nullptr;
     auto* m = new Memo;
     m->path = path;
     m->dpi = DpiForPoint(anchor);
@@ -347,7 +347,7 @@ void OpenMemoWindow(const std::wstring& path, POINT anchor) {
                               r.bottom - r.top, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!m->hwnd) {
         delete m;
-        return;
+        return nullptr;
     }
     ApplyRoundedCorners(m->hwnd);
     m->edit = CreateWindowExW(0, MSFTEDIT_CLASS, L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL,
@@ -384,6 +384,7 @@ void OpenMemoWindow(const std::wstring& path, POINT anchor) {
     ShowWindow(m->hwnd, SW_SHOW);
     SetForegroundWindow(m->hwnd);
     SetFocus(m->edit);
+    return m->hwnd;
 }
 
 void CloseAllMemoWindows() {

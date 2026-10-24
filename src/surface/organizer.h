@@ -4,6 +4,8 @@
 // Cards go in by dragging them onto the bookmark (or "오거나이저에 꽂기") and out by dragging them
 // off the tray (the card follows the pointer, as it does going in). The bookmark itself can be
 // dragged along the edge, to the other side or monitor. Below the piles: memos, and "＋ 새 메모".
+// Cards are dragged up and down to reorder them; a memo card dragged out becomes its window, and
+// while one is carried the "＋ 새 메모" button turns into a trash can it is crumpled into.
 #pragma once
 
 #include <windows.h>
@@ -12,6 +14,7 @@
 #include <vector>
 
 #include "groups/pile.h"
+#include "common/canvas.h"
 #include "notes/memo_store.h"
 
 namespace wp {
@@ -25,6 +28,7 @@ public:
     virtual void OnOrganizerCarryOut(Pile& pile, POINT screenPt) = 0;
     virtual void OnOrganizerMenu(Pile* pile, POINT screenPt) = 0;     // right click on a card, or the bookmark
     virtual void OnOrganizerMoved() = 0;                               // the bookmark moved: remember where
+    virtual void OnOrganizerReorder(const std::vector<int>& pileIds) = 0;  // cards dragged into a new order
 };
 
 class Organizer {
@@ -62,6 +66,10 @@ private:
     Pile* PileAt(int item);
     void Activate(int item, POINT screenPt);  // a click on an item
     void MemoMenu(int memo, POINT screenPt);
+    void DrawPileCard(Canvas& c, const RECT& card, Pile& p, bool hot);
+    void DrawMemoCard(Canvas& c, const RECT& card, const MemoInfo& m, bool hot);
+    void DrawTrash(Canvas& c, const RECT& area, double now);
+    void EndDrag(POINT client);
 
     OrganizerHost& host_;
     Place place_;
@@ -78,8 +86,21 @@ private:
     // pressing on the bookmark: a click opens the tray, a drag moves the bookmark
     bool handlePressed_ = false, handleDragging_ = false;
     POINT pressAt_{};
-    // pressing on a pile card in the tray: a click opens the pile, a drag takes the card out
+    // pressing on a card in the tray: a click opens it; dragging it moves it within the tray (drag_),
+    // or out of it: a pile card back onto the desktop, a memo as its window
     int pressed_ = -1;
+    POINT pressPt_{};  // tray client
+    struct Drag {
+        int item = -1;          // pile index or kItemMemo + memo index, while moving
+        int grabDy = 0;         // pointer to card top
+        int y = 0;              // pointer, tray client
+        int slot = -1;          // where it would land (index in its list)
+        bool overTrash = false;  // a memo over the trash can
+        RECT card{};            // where it was drawn last, tray client
+    } drag_;
+    // a memo just dropped into the trash: crumpled and dropped in (animation only; the file is already gone)
+    double crumpleStart_ = 0;
+    RECT crumpleFrom_{};  // the card, relative to the trash area's top-left
     int hover_ = -1;
     std::vector<int> cardIds_;    // pile ids, in drawing order
     std::vector<RECT> cardRects_;  // tray client coords

@@ -45,6 +45,7 @@ public:
     void OnOrganizerCarryOut(Pile& pile, POINT screenPt) override;
     void OnOrganizerMenu(Pile* pile, POINT screenPt) override;
     void OnOrganizerMoved() override;
+    void OnOrganizerReorder(const std::vector<int>& pileIds) override;
     void OnFilesDropped(Pile& pile, const std::vector<std::wstring>& paths) override;
     void OnFileClick(Pile& pile, int index) override;
     void OnFileRemove(Pile& pile, int index) override;

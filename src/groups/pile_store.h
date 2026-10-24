@@ -27,6 +27,7 @@ struct SavedPile {
     COLORREF color = 0;
     int material = 0;
     bool docked = false;
+    int dockOrder = 0;
     POINT pos{};
     bool folded = true;
     std::vector<SavedMember> members;
