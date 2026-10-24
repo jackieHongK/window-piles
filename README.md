@@ -3,7 +3,7 @@
 **Tasks stack up, but never overflow.**
 *Your windows. Your tasks. One organized desktop.*
 
-(창 더미, 이전 이름 Window Piles) 실행 중인 여러 앱 창을 '더미'로 접어 화면에 남겨 두고, 다시 원래 창들로 펼쳐 쓰는 초경량 Windows 유틸리티. 화면을 책상처럼, 창 더미를 서류 더미처럼 다룹니다.
+**스택 네버플로우** (이전 이름: 창 더미 / Window Piles). 실행 중인 여러 앱 창을 '더미'로 접어 화면에 남겨 두고, 다시 원래 창들로 펼쳐 쓰는 초경량 Windows 유틸리티. 화면을 책상처럼, 창 더미를 서류 더미처럼 다룹니다.
 
 > 이름이 바뀌어도 파일과 데이터는 그대로입니다: 실행 파일 `WindowPiles.exe`, 데이터 폴더 `%LOCALAPPDATA%\WindowPiles`, 배포 zip `WindowPiles-<버전>-win-x64.zip`.
 
@@ -137,7 +137,7 @@ E2E 테스트 실행:
 
 ### Unreleased
 
-**🪵 새 이름: Stack Neverflow** — "Tasks stack up, but never overflow."
+**🪵 새 이름: Stack Neverflow (스택 네버플로우)** — "Tasks stack up, but never overflow."
 - 앱 이름과 로고가 바뀌었습니다: 호두나무 받침 위의 트레이에 카드가 넘치지 않게 쌓인 마크. 트레이 아이콘은 작업 표시줄 밝기(라이트/다크)에 맞춰 흰색 또는 검은색 한 색으로 표시됩니다.
 - 화면 = 책상(Deskterior) 컨셉: 따뜻한 잉크색 무채색, 창이 여러 개인 더미 카드 뒤로 종이 1~2장이 살짝 보이고, 그림자도 따뜻한 톤입니다. 사용법 창 머리에 마크와 슬로건이 들어갔습니다.
 - 파일 속성(자세히)에 제품 이름과 버전이 표시됩니다.
