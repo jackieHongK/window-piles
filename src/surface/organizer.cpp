@@ -130,6 +130,17 @@ void Organizer::Layout() {
 
 RECT Organizer::HandleRect() const { return handleRect_; }
 
+void Organizer::Raise() {
+    SetWindowPos(handle_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    if (trayOpen_) SetWindowPos(tray_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+void Organizer::SetVisible(bool show) {
+    if (!show) HideTray();
+    ShowWindow(handle_, show ? SW_SHOWNOACTIVATE : SW_HIDE);
+    if (show) Raise();
+}
+
 void Organizer::RenderHandle() {
     if (handleDragging_) return;  // follows the pointer; drawn once it lands
     Layout();

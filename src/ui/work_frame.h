@@ -20,7 +20,8 @@ public:
     WorkFrame(const WorkFrame&) = delete;
     WorkFrame& operator=(const WorkFrame&) = delete;
 
-    void Update();  // re-read monitors, name, color, count
+    void Update();  // re-read monitors, name, color, count (and show it again after Hide)
+    void Hide();
     bool HitTab(POINT pt) const;
     void SetHot(bool hot);
     // While a window is being dragged the tab grows into an obvious "drop here to add" target.

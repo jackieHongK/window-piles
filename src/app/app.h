@@ -152,6 +152,11 @@ private:
     std::unique_ptr<WorkFrame> frame_;  // for the active pile
     std::unique_ptr<Organizer> organizer_;  // the edge organizer, when turned on
     void SetOrganizer(bool on);
+    // "항상 위로" (default) / "숨기기" from the tray icon: hide every card, the organizer and the open pile's
+    // frame while focusing; the windows themselves stay as they are. Not remembered across starts.
+    bool uiHidden_ = false;
+    void SetUiHidden(bool hide);
+    void UpdateFrame();  // frame_->Update(), then the organizer back above it
     // Keep a pile in the organizer (its card leaves the desktop) or take it out, its card landing at
     // `at` (screen px) or next to the bookmark.
     void Dock(Pile& pile, bool on, const POINT* at = nullptr);

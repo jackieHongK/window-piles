@@ -49,6 +49,8 @@ public:
     void DragOver(POINT pt);
     void DragEnd();
     bool IsDropTarget(POINT pt) const;  // dropping a card here keeps it in the tray
+    void Raise();                // back on top of other always-on-top windows (an open pile's frame)
+    void SetVisible(bool show);  // "숨기기" in the tray icon menu
     RECT HandleRect() const;            // screen px: where folding/opening animations meet the tray
     const Place& place() const { return place_; }
 

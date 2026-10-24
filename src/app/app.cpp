@@ -63,6 +63,8 @@ enum MenuId : UINT {
     kMenuOrganizer,
     kMenuOrganizerSide,
     kMenuMemoFolder,
+    kMenuOnTop,
+    kMenuHideUi,
 };
 
 std::wstring FileName(const std::wstring& path) {
@@ -658,6 +660,10 @@ void App::OnPileMoved(Pile& pile) {
 }
 
 void App::ShowCard(Pile& pile) {
+    if (uiHidden_) {  // "숨기기": every card stays away until "항상 위로"
+        pile.view->SetVisible(false);
+        return;
+    }
     if (pile.docked && organizer_) {  // lives in the organizer: no card on the desktop
         pile.view->SetVisible(false);
         organizer_->Refresh();
@@ -719,7 +725,7 @@ void App::OnFilesDropped(Pile& pile, const std::vector<std::wstring>& paths) {
     }
     if (!added) return;
     Refresh(pile);
-    if (pile.active && frame_) frame_->Update();
+    if (pile.active && frame_) UpdateFrame();
     PersistSoon();
 }
 
@@ -859,7 +865,7 @@ void App::EditStyle(Pile& pile, POINT anchor) {
             p->material = s.material;
             if (!s.name.empty()) p->name = s.name;
             p->view->Render();
-            if (p->active && frame_) frame_->Update();
+            if (p->active && frame_) UpdateFrame();
         }
     };
     bool saved = EditPileStyle(current, anchor, preview, result);
@@ -951,7 +957,7 @@ void App::Refresh(Pile& pile) {
     if (!pile.customName) pile.name = AutoName(pile);
     UpdatePreviews(pile);
     pile.view->Render();
-    if (pile.active && frame_) frame_->Update();
+    if (pile.active && frame_) UpdateFrame();
     if (pile.docked && organizer_) organizer_->Refresh();
 }
 
@@ -1116,6 +1122,8 @@ void App::Expand(Pile& pile, bool makeActive) {
         SetTimer(main_, kTimerToFront, 250, nullptr);
         if (!pile.customName) pile.name = AutoName(pile);
         frame_ = std::make_unique<WorkFrame>(pile, *this);
+        if (uiHidden_) frame_->Hide();
+        else if (organizer_) organizer_->Raise();  // the frame came up on top of it
     } else {
         ShowCard(pile);
     }
@@ -1382,6 +1390,9 @@ void App::ShowTrayMenu() {
     for (auto& p : piles_) hidden += p->HiddenCount();
     bool autostart = AutostartEnabled();
     std::vector<MenuItem> items = {
+        {kMenuOnTop, L"항상 위로", uiHidden_ ? L"기본값" : L"✓"},
+        {kMenuHideUi, L"숨기기", uiHidden_ ? L"✓" : L"카드·오거나이저 잠시 치우기"},
+        {},
         {kMenuRestoreAll, L"모든 창 꺼내기", hidden ? std::to_wstring(hidden) + L"개" : L"", hidden == 0},
         {kMenuStats, L"작업 기록", L"오늘 쓴 시간"},
         {kMenuAutostart, L"Windows 시작 시 자동 실행", autostart ? L"켜짐 ✓" : L"꺼짐"},
@@ -1391,7 +1402,8 @@ void App::ShowTrayMenu() {
         {kMenuQuit, L"Neverflow 종료", L"창을 모두 꺼내요"},
     };
     UINT id = ShowMenu(items, pt);
-    if (id == kMenuRestoreAll) RestoreAll();
+    if (id == kMenuOnTop || id == kMenuHideUi) SetUiHidden(id == kMenuHideUi);
+    else if (id == kMenuRestoreAll) RestoreAll();
     else if (id == kMenuStats) ShowStats();
     else if (id == kMenuAutostart) {
         SetAutostart(!autostart);
@@ -1404,10 +1416,32 @@ void App::ShowTrayMenu() {
     else if (id == kMenuQuit) Quit();
 }
 
+void App::UpdateFrame() {
+    if (!frame_ || uiHidden_) return;
+    frame_->Update();
+    if (organizer_) organizer_->Raise();  // the frame puts itself on top: the organizer goes back above it
+}
+
+void App::SetUiHidden(bool hide) {
+    if (hide == uiHidden_) return;
+    uiHidden_ = hide;
+    Log("ui: %s", hide ? "hidden" : "shown");
+    if (organizer_) organizer_->SetVisible(!hide);
+    if (frame_) {
+        if (hide) frame_->Hide();
+        else frame_->Update();
+    }
+    for (auto& p : piles_)
+        if (hide) p->view->SetVisible(false);
+        else if (!p->active) ShowCard(*p);
+    if (!hide && organizer_) organizer_->Raise();
+}
+
 void App::SetOrganizer(bool on) {
     if (on == (organizer_ != nullptr)) return;
     if (on) {
         organizer_ = std::make_unique<Organizer>(*this, LoadOrganizerPlace());
+        if (uiHidden_) organizer_->SetVisible(false);
         for (auto& p : piles_)
             if (p->docked) p->view->SetVisible(false);
         organizer_->Refresh();
@@ -1554,7 +1588,7 @@ void App::Revalidate() {
             if (!IsWindow(m.hwnd)) dead.push_back(m.hwnd);
     for (HWND h : dead) OnMemberGone(h);
     for (auto& p : piles_) p->view->Render();
-    if (frame_) frame_->Update();
+    if (frame_) UpdateFrame();
 }
 
 void App::UpdateReclaim() {
@@ -1791,7 +1825,7 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
                 if (!toFront_.empty() && IsWindow(toFront_.back()) && !IsIconic(toFront_.back()))
                     SetForegroundWindow(toFront_.back());
                 toFront_.clear();
-                if (frame_) frame_->Update();  // monitors of the now-visible windows
+                if (frame_) UpdateFrame();  // monitors of the now-visible windows
             } else if (wp == kTimerReclaimNote) {
                 KillTimer(main_, kTimerReclaimNote);
                 if (reclaimed_ > 0)

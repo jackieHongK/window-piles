@@ -88,6 +88,14 @@ void WorkFrame::Destroy() {
     parts_.clear();
 }
 
+void WorkFrame::Hide() {
+    for (auto& p : parts_) {
+        for (HWND e : p.edges)
+            if (e) ShowWindow(e, SW_HIDE);
+        if (p.tab) ShowWindow(p.tab, SW_HIDE);
+    }
+}
+
 void WorkFrame::Build() {
     Destroy();
     // Every monitor that shows one of the pile's windows; the pile's own monitor as a fallback.
