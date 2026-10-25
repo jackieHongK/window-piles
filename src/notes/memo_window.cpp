@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
 #include <vector>
 
 #include "common/canvas.h"
@@ -24,7 +25,8 @@ namespace {
 // Layout in DIPs.
 constexpr int kW = 340, kH = 380, kMinW = 220, kMinH = 160, kHeaderH = 36, kPad = 14, kEdge = 6, kBtn = 28;
 constexpr UINT_PTR kTimerSave = 1;
-constexpr UINT kSaveDelayMs = 600;
+constexpr UINT kSaveDelayMs = 400;
+constexpr int kTabW = 24, kTabH = 26;  // the color tab, as big as the memo's flag tip on the organizer
 // Text sizes in twips (1/20 pt), by MemoLine: body, h1, h2, h3, bullet, number.
 constexpr LONG kTwips[] = {220, 340, 280, 240, 220, 220};
 const COLORREF kPaper = RGB(255, 252, 240);  // a note's warm paper
@@ -33,7 +35,8 @@ const COLORREF kBand = RGB(246, 238, 228);    // cream, as on the organizer
 struct Memo {
     std::wstring path;
     std::wstring saved;  // the text as last written (RichEdit form: paragraphs end in \r)
-    HWND hwnd = nullptr, edit = nullptr;
+    HWND hwnd = nullptr, edit = nullptr, tab = nullptr;
+    COLORREF color = CLR_INVALID;  // its flag's color
     ITextDocument* doc = nullptr;  // to keep restyling out of the undo history
     UINT dpi = 96;
     int hoverBtn = 0;  // 1 show in folder, 2 close
@@ -42,6 +45,45 @@ struct Memo {
 
 std::vector<Memo*> g_memos;
 WNDPROC g_richProc = nullptr;
+std::function<void()> g_onSaved;
+
+// The memo's flag color tab, sticking out of the window's left side beside its title bar (an owned window,
+// so it goes along when the memo is minimized, hidden or closed).
+void PlaceTab(Memo& m) {
+    if (!m.tab) return;
+    if (!IsWindowVisible(m.hwnd) || IsIconic(m.hwnd)) {
+        ShowWindow(m.tab, SW_HIDE);
+        return;
+    }
+    if (m.color == CLR_INVALID) {
+        m.color = kMemoColors[0].color;
+        for (const MemoInfo& i : ListMemos())
+            if (_wcsicmp(i.path.c_str(), m.path.c_str()) == 0) m.color = MemoColorOf(i);
+    }
+    auto S = [&](int v) { return Scale(v, m.dpi); };
+    RECT r;
+    GetWindowRect(m.hwnd, &r);
+    int w = S(kTabW), h = S(kTabH);
+    Canvas c(w, h);
+    c.FillRoundRect({0, 0, w + S(4), h}, S(2), m.color);  // rounded on the outside only
+    POINT at{r.left - w, r.top + (S(kHeaderH) - h) / 2};
+    c.Present(m.tab, at);
+    SetWindowPos(m.tab, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+HWND MakeTab(HWND owner) {
+    WNDCLASSW wc{};
+    if (!GetClassInfoW(GetModuleHandleW(nullptr), L"WindowPilesMemoTab", &wc)) {
+        wc = {};
+        wc.lpfnWndProc = DefWindowProcW;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.lpszClassName = L"WindowPilesMemoTab";
+        RegisterClassW(&wc);
+    }
+    return CreateWindowExW(WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT, L"WindowPilesMemoTab", L"",
+                           WS_POPUP, 0, 0, 1, 1, owner, nullptr, GetModuleHandleW(nullptr), nullptr);
+}
 
 Memo* From(HWND hwnd) { return (Memo*)GetWindowLongPtrW(hwnd, GWLP_USERDATA); }
 
@@ -185,6 +227,7 @@ void Save(Memo& m) {
     m.saved = text;
     // The file is named after the memo: "2026-10-25 장보기.txt", so it is easy to find outside the app too.
     if (text.find_first_not_of(L" \t\r\n") != std::wstring::npos) m.path = RenameMemoForTitle(m.path, MemoTitle(text));
+    if (g_onSaved) g_onSaved();  // the organizer's flag shows the new title right away
 }
 
 void UpdateTitle(Memo& m) {
@@ -196,7 +239,10 @@ void UpdateTitle(Memo& m) {
 
 void Close(Memo& m) {
     Save(m);
-    if (m.saved.find_first_not_of(L" \t\r\n") == std::wstring::npos) DeleteFileW(m.path.c_str());  // nothing written
+    if (m.saved.find_first_not_of(L" \t\r\n") == std::wstring::npos) {  // nothing written
+        DeleteFileW(m.path.c_str());
+        if (g_onSaved) g_onSaved();
+    }
     DestroyWindow(m.hwnd);
 }
 
@@ -265,7 +311,14 @@ LRESULT CALLBACK Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_GETMINMAXINFO:
             ((MINMAXINFO*)lp)->ptMinTrackSize = {S(kMinW), S(kMinH)};
             return 0;
+        case WM_MOVE:
+            PlaceTab(*m);
+            return 0;
+        case WM_SHOWWINDOW:
+            PostMessageW(hwnd, WM_MOVE, 0, 0);  // the tab follows once the window is shown or hidden
+            break;
         case WM_SIZE:
+            PlaceTab(*m);
             MoveWindow(m->edit, S(kPad), S(kHeaderH) + S(8), std::max(0, LOWORD(lp) - S(kPad) - S(kEdge)),
                        std::max(0, HIWORD(lp) - S(kHeaderH) - S(8) - S(kEdge) - S(4)), TRUE);
             return 0;
@@ -330,7 +383,7 @@ LRESULT CALLBACK Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 }  // namespace
 
-HWND OpenMemoWindow(const std::wstring& path, POINT anchor) {
+HWND OpenMemoWindow(const std::wstring& path, POINT anchor, const RECT* at) {
     for (Memo* m : g_memos)
         if (_wcsicmp(m->path.c_str(), path.c_str()) == 0) {
             SetForegroundWindow(m->hwnd);
@@ -346,7 +399,7 @@ HWND OpenMemoWindow(const std::wstring& path, POINT anchor) {
     // Beside the tray, toward the middle of the screen; a few open at once step down a little.
     int x = anchor.x > (work.left + work.right) / 2 ? anchor.x - w - gap : anchor.x + gap;
     int y = anchor.y - h / 2 + (int)g_memos.size() * gap;
-    RECT r = ClampToWorkArea({x, y, x + w, y + h}, anchor);
+    RECT r = at ? *at : ClampToWorkArea({x, y, x + w, y + h}, anchor);
     m->hwnd = CreateWindowExW(WS_EX_APPWINDOW, RegisterPopupClass(L"WindowPilesMemo", Proc), L"새 메모",
                               WS_POPUP | WS_CLIPCHILDREN | WS_MINIMIZEBOX, r.left, r.top, r.right - r.left,
                               r.bottom - r.top, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
@@ -375,6 +428,7 @@ HWND OpenMemoWindow(const std::wstring& path, POINT anchor) {
     }
     SetWindowLongPtrW(m->hwnd, GWLP_USERDATA, (LONG_PTR)m);
     g_memos.push_back(m);
+    m->tab = MakeTab(m->hwnd);
 
     SetText(m->edit, ReadMemo(path));
     m->saved = Text(*m);  // the file as the editor holds it, so opening alone never rewrites it
@@ -387,9 +441,23 @@ HWND OpenMemoWindow(const std::wstring& path, POINT anchor) {
     GetClientRect(m->hwnd, &rc);
     SendMessageW(m->hwnd, WM_SIZE, 0, MAKELPARAM(rc.right, rc.bottom));
     ShowWindow(m->hwnd, SW_SHOW);
+    PlaceTab(*m);
     SetForegroundWindow(m->hwnd);
     SetFocus(m->edit);
     return m->hwnd;
+}
+
+SIZE MemoWindowSize(UINT dpi) { return {Scale(kW, dpi), Scale(kH, dpi)}; }
+
+int OpenMemoCount() { return (int)g_memos.size(); }
+
+void OnMemoSaved(std::function<void()> handler) { g_onSaved = std::move(handler); }
+
+void RefreshMemoTabs() {
+    for (Memo* m : g_memos) {
+        m->color = CLR_INVALID;  // read again
+        PlaceTab(*m);
+    }
 }
 
 void CloseAllMemoWindows() {

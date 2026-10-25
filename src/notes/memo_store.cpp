@@ -126,11 +126,11 @@ std::wstring RenameMemoForTitle(const std::wstring& path, const std::wstring& ti
         order.replace(at + 1, old.size(), now);
         WritePrivateProfileStringW(L"memo", L"order", order.substr(1, order.size() - 2).c_str(), IniPath().c_str());
     }
+    // One never chosen came from the old name: kept as it was, rather than changing with the new name.
     int color = (int)GetPrivateProfileIntW(L"memoColor", old.c_str(), -1, IniPath().c_str());
-    if (color >= 0) {
-        WritePrivateProfileStringW(L"memoColor", old.c_str(), nullptr, IniPath().c_str());
-        SetMemoColor(to, color);
-    }
+    if (color < 0 || color >= kColors) color = (int)(std::hash<std::wstring>()(old) % kColors);
+    WritePrivateProfileStringW(L"memoColor", old.c_str(), nullptr, IniPath().c_str());
+    SetMemoColor(to, color);
     return to;
 }
 
