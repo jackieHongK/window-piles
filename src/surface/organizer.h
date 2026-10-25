@@ -29,6 +29,8 @@ public:
     virtual void OnOrganizerMenu(Pile* pile, POINT screenPt) = 0;     // right click on a card, or the bookmark
     virtual void OnOrganizerMoved() = 0;                               // the bookmark moved: remember where
     virtual void OnOrganizerReorder(const std::vector<int>& pileIds) = 0;  // cards dragged into a new order
+    // Files or folders from Explorer dropped on a pile's card in the tray.
+    virtual void OnOrganizerFilesDropped(Pile& pile, const std::vector<std::wstring>& paths) = 0;
 };
 
 class Organizer {
@@ -45,8 +47,9 @@ public:
     Organizer& operator=(const Organizer&) = delete;
 
     void Refresh();  // the piles in it changed: redraw the bookmark and, if open, the tray
-    // A desktop card is being carried at `pt`: near the bookmark the tray opens as a drop target.
-    void DragOver(POINT pt);
+    // Something is being carried at `pt`: near the bookmark the tray opens as a drop target. `add`: a window
+    // or files, which go into the pile whose card they are dropped on (otherwise a desktop card, which docks).
+    void DragOver(POINT pt, bool add = false);
     void DragEnd();
     bool IsDropTarget(POINT pt) const;  // dropping a card here keeps it in the tray
     // How many piles it holds: like a real tray it has a fixed number of slots, as many as fit in 60% of
@@ -56,6 +59,7 @@ public:
     void Raise();                // back on top of other always-on-top windows (an open pile's frame)
     void SetVisible(bool show);  // "숨기기" in the tray icon menu
     RECT HandleRect() const;            // screen px: where folding/opening animations meet the tray
+    Pile* PileAtScreen(POINT pt);       // the pile whose card in the open tray is at `pt`
     const Place& place() const { return place_; }
 
 private:
@@ -87,6 +91,10 @@ private:
     bool handleHover_ = false;
     bool trayOpen_ = false;
     bool dropMode_ = false;   // a card is being carried over it
+    bool dropAdd_ = false;    // ... or a window or files, to put into one of its piles
+    // Explorer's file drags send no mouse messages: a held button resting on the bookmark opens the tray.
+    bool filesDrag_ = false;
+    double fileHoverSince_ = 0;
     bool seenInside_ = false;  // the pointer was over the bookmark or tray since it opened
     double outsideSince_ = 0;
     // pressing on the bookmark: a click opens the tray, a drag moves the bookmark

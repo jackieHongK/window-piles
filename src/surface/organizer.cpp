@@ -30,7 +30,7 @@ constexpr int kItemMemo = 1000, kItemPlus = 2000, kItemMemoMore = 2001;
 const COLORREF kNotePaper = RGB(255, 252, 240);  // as the memo window
 constexpr int kLift = 10;            // a hovered card slides this far out of the tray
 constexpr double kHideAfterMs = 350;  // the pointer left the bookmark and tray this long ago: put it away
-constexpr UINT_PTR kTimerWatch = 1, kTimerOpen = 2, kTimerAnim = 3;
+constexpr UINT_PTR kTimerWatch = 1, kTimerOpen = 2, kTimerAnim = 3, kTimerFiles = 4;
 // Crumpling a memo into the trash: into a ball until kBallAt, falls in until kLandAt (the lid starts
 // shutting at kShutAt), then the can settles.
 constexpr double kCrumpleMs = 640, kBallAt = 0.45, kShutAt = 0.74, kLandAt = 0.78;
@@ -86,6 +86,10 @@ void TearOffMemo(const std::wstring& path, POINT pt, UINT dpi) {
 Organizer::Organizer(OrganizerHost& host, const Place& place) : host_(host), place_(place) {
     handle_ = MakeWindow(kHandleClass, &Organizer::HandleProc, this);
     tray_ = MakeWindow(kTrayClass, &Organizer::TrayProc, this);
+    DragAcceptFiles(tray_, TRUE);  // files dropped on a card in the tray join that pile
+    // ponytail: polls the button every 150 ms for Explorer drags; an OLE drop target needs an STA thread
+    // (this one is MTA for WinRT capture), worth it only if the poll ever shows up.
+    SetTimer(handle_, kTimerFiles, 150, nullptr);
     Layout();
     RenderHandle();
     ShowWindow(handle_, SW_SHOWNOACTIVATE);
@@ -325,11 +329,13 @@ void Organizer::RenderTray() {
     InflateRect(&rim, -1, -1);
     c.StrokeRoundRect(rim, r - 1, std::max(1, S(1)), RGB(255, 255, 255), 50);
     bool full = (int)piles.size() >= slots;
-    std::wstring label = dropMode_ ? (full ? L"자리가 없어요 · " + std::to_wstring(slots) + L"칸이 다 찼어요" : L"여기에 놓으면 꽂혀요")
+    std::wstring label = dropMode_ ? (dropAdd_ ? L"더미 카드 위에 놓으면 그 더미에 들어가요"
+                                      : full    ? L"자리가 없어요 · " + std::to_wstring(slots) + L"칸이 다 찼어요"
+                                                : L"여기에 놓으면 꽂혀요")
                                    : L"오거나이저 · " + std::to_wstring(piles.size()) + L" / " + std::to_wstring(slots) + L"칸";
     c.Text(label, {S(kTrayPad), S(kTrayPad), w - S(kTrayPad), S(kTrayPad + kTrayLabelH)}, kCream, S(12), true,
            DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    if (dropMode_ && !full) {
+    if (dropMode_ && !dropAdd_ && !full) {
         RECT o{S(4), S(4), w - S(4), h - S(4)};
         c.DashedRoundRect(o, S(10), S(2), S(6), S(4), kCream, 200);
     }
@@ -467,20 +473,36 @@ void Organizer::HideTray() {
     if (GetCapture() == tray_) ReleaseCapture();
 }
 
-void Organizer::DragOver(POINT pt) {
+Pile* Organizer::PileAtScreen(POINT pt) {
+    if (!trayOpen_) return nullptr;
+    ScreenToClient(tray_, &pt);
+    return PileAt(ItemAt(pt));
+}
+
+void Organizer::DragOver(POINT pt, bool add) {
     // Near the bookmark (within a card's width of the edge, around its height) the tray opens to catch it.
     int reach = Scale(kCardW, dpi_);
     bool nearEdge = place_.right ? pt.x >= monitor_.right - reach && pt.x <= monitor_.right
                                  : pt.x <= monitor_.left + reach && pt.x >= monitor_.left;
     bool nearHandle = nearEdge && pt.y >= handleRect_.top - reach && pt.y <= handleRect_.bottom + reach;
     if (nearHandle || (trayOpen_ && IsDropTarget(pt))) {
+        bool changed = !dropMode_ || dropAdd_ != add;
+        dropAdd_ = add;
         if (!dropMode_) {
             dropMode_ = true;
             ShowTray();
             seenInside_ = true;
             RenderHandle();
-            RenderTray();
         }
+        if (add) {  // the card it would go into lights up
+            POINT c = pt;
+            ScreenToClient(tray_, &c);
+            int item = ItemAt(c);
+            item = item >= 0 && item < kItemMemo ? item : -1;
+            changed |= item != hover_;
+            hover_ = item;
+        }
+        if (changed) RenderTray();
     } else if (dropMode_) {
         DragEnd();
     }
@@ -489,6 +511,7 @@ void Organizer::DragOver(POINT pt) {
 void Organizer::DragEnd() {
     if (!dropMode_) return;
     dropMode_ = false;
+    dropAdd_ = false;
     HideTray();
     RenderHandle();
 }
@@ -597,6 +620,32 @@ LRESULT Organizer::OnHandle(UINT msg, WPARAM wp, LPARAM lp) {
             RenderHandle();
             return 0;
         case WM_TIMER:
+            if (wp == kTimerFiles) {
+                bool down = GetAsyncKeyState(GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON) & 0x8000;
+                POINT c;
+                GetCursorPos(&c);
+                if (filesDrag_) {
+                    if (down) DragOver(c, true);
+                    else {  // let go: a drop on the tray came as WM_DROPFILES; anywhere else, nothing to do
+                        filesDrag_ = false;
+                        DragEnd();
+                    }
+                    return 0;
+                }
+                // Not our own drags (a card or the bookmark holds the capture), and only after a short rest.
+                RECT h = handleRect_;
+                InflateRect(&h, Scale(8, dpi_), Scale(8, dpi_));
+                if (!down || GetCapture() || handlePressed_ || trayOpen_ || !PtInRect(&h, c)) {
+                    fileHoverSince_ = 0;
+                    return 0;
+                }
+                if (!fileHoverSince_) fileHoverSince_ = NowMs();
+                else if (NowMs() - fileHoverSince_ >= 250) {
+                    filesDrag_ = true;
+                    DragOver(c, true);
+                }
+                return 0;
+            }
             if (wp == kTimerOpen) {
                 KillTimer(handle_, kTimerOpen);
                 if (!handlePressed_) ShowTray();
@@ -773,6 +822,17 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
             POINT c = p;
             ClientToScreen(tray_, &c);
             Activate(item, c);  // may change the tray: nothing may touch it afterwards
+            return 0;
+        }
+        case WM_DROPFILES: {
+            HDROP drop = (HDROP)wp;
+            POINT p{};
+            DragQueryPoint(drop, &p);
+            std::vector<std::wstring> paths = DroppedPaths(drop);  // releases the drop
+            Pile* pile = PileAt(ItemAt(p));
+            filesDrag_ = false;
+            DragEnd();
+            if (pile && !paths.empty()) host_.OnOrganizerFilesDropped(*pile, paths);
             return 0;
         }
         case WM_RBUTTONUP: {

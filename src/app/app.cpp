@@ -534,12 +534,14 @@ void App::OnDragTargetsShown(HWND) {
 }
 
 void App::OnDragHover(HWND, POINT cursor) {
+    if (organizer_) organizer_->DragOver(cursor, true);  // near the bookmark the tray opens: its cards take it too
     Pile* over = PileAt(cursor);
     for (auto& p : piles_) p->view->SetHot(p.get() == over && !p->active);
     if (frame_) frame_->SetHot(over && over->active);
 }
 
 void App::OnDragEnd() {
+    if (organizer_) organizer_->DragEnd();
     for (auto& p : piles_) p->view->SetHot(false);
     if (frame_) frame_->SetDropMode(false);
 }
@@ -895,6 +897,8 @@ void App::EditStyle(Pile& pile, POINT anchor) {
 // ---------------------------------------------------------------------------------------------
 
 Pile* App::PileAt(POINT pt) {
+    if (organizer_)
+        if (Pile* p = organizer_->PileAtScreen(pt)) return p;  // a card in the open tray
     for (auto it = piles_.rbegin(); it != piles_.rend(); ++it) {
         Pile& p = **it;
         if (p.active) {
@@ -1492,6 +1496,8 @@ std::vector<Pile*> App::OrganizerPiles() {
     std::stable_sort(out.begin(), out.end(), [](Pile* a, Pile* b) { return a->dockOrder < b->dockOrder; });
     return out;
 }
+
+void App::OnOrganizerFilesDropped(Pile& pile, const std::vector<std::wstring>& paths) { OnFilesDropped(pile, paths); }
 
 void App::OnOrganizerReorder(const std::vector<int>& pileIds) {
     for (size_t i = 0; i < pileIds.size(); ++i)
