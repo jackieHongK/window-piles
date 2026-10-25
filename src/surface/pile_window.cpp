@@ -208,7 +208,7 @@ void PileWindow::Render() {
 
     Canvas c(size_.cx, size_.cy);
     RECT card{margin_, margin_, size_.cx - margin_, size_.cy - margin_};
-    int radius = S(kRadiusLg);
+    int radius = S(1);  // a sheet of paper: barely rounded
     c.Shadow(card, radius, S(10), S(3), hot_ ? 70 : 45, kForeground);  // warm ink, not gray
     // One clean sheet (no stacked layers behind it) of the chosen material; text on it follows its tone.
     FillMaterial(c, card, radius, pile_.material, dpi);

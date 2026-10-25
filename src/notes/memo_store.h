@@ -16,6 +16,7 @@ struct MemoInfo {
     std::wstring title;    // first line (markers removed); empty for an empty memo
     std::wstring excerpt;  // second line
     FILETIME created{};
+    int color = 0;  // its flag's color: index into the organizer's Post-it colors
 };
 
 std::wstring MemoDir();                // created if missing
@@ -25,5 +26,6 @@ std::wstring NewMemo();                // creates an empty memo file, returns it
 std::wstring ReadMemo(const std::wstring& path);
 bool WriteMemo(const std::wstring& path, const std::wstring& text);  // replaces the file safely
 bool RecycleMemo(const std::wstring& path);                          // to the Recycle Bin (can be restored)
+void SetMemoColor(const std::wstring& path, int color);              // kept by file name in organizer.ini
 
 }  // namespace wp

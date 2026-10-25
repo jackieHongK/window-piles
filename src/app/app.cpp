@@ -651,7 +651,7 @@ void App::OnPileMoved(Pile& pile) {
         bool dock = organizer_->IsDropTarget(c) && !organizer_->Full();  // a full tray: it stays where it was let go
         organizer_->DragEnd();
         if (dock) {
-            Dock(pile, true);
+            Dock(pile, true, &c);
             return;
         }
     }
@@ -1469,10 +1469,8 @@ void App::Dock(Pile& pile, bool on, const POINT* at) {
     if (!organizer_ || pile.docked == on || (on && organizer_->Full())) return;
     pile.docked = on;
     if (on) {
-        // On top of the tray, like a card put on a stack.
-        int top = 0;
-        for (Pile* p : OrganizerPiles()) top = std::min(top, p->dockOrder);
-        pile.dockOrder = top - 1;
+        // Into the empty slot it was let go over, or the first empty one, as you'd put it on a real tray.
+        pile.dockOrder = organizer_->FreeSlot(at);
         pile.view->SetVisible(false);
     } else {
         // Out of the tray: the card lands where it was let go, or just inside the bookmark.

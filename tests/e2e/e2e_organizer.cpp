@@ -133,7 +133,7 @@ HWND NewMemoFromTray() {
     if (!tray) return nullptr;
     RECT tr;
     GetClientRect(tray, &tr);
-    Click(tray, MAKELPARAM(tr.right / 2, tr.bottom - MulDiv(12 + 18, GetDpiForWindow(tray), 96)));  // padding + half the button
+    Click(tray, MAKELPARAM(tr.right / 2, tr.bottom - MulDiv(14 + 18, GetDpiForWindow(tray), 96)));  // padding + half the button
     HWND memo = nullptr;
     PumpUntil([&] { return (memo = FindWindowW(L"WindowPilesMemo", nullptr)) && IsWindowVisible(memo); }, 3000);
     return memo;
@@ -219,7 +219,7 @@ int wmain(int argc, wchar_t** argv) {
         UINT dpi = GetDpiForWindow(tray);
         RECT tr;
         GetClientRect(tray, &tr);
-        Click(tray, MAKELPARAM(tr.right / 2, MulDiv(12 + 24 + 33, dpi, 96)));  // padding + label + half a card
+        Click(tray, MAKELPARAM(tr.right / 2, MulDiv(14 + 30 + 14 + 33, dpi, 96)));  // padding + logo + gap + half a card
     }
     bool opened = PumpUntil([&] { return IsWindowVisible(w[0]) && IsWindowVisible(w[1]); }, 4000);
     Check(opened, "3) 트레이의 카드를 누르면 더미 A가 펼쳐짐");
@@ -277,12 +277,12 @@ int wmain(int argc, wchar_t** argv) {
         PumpUntil([&] { return !IsWindow(memo); }, 3000);
     }
     PumpFor(400);
-    // Tray layout (DIPs, from the bottom): 12 padding, the 36-high button, then memo rows 44 high every 52.
+    // Tray layout (DIPs, from the bottom): 14 padding, the 36-high button, 6, then memo flags 26 high every 32.
     tray = OpenTray();
     RECT tr{};
     if (tray) GetClientRect(tray, &tr);
     int bottom = tray ? MulDiv(tr.bottom, 96, GetDpiForWindow(tray)) : 0, mid = tray ? MulDiv(tr.right / 2, 96, GetDpiForWindow(tray)) : 0;
-    int plusY = bottom - 12 - 18, memo2Y = bottom - 12 - 36 - 52 + 22, memo1Y = memo2Y - 52;
+    int plusY = bottom - 14 - 18, memo2Y = bottom - 14 - 36 - 6 - 32 + 13, memo1Y = memo2Y - 32;
     if (tray) DragInTray(tray, {mid, memo1Y}, {mid, memo2Y});
     Check(!first.empty() && MemoOrder().rfind(FileName(first) + L"|", 0) == 0, "7) 메모 카드를 끌어 순서를 바꾸면 그 순서가 기억됨");
     if (tray) DragInTray(tray, {mid, memo1Y}, {mid, plusY});
@@ -307,7 +307,7 @@ int wmain(int argc, wchar_t** argv) {
     PumpUntil([&] { return FindWindowW(L"WindowPilesMain", nullptr) && !IsWindowVisible(w[2]); }, 8000);
     PumpFor(1000);
     tray = OpenTray();
-    if (tray) DragInTray(tray, {mid, 12 + 24 + 33}, {mid, 12 + 24 + 33 + 74});
+    if (tray) DragInTray(tray, {mid, 14 + 30 + 14 + 33}, {mid, 14 + 30 + 14 + 33 + 78});  // slot 0 to slot 1
     PostMessageW(FindWindowW(L"WindowPilesMain", nullptr), WM_ENDSESSION, TRUE, 0);
     WaitForSingleObject(app, 5000);
     CloseHandle(app);

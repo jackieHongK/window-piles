@@ -158,8 +158,8 @@ private:
     bool uiHidden_ = false;
     void SetUiHidden(bool hide);
     void UpdateFrame();  // frame_->Update(), then the organizer back above it
-    // Keep a pile in the organizer (its card leaves the desktop) or take it out, its card landing at
-    // `at` (screen px) or next to the bookmark.
+    // Keep a pile in the organizer (its card leaves the desktop; in the empty slot under `at` if there is one)
+    // or take it out, its card landing at `at` (screen px) or next to the bookmark.
     void Dock(Pile& pile, bool on, const POINT* at = nullptr);
     std::unique_ptr<GuideWindow> guide_;
     int nextId_ = 1;

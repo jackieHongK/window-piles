@@ -4,6 +4,7 @@
 #include <shlobj.h>
 
 #include <algorithm>
+#include <functional>
 
 #include "common/win_util.h"
 #include "notes/memo_format.h"
@@ -13,6 +14,10 @@ namespace wp {
 namespace {
 
 std::wstring IniPath() { return AppDataDir() + L"\\organizer.ini"; }
+
+std::wstring FileOf(const std::wstring& path) { return path.substr(path.find_last_of(L'\\') + 1); }
+
+constexpr int kColors = 7;  // the organizer's Post-it colors
 
 std::wstring DefaultDir() {
     if (UsingTestDataDir()) return AppDataDir() + L"\\memos";  // tests never write to the user's Documents
@@ -53,6 +58,9 @@ std::vector<MemoInfo> ListMemos() {
         m.title = MemoTitle(text);
         m.excerpt = MemoExcerpt(text);
         m.created = fd.ftCreationTime;
+        // Its flag's color: chosen, or one that comes from the name, so it never changes by itself.
+        m.color = (int)GetPrivateProfileIntW(L"memoColor", fd.cFileName, -1, IniPath().c_str());
+        if (m.color < 0 || m.color >= kColors) m.color = (int)(std::hash<std::wstring>()(fd.cFileName) % kColors);
         out.push_back(std::move(m));
     } while (FindNextFileW(f, &fd));
     FindClose(f);
@@ -83,6 +91,10 @@ std::wstring NewMemo() {
     std::wstring base = MemoDir() + L"\\" + name, path = base + L".txt";
     for (int i = 2; GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES; ++i) path = base + L" (" + std::to_wstring(i) + L").txt";
     return WriteMemo(path, L"") ? path : L"";
+}
+
+void SetMemoColor(const std::wstring& path, int color) {
+    WritePrivateProfileStringW(L"memoColor", FileOf(path).c_str(), std::to_wstring(color).c_str(), IniPath().c_str());
 }
 
 std::wstring ReadMemo(const std::wstring& path) {
