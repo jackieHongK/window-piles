@@ -178,8 +178,13 @@ void Save(Memo& m) {
     KillTimer(m.hwnd, kTimerSave);
     std::wstring text = Text(m);
     if (text == m.saved) return;
-    if (WriteMemo(m.path, text)) m.saved = text;
-    else Log("memo: could not save %s", Utf8(m.path).c_str());
+    if (!WriteMemo(m.path, text)) {
+        Log("memo: could not save %s", Utf8(m.path).c_str());
+        return;
+    }
+    m.saved = text;
+    // The file is named after the memo: "2026-10-25 장보기.txt", so it is easy to find outside the app too.
+    if (text.find_first_not_of(L" \t\r\n") != std::wstring::npos) m.path = RenameMemoForTitle(m.path, MemoTitle(text));
 }
 
 void UpdateTitle(Memo& m) {

@@ -30,4 +30,9 @@ MemoEnter MemoOnEnter(std::wstring_view line);
 std::wstring MemoTitle(std::wstring_view text);
 std::wstring MemoExcerpt(std::wstring_view text);
 
+// A memo's file name: "2026-10-25 장보기.txt" — the date, then its title with anything but letters, digits,
+// spaces and - _ . , ( ) [ ] taken out (so every file system and sync service takes it), at most 50
+// characters; "메모" if nothing is left.
+std::wstring MemoFileName(std::wstring_view date, std::wstring_view title);
+
 }  // namespace wp

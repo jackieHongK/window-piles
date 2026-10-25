@@ -4,6 +4,7 @@
 #include <shlobj.h>
 
 #include <algorithm>
+#include <cwctype>
 #include <functional>
 
 #include "common/win_util.h"
@@ -18,6 +19,22 @@ std::wstring IniPath() { return AppDataDir() + L"\\organizer.ini"; }
 std::wstring FileOf(const std::wstring& path) { return path.substr(path.find_last_of(L'\\') + 1); }
 
 constexpr int kColors = 7;  // the organizer's Post-it colors
+
+std::wstring Today() {
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    wchar_t d[16];
+    swprintf_s(d, L"%04u-%02u-%02u", t.wYear, t.wMonth, t.wDay);
+    return d;
+}
+
+// "dir\base.txt", or "dir\base (2).txt" ... if that name is taken by another file.
+std::wstring FreeName(const std::wstring& dir, const std::wstring& name, const std::wstring& self = L"") {
+    std::wstring base = name.substr(0, name.size() - 4), path = dir + L"\\" + name;
+    for (int i = 2; _wcsicmp(path.c_str(), self.c_str()) != 0 && GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES; ++i)
+        path = dir + L"\\" + base + L" (" + std::to_wstring(i) + L").txt";
+    return path;
+}
 
 std::wstring DefaultDir() {
     if (UsingTestDataDir()) return AppDataDir() + L"\\memos";  // tests never write to the user's Documents
@@ -84,17 +101,37 @@ void SaveMemoOrder(const std::vector<MemoInfo>& memos) {
 }
 
 std::wstring NewMemo() {
-    SYSTEMTIME t;
-    GetLocalTime(&t);
-    wchar_t name[64];
-    swprintf_s(name, L"메모 %04u-%02u-%02u %02u%02u%02u", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
-    std::wstring base = MemoDir() + L"\\" + name, path = base + L".txt";
-    for (int i = 2; GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES; ++i) path = base + L" (" + std::to_wstring(i) + L").txt";
+    std::wstring path = FreeName(MemoDir(), MemoFileName(Today(), L""));
     return WriteMemo(path, L"") ? path : L"";
 }
 
 void SetMemoColor(const std::wstring& path, int color) {
     WritePrivateProfileStringW(L"memoColor", FileOf(path).c_str(), std::to_wstring(color).c_str(), IniPath().c_str());
+}
+
+std::wstring RenameMemoForTitle(const std::wstring& path, const std::wstring& title) {
+    std::wstring dir = path.substr(0, path.find_last_of(L'\\')), old = FileOf(path);
+    // The date it was made: from its name when it has one, else today.
+    std::wstring date = old.size() > 10 && iswdigit(old[0]) && old[4] == L'-' && old[7] == L'-' ? old.substr(0, 10) : Today();
+    std::wstring want = MemoFileName(date, title);
+    if (_wcsicmp(want.c_str(), old.c_str()) == 0) return path;
+    std::wstring to = FreeName(dir, want, path);
+    if (_wcsicmp(to.c_str(), path.c_str()) == 0 || !MoveFileExW(path.c_str(), to.c_str(), 0)) return path;
+    std::wstring now = FileOf(to);
+    // Its place in the arranged order and its color go with it.
+    std::vector<wchar_t> buf(32768);
+    GetPrivateProfileStringW(L"memo", L"order", L"", buf.data(), (DWORD)buf.size(), IniPath().c_str());
+    std::wstring order = L"|" + std::wstring(buf.data()) + L"|";
+    if (size_t at = order.find(L"|" + old + L"|"); at != std::wstring::npos) {
+        order.replace(at + 1, old.size(), now);
+        WritePrivateProfileStringW(L"memo", L"order", order.substr(1, order.size() - 2).c_str(), IniPath().c_str());
+    }
+    int color = (int)GetPrivateProfileIntW(L"memoColor", old.c_str(), -1, IniPath().c_str());
+    if (color >= 0) {
+        WritePrivateProfileStringW(L"memoColor", old.c_str(), nullptr, IniPath().c_str());
+        SetMemoColor(to, color);
+    }
+    return to;
 }
 
 std::wstring ReadMemo(const std::wstring& path) {

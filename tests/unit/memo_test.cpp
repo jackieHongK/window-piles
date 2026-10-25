@@ -48,6 +48,16 @@ int main() {
     Check(MemoTitle(L"") == L"" && MemoExcerpt(L"한 줄") == L"", "empty title / no excerpt");
     Check(MemoTitle(std::wstring(60, L'가')).size() == 40, "long titles are clipped to 40");
 
+    // file names
+    Check(MemoFileName(L"2026-10-25", L"장보기") == L"2026-10-25 장보기.txt", "date + title");
+    Check(MemoFileName(L"2026-10-25", L"a/b:c*d?\"e<f>g|h\\i") == L"2026-10-25 a b c d e f g h i.txt", "characters Windows refuses");
+    Check(MemoFileName(L"2026-10-25", L"회의 🎉 준비!!") == L"2026-10-25 회의 준비.txt", "symbols and emoji go, spaces collapse");
+    Check(MemoFileName(L"2026-10-25", L"끝에 점...  ") == L"2026-10-25 끝에 점.txt", "no trailing dots or spaces");
+    Check(MemoFileName(L"2026-10-25", L"") == L"2026-10-25 메모.txt" && MemoFileName(L"2026-10-25", L"★☆") == L"2026-10-25 메모.txt",
+          "nothing left: 메모");
+    Check(MemoFileName(L"2026-10-25", std::wstring(80, L'가')).size() == 10 + 1 + 50 + 4, "titles are cut to 50");
+    Check(MemoFileName(L"2026-10-25", L"Café (v2) [초안]") == L"2026-10-25 Café (v2) [초안].txt", "accents and brackets stay");
+
     printf("%d cases\n%s (%d failed)\n", g_cases, g_fail ? "MEMO FAILED" : "MEMO PASSED", g_fail);
     return g_fail;
 }

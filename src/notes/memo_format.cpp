@@ -68,6 +68,35 @@ std::wstring Clip(std::wstring s) {
 
 }  // namespace
 
+namespace {
+
+bool NameChar(wchar_t c) {
+    if ((c >= L'0' && c <= L'9') || (c >= L'A' && c <= L'Z') || (c >= L'a' && c <= L'z')) return true;
+    if (std::wstring_view(L" -_.,()[]").find(c) != std::wstring_view::npos) return true;
+    return (c >= 0xC0 && c <= 0x24F && c != 0xD7 && c != 0xF7)  // Latin letters with accents
+           || (c >= 0x370 && c <= 0x52F)                           // Greek, Cyrillic
+           || (c >= 0x3040 && c <= 0x30FF)                         // kana
+           || (c >= 0x3130 && c <= 0x318F)                         // Hangul jamo
+           || (c >= 0x4E00 && c <= 0x9FFF)                         // CJK ideographs
+           || (c >= 0xAC00 && c <= 0xD7A3);                        // Hangul syllables
+}
+
+}  // namespace
+
+std::wstring MemoFileName(std::wstring_view date, std::wstring_view title) {
+    std::wstring name;
+    for (wchar_t c : title) {
+        if (!NameChar(c)) c = L' ';
+        if (c == L' ' && (name.empty() || name.back() == L' ')) continue;  // no leading or doubled spaces
+        name += c;
+    }
+    if (name.size() > 50) name.resize(50);
+    // Windows drops trailing dots and spaces from names, which would make the file hard to find again.
+    while (!name.empty() && (name.back() == L' ' || name.back() == L'.')) name.pop_back();
+    if (name.empty()) name = L"메모";
+    return std::wstring(date) + L" " + name + L".txt";
+}
+
 std::wstring MemoTitle(std::wstring_view text) {
     auto lines = ContentLines(text, 1);
     return lines.empty() ? L"" : Clip(lines[0]);
