@@ -11,6 +11,7 @@
 #include "common/win_util.h"
 #include "notes/memo_format.h"
 #include "notes/memo_list_window.h"
+#include "ui/list_popup.h"
 #include "notes/memo_store.h"
 #include "notes/memo_window.h"
 #include "ui/material.h"
@@ -32,20 +33,22 @@ constexpr int kMemoLabelH = 22, kFlagH = 26, kFlagGap = 6, kFlagMax = 5, kPlusH 
 // the tray is put away); the tip is this wide in all.
 constexpr int kFlagOut = 12, kFlagTip = 24;
 constexpr int kOut = kHandleW;          // the tray window's room for what sticks out toward the desktop
-constexpr int kMaxHeightPercent = 60;  // of the work area: the tray never gets taller than this
-constexpr int kMinSlots = 2;
+constexpr int kSlots = 5, kMinSlots = 2;  // five pile slots, fewer only on a screen too short for them
 // Hit codes for what isn't a pile card (pile cards are their index).
-constexpr int kItemMemo = 1000, kItemPlus = 2000, kItemMemoMore = 2001, kItemHandle = 2002, kItemPin = 2003;
+constexpr int kItemMemo = 1000, kItemPlus = 2000, kItemMemoMore = 2001, kItemHandle = 2002, kItemPin = 2003, kItemClipMore = 2004;
 constexpr int kItemDock = 2999, kItemMessenger = 3000;  // the dock's row; + index: one of its apps
 constexpr int kItemClip = 4000;                         // + index: an item on the clipboard shelf
 constexpr int kTile = 44;                               // a messenger's (and a clip's) tile
 constexpr UINT kNoticeMs = 1800;                        // a notice over a row of tiles
+constexpr double kGrowMs = 160;  // hovered, the dispenser grows over the sections below this fast
+constexpr double kNextMs = 300;  // one shot out, the next sheet comes up out of the slot this long
+constexpr double kFlyMs = 460;   // ... while the one shot out flies to where its memo opens
 bool IsMessenger(int item) { return item >= kItemMessenger && item < kItemClip; }
 bool IsClip(int item) { return item >= kItemClip; }
 constexpr int kPin = 28;  // the pin button at the end of the logo row
 constexpr int kLift = 10;            // a hovered card slides this far out of the tray
 constexpr double kHideAfterMs = 350;  // the pointer left the bookmark and tray this long ago: put it away
-constexpr UINT_PTR kTimerWatch = 1, kTimerOpen = 2, kTimerAnim = 3, kTimerFiles = 4, kTimerPeek = 6, kTimerNotice = 7;
+constexpr UINT_PTR kTimerWatch = 1, kTimerOpen = 2, kTimerAnim = 3, kTimerFiles = 4, kTimerPeek = 6, kTimerNotice = 7, kTimerSheet = 8, kTimerFly = 9, kTimerEdge = 10;
 constexpr double kSlideMs = 240;    // the brand motion: 240 ms ease-out
 constexpr double kSlideInMs = 200;  // folding back in, a little quicker
 constexpr UINT kOpenDelayMs = 120;  // resting on the bookmark this long opens the drawer
@@ -58,6 +61,7 @@ constexpr wchar_t kHandleClass[] = L"WindowPilesOrganizerHandle";
 constexpr wchar_t kTrayClass[] = L"WindowPilesOrganizerTray";
 constexpr wchar_t kFlagsClass[] = L"WindowPilesOrganizerFlags";
 constexpr wchar_t kPeekClass[] = L"WindowPilesOrganizerPeek";
+constexpr wchar_t kFlyClass[] = L"WindowPilesOrganizerFlight";
 const COLORREF kCream = RGB(246, 238, 228);
 const COLORREF kFlagPaper = RGB(252, 250, 244);
 constexpr const MemoColor* kFlagColors = kMemoColors;  // notes/memo_store.h
@@ -116,9 +120,18 @@ Organizer::Organizer(OrganizerHost& host, const Place& place) : host_(host), pla
     // ponytail: polls the button every 150 ms for Explorer drags; an OLE drop target needs an STA thread
     // (this one is MTA for WinRT capture), worth it only if the poll ever shows up.
     SetTimer(handle_, kTimerFiles, 150, nullptr);
+    // ponytail: the screen edge along the tray's height is watched by polling the pointer (cheap) rather than a
+    // strip window there, which would take clicks from whatever else is at the edge (a scroll bar).
+    SetTimer(handle_, kTimerEdge, 40, nullptr);
     Layout();
     memos_ = ListMemos();
     messengers_ = LoadMessengers();
+    OnMemoSaved([this] {
+        if (drag_.item >= 0) return;  // the flags are being rearranged: they're read again when that ends
+        memos_ = ListMemos();
+        RenderFlags();
+        if (trayOpen_) RenderTray();
+    });
     AddClipboardFormatListener(handle_);  // the clipboard shelf (removed with the window)
     RenderHandle();
     ShowWindow(handle_, SW_SHOWNOACTIVATE);
@@ -128,6 +141,8 @@ Organizer::Organizer(OrganizerHost& host, const Place& place) : host_(host), pla
 
 Organizer::~Organizer() {
     *alive_ = false;
+    OnMemoSaved(nullptr);
+    for (Flight& f : flights_) DestroyWindow(f.hwnd);
     for (HWND h : {handle_, tray_, flags_, peek_})
         if (h) {
             SetWindowLongPtrW(h, GWLP_USERDATA, 0);
@@ -162,6 +177,10 @@ void Organizer::Layout() {
     int w = Scale(handleHover_ ? kHandleHoverW : kHandleW, dpi_), h = Scale(kHandleH, dpi_);
     int cy = work_.top + MulDiv(work_.bottom - work_.top, std::clamp(place_.yPermille, 0, 1000), 1000);
     cy = std::clamp<int>(cy, work_.top + h / 2, work_.bottom - h / 2);
+    // Kept where the tray, at its tallest, opens with its slots beside the bookmark and still fits the screen.
+    Geometry g = Measure(0, true);
+    int lo = work_.top + Scale(16, dpi_) + SlotsMid(g), hi = work_.bottom - Scale(16, dpi_) - g.h + SlotsMid(g);
+    if (lo <= hi) cy = std::clamp(cy, lo, hi);
     int x = place_.right ? monitor_.right - w : monitor_.left;
     handleRect_ = {x, cy - h / 2, x + w, cy + h / 2};
 }
@@ -180,21 +199,20 @@ void Organizer::SetMaterial(const std::string& id) {
 int Organizer::Capacity() const {
     auto S = [this](int v) { return Scale(v, dpi_); };
     // Counted with the memo flags at their most, so the number of slots doesn't move as memos come and go.
-    int maxH = (work_.bottom - work_.top) * kMaxHeightPercent / 100;
+    int maxH = work_.bottom - work_.top - S(32);
     int fixed = S(kTrayPad + kLogoH + kSectionGap + kSectionGap + kMemoLabelH + 6 + kFlagMax * (kFlagH + kFlagGap) +
-                  kMoreH + kPlusH + kSectionGap + 2 * (kMemoLabelH + 6 + kTile) + kSectionGap + kTrayPad);
-    return std::max(kMinSlots, (maxH - fixed + S(kCardGap)) / S(kCardH + kCardGap));
+                  kPlusH + kSectionGap + 2 * (kMemoLabelH + 6 + kTile) + kSectionGap + kTrayPad);
+    return std::clamp((maxH - fixed + S(kCardGap)) / S(kCardH + kCardGap), kMinSlots, kSlots);
 }
 
 bool Organizer::Full() const { return (int)host_.OrganizerPiles().size() >= Capacity(); }
 
-Organizer::Geometry Organizer::Measure(int pileCount) const {
+Organizer::Geometry Organizer::Measure(int pileCount, bool tallest) const {
     auto S = [this](int v) { return Scale(v, dpi_); };
     Geometry g;
     g.slots = Capacity();
     g.more = std::max(0, pileCount - g.slots);
-    g.flagCount = std::min<int>((int)memos_.size(), kFlagMax);
-    g.flagMore = (int)memos_.size() - g.flagCount;
+    g.flagCount = tallest ? kFlagMax : std::min<int>((int)memos_.size(), kFlagMax);
     g.w = S(kOut) + S(kTrayPad * 2 + kCardW + kLift);
     g.bodyLeft = place_.right ? S(kOut) : 0;
     g.bodyRight = place_.right ? g.w : g.w - S(kOut);
@@ -213,7 +231,6 @@ Organizer::Geometry Organizer::Measure(int pileCount) const {
     y += S(kMemoLabelH + 6);
     g.flagTop = y;
     y += g.flagCount * S(kFlagH + kFlagGap);
-    if (g.flagMore) y += S(kMoreH);
     g.plus = {g.cardX, y, g.cardX + S(kCardW), y + S(kPlusH)};
     y += S(kPlusH + kSectionGap);
     // The clipboard shelf, then the messenger dock at the very bottom: a label and one row of tiles each
@@ -226,8 +243,10 @@ Organizer::Geometry Organizer::Measure(int pileCount) const {
     y += S(kMemoLabelH + 6);
     g.dockTop = y;
     g.h = y + S(kTile + kTrayPad);
+    // The bookmark sits beside the middle of the pile slots, so the memo flags' tips (on the same screen edge)
+    // are always below it, never over it.
     int cy = (handleRect_.top + handleRect_.bottom) / 2;
-    int top = std::clamp<int>(cy - g.h / 2, work_.top + S(16), std::max<int>(work_.top + S(16), work_.bottom - S(16) - g.h));
+    int top = std::clamp<int>(cy - SlotsMid(g), work_.top + S(16), std::max<int>(work_.top + S(16), work_.bottom - S(16) - g.h));
     int left = place_.right ? monitor_.right - g.w : monitor_.left;
     g.screen = {left, top, left + g.w, top + g.h};
     // The bookmark comes out with the tray, on its desktop side, at the height it was on the screen edge.
@@ -235,6 +254,10 @@ Organizer::Geometry Organizer::Measure(int pileCount) const {
     int hx = place_.right ? 0 : g.w - S(kHandleW);
     g.handle = {hx, hy - hh / 2, hx + S(kHandleW), hy + hh / 2};
     return g;
+}
+
+int Organizer::SlotsMid(const Geometry& g) const {
+    return g.slotTop + (g.slots * Scale(kCardH + kCardGap, dpi_) - Scale(kCardGap, dpi_)) / 2;
 }
 
 RECT Organizer::SlotRect(const Geometry& g, int slot) const {
@@ -577,6 +600,13 @@ void Organizer::RenderTray(bool present) {
         if (hot) OffsetRect(&sr, g.slide, 0);
         else if (open) OffsetRect(&sr, g.slide * 4 / 5, 0);
         DrawPileCard(c, sr, *by[cardSlots_[i]], hot || open);
+        if (open) {  // the pile being looked at: dimmed, an eye in the middle
+            c.FillRoundRect(sr, S(1), RGB(24, 16, 10), 120);
+            int cx = (sr.left + sr.right) / 2, cy = (sr.top + sr.bottom) / 2, d = S(34);
+            RECT eye{cx - d / 2, cy - d / 2, cx + d / 2, cy + d / 2};
+            c.FillRoundRect(eye, d / 2, RGB(255, 255, 255), 235);
+            c.Glyph(0xE890, eye, RGB(40, 32, 26), S(16));  // View
+        }
     }
     int y = g.slotTop + g.slots * unit - S(kCardGap);
     if (g.more)
@@ -607,20 +637,14 @@ void Organizer::RenderTray(bool present) {
         if (hot) OffsetRect(&f, g.slide / 2, 0);
         DrawFlag(c, f, memos_[i], hot);
     }
-    memoMoreRect_ = {};
-    if (g.flagMore) {
-        int my = g.flagTop + g.flagCount * flagUnit;
-        memoMoreRect_ = {g.cardX, my, g.cardX + S(kCardW), my + S(kMoreH)};
-        c.Text(L"메모 " + std::to_wstring(g.flagMore) + L"개 더 보기", memoMoreRect_, Ink(), S(12), hover_ == kItemMemoMore,
-               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    }
+    memoMoreRect_ = memos_.empty() ? RECT{} : LabelLink(c, g.memoLabelY, L"전체 보기", hover_ == kItemMemoMore);
     // The dispenser, as wide as a card; the trash can while a memo, messenger or clip is carried or going in.
     plusRect_ = {g.bodyLeft + S(kTrayPad), g.plus.top, g.bodyRight - S(kTrayPad), g.plus.bottom};
     bool carried = draggedMemo >= 0 || IsMessenger(drag_.item) || IsClip(drag_.item);
     if (carried || crumpleStart_) DrawTrash(c, g.plus, NowMs());
-    else DrawDispenser(c, g.plus, hover_ == kItemPlus);
     DrawClips(c, g);  // a carried clip or messenger is drawn on top of the trash
     DrawDock(c, g);
+    if (!carried && !crumpleStart_) DrawDispenser(c, g, hover_ == kItemPlus);  // grown, it lies over the sections below
 
     // The carried card or flag, on top of everything, following the pointer.
     if (draggedPile >= 0) {
@@ -652,57 +676,164 @@ static void DrawTileRecess(Canvas& c, const RECT& t, int r, int lip, BYTE depth)
     c.FillRoundRect({t.left + r / 2, t.bottom - 1, t.right - r / 2, t.bottom}, 0, RGB(255, 226, 196), 45);
 }
 
-// Premultiplied `img` over the canvas at (x, y): a transparent clip shows only its own shape.
-static void BlendImage(Canvas& c, const Image& img, int x, int y) {
-    uint32_t* px = c.pixels();
-    for (int j = 0; j < img.h; ++j) {
-        int dy = y + j;
-        if (dy < 0 || dy >= c.height()) continue;
-        for (int i = 0; i < img.w; ++i) {
-            int dx = x + i;
-            if (dx < 0 || dx >= c.width()) continue;
-            uint32_t s = img.px[(size_t)j * img.w + i], a = s >> 24;
-            if (!a) continue;
-            uint32_t& d = px[(size_t)dy * c.width() + dx];
-            uint32_t out = 0;
-            for (int sh = 0; sh < 32; sh += 8) {
-                uint32_t v = ((s >> sh) & 255) + ((d >> sh) & 255) * (255 - a) / 255;
-                out |= std::min<uint32_t>(v, 255) << sh;
-            }
-            d = out;
-        }
-    }
+// The memo dispenser: a box at the screen-edge end of its row, its mouth toward the desktop, with the next
+// sheet's tongue sticking out. A click shoots that sheet out: it flies off, turning into a memo window as it
+// goes, and the memo opens where it lands; meanwhile the next sheet comes up out of the slot.
+double Organizer::NextSheet(double now) const {
+    if (!launchAt_) return 1;
+    double u = std::min(1.0, (now - launchAt_) / kNextMs) - 1;
+    return 1 + 2.7 * u * u * u + 1.7 * u * u;  // ease out, overshooting a little
 }
 
-// The memo dispenser (a pop-up note dispenser): a little box with the next sheet standing up out of its
-// slot; hovered, the sheet comes up further, ready to be pulled.
-void Organizer::DrawDispenser(Canvas& c, const RECT& r, bool hot) {
+void Organizer::DrawDispenser(Canvas& c, const Geometry& g, bool hot) {
     using namespace theme;
-    using PtF = Canvas::PtF;
     auto S = [this](int v) { return Scale(v, dpi_); };
-    auto F = [this](float v) { return v * dpi_ / 96.f; };
-    if (hot) c.FillRoundRect(r, S(8), RGB(255, 255, 255), 30);
-    float cx = (float)r.left + F(30), base = (float)r.bottom - F(6);
-    float rise = hot ? F(17) : F(12);
+    const RECT& r = g.plus;
+    int dir = place_.right ? -1 : 1;  // toward the desktop
+    double now = NowMs();
+    // Hovered, the dispenser grows to about four times its size over the sections below (dimmed a little).
+    // k: 0 resting .. 1 grown.
+    double k = !hot ? 0 : std::min(1.0, (now - upAt_) / kGrowMs);
+    k = 1 - (1 - k) * (1 - k) * (1 - k);  // ease out
+    auto L = [&](int a, int b) { return a + (int)((b - a) * k); };
+    if (k > 0) {
+        RECT below{g.bodyLeft + S(2), r.top - S(8), g.bodyRight - S(2), g.h - S(2)};
+        c.FillRoundRect(below, S(12), RGB(16, 10, 6), (BYTE)(80 * k));
+    }
+    int side = L(S(28), S(100));
+    int top = L(r.top + (r.bottom - r.top - S(28)) / 2, r.top - S(6));
+    RECT box = place_.right ? RECT{r.right - S(6) - side, top, r.right - S(6), top + side}
+                            : RECT{r.left + S(6), top, r.left + S(6) + side, top + side};
+    int mouth = place_.right ? box.left + side / 7 : box.right - side / 7;
+    int mid = top + side / 2, sh = side * 13 / 20;  // shorter than the slot, which shows above and below it
+    int out = (int)(L(S(10), S(38)) * NextSheet(now));
+    // Grown, the whole box can be clicked (and keeps it grown) until the pointer leaves it.
+    // At rest, only the box and its sheet's tongue are hovered to grow it.
+    restRect_ = place_.right ? RECT{r.right - S(6) - S(28) - S(8), r.top, r.right - S(4), r.bottom}
+                             : RECT{r.left + S(4), r.top, r.left + S(6) + S(28) + S(8), r.bottom};
+    growRect_ = {};
+    if (hot) {
+        // Just the grown box and its sheet's tongue (the rest of the row is left alone).
+        growRect_ = place_.right ? RECT{r.right - S(106) - S(26), r.top - S(6), r.right - S(6), r.top + S(94)}
+                                 : RECT{r.left + S(6), r.top - S(6), r.left + S(106) + S(26), r.top + S(94)};
+    }
+    // The box: dark plastic, its mouth (a slot) toward the desktop, the stack of sheets showing through its face.
     COLORREF sheet = kFlagColors[2].color;  // a yellow Post-it
-    // The sheet: bowed a little forward at its top, as a pop-up note stands.
-    c.FillPolygons({{{cx - F(10), base - F(9)}, {cx + F(10), base - F(9)}, {cx + F(11), base - F(9) - rise}, {cx - F(9), base - F(9) - rise + F(2)}}},
-                   Mix(sheet, RGB(0, 0, 0), 0.12));
-    c.FillPolygons({{{cx - F(9), base - F(9) - rise + F(2)}, {cx + F(11), base - F(9) - rise}, {cx + F(9), base - F(9) - rise + F(5)}, {cx - F(10), base - F(9) - rise + F(6)}}},
-                   sheet);
-    c.FillPolygons({{{cx - F(10), base - F(9)}, {cx + F(10), base - F(9)}, {cx + F(10), base - F(9) - rise + F(5)}, {cx - F(10), base - F(9) - rise + F(6)}}},
-                   Mix(sheet, RGB(255, 255, 255), 0.08));
-    // The box, with its slot across the top.
-    RECT box{(int)(cx - F(17)), (int)(base - F(11)), (int)(cx + F(17)), (int)base};
-    c.Shadow(box, S(3), S(3), S(1), 70, RGB(20, 10, 4));
-    c.FillRoundRectV(box, S(3), RGB(92, 88, 84), RGB(58, 55, 52));
-    c.FillRoundRect({box.left + S(6), box.top + S(2), box.right - S(6), box.top + S(4)}, S(1), RGB(24, 22, 20));
-    c.FillRoundRect({box.left + S(2), box.bottom - S(3), box.right - S(2), box.bottom - S(2)}, 0, RGB(255, 255, 255), 30);
-    c.Text(L"새 메모 뽑기", {(int)(cx + F(28)), r.top, r.right - S(8), r.bottom}, Ink(), S(12), true,
-           DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    if (hot)
-        c.Text(L"클릭하면 한 장", {(int)(cx + F(28)), r.top, r.right - S(10), r.bottom}, Mix(Ink(), kMaterials[Mat()].base, 0.35), S(11),
-               false, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+    int br = std::max(S(4), side / 8);
+    c.Shadow(box, br, L(S(4), S(14)), L(S(1), S(5)), (BYTE)L(80, 130), RGB(20, 10, 4));
+    c.FillRoundRectV(box, br, RGB(98, 94, 90), RGB(52, 49, 46));
+    int slot = std::max(S(2), side / 22);
+    c.FillRoundRect({mouth - slot / 2 - 1, box.top + side / 8, mouth + slot / 2 + 1, box.bottom - side / 8}, slot, RGB(18, 16, 14));
+    RECT stack = place_.right ? RECT{mouth + side / 7, box.top + side / 5, box.right - side / 7, box.bottom - side / 5}
+                              : RECT{box.left + side / 7, box.top + side / 5, mouth - side / 7, box.bottom - side / 5};
+    c.FillRoundRect(stack, std::max(1, side / 30), Mix(sheet, RGB(0, 0, 0), 0.22));
+    for (int i = 1; i <= 3 && side > S(48); ++i) {  // the sheets' edges, one behind another
+        int x = place_.right ? stack.left + i * side / 20 : stack.right - i * side / 20;
+        c.FillRoundRect({x, stack.top, x + 1, stack.bottom}, 0, Mix(sheet, RGB(0, 0, 0), 0.45), 160);
+    }
+    c.FillRoundRect({box.left + br / 2, box.top + 1, box.right - br / 2, box.top + 2}, 0, RGB(255, 255, 255), 60);
+    if (k > 0.7) {  // grown: "PUSH" pressed into the window over the stack, as moulded on the product
+        COLORREF face = Mix(sheet, RGB(0, 0, 0), 0.22);
+        int size = std::max(S(8), side / 9);
+        RECT at = stack;
+        OffsetRect(&at, 0, 1);
+        c.Text(L"P U S H", at, Mix(face, RGB(255, 255, 255), 0.3), size, false, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        c.Text(L"P U S H", stack, Mix(face, RGB(0, 0, 0), 0.5), size, false, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    }
+    // The sheet coming out of the slot, its free end lifting a little.
+    float y0 = (float)mid - sh / 2.f, y1 = (float)mid + sh / 2.f, lift = std::min<float>(out * 0.06f, sh * 0.06f);
+    float m = (float)mouth, e = (float)(mouth + dir * out);
+    if (out > 0) {
+        RECT shade{std::min<int>((int)m, (int)e), (int)y0 + L(S(2), S(4)), std::max<int>((int)m, (int)e), (int)y1 + L(S(2), S(4))};
+        c.Shadow(shade, S(2), L(S(3), S(8)), L(S(1), S(3)), (BYTE)L(60, 100), RGB(20, 10, 4));
+        c.FillPolygons({{{m, y0}, {e, y0 - lift}, {e, y1}, {m, y1}}}, sheet);
+        float strip = (float)dir * std::min<float>((float)L(S(6), S(12)), (float)out);
+        c.FillPolygons({{{m, y0}, {m + strip, y0}, {m + strip, y1}, {m, y1}}}, RGB(0, 0, 0), 40);
+    }
+    // The whole sheet as it would be out of the slot: where a shot one starts its flight.
+    sheetRect_ = place_.right ? RECT{mouth - sh, (int)y0, mouth, (int)y1} : RECT{mouth, (int)y0, mouth + sh, (int)y1};
+}
+
+void Organizer::Launch() {
+    std::wstring path = NewMemo();
+    if (path.empty()) return;
+    // Where it opens: 60% across the screen (40% for a tray on the left), 45% down, a little lower for each memo
+    // already open or on its way.
+    int flying = 0;
+    for (const Flight& f : flights_) flying += f.start != 0;
+    int ww = work_.right - work_.left, wh = work_.bottom - work_.top;
+    POINT at{place_.right ? work_.left + ww * 60 / 100 : work_.right - ww * 60 / 100,
+             work_.top + wh * 45 / 100 + (OpenMemoCount() + flying) % 8 * Scale(24, dpi_)};
+    SIZE z = MemoWindowSize(DpiForPoint(at));
+    Flight* f = nullptr;
+    for (Flight& k : flights_)
+        if (!k.start) f = &k;
+    if (!f) {  // a window for it to fly in, kept for the next ones
+        flights_.push_back({});
+        f = &flights_.back();
+        f->hwnd = MakeWindow(kFlyClass, &Organizer::PeekProc, this, L"Neverflow 새 메모");
+        SetWindowLongPtrW(f->hwnd, GWL_EXSTYLE, GetWindowLongPtrW(f->hwnd, GWL_EXSTYLE) | WS_EX_TRANSPARENT);
+    }
+    f->to = {at.x - z.cx / 2, at.y - z.cy / 2, at.x - z.cx / 2 + z.cx, at.y - z.cy / 2 + z.cy};
+    f->from = sheetRect_;
+    OffsetRect(&f->from, trayRect_.left, trayRect_.top);
+    f->path = path;
+    f->start = launchAt_ = NowMs();
+    SetTimer(tray_, kTimerFly, 10, nullptr);
+    SetTimer(tray_, kTimerSheet, 15, nullptr);
+    RenderFlight(*f, 0);
+    RenderTray();
+}
+
+// The shot sheet on its way: along an arc that rises a little, growing from the sheet to the memo window's size,
+// turning straight as it goes, its yellow giving way to the memo's paper and title band just before it lands.
+void Organizer::RenderFlight(Flight& f, double t) {
+    using namespace theme;
+    auto S = [this](int v) { return Scale(v, dpi_); };
+    double e = 1 - (1 - t) * (1 - t) * (1 - t);  // ease out
+    const RECT &from = f.from, &to = f.to;
+    double ax = (from.left + from.right) / 2.0, ay = (from.top + from.bottom) / 2.0;
+    double bx = (to.left + to.right) / 2.0, by = (to.top + to.bottom) / 2.0;
+    double cx = (ax + bx) / 2, cy = std::min(ay, by) - std::hypot(bx - ax, by - ay) * 0.16;
+    double x = (1 - e) * (1 - e) * ax + 2 * (1 - e) * e * cx + e * e * bx;
+    double y = (1 - e) * (1 - e) * ay + 2 * (1 - e) * e * cy + e * e * by;
+    double w = (from.right - from.left) + ((to.right - to.left) - (from.right - from.left)) * e;
+    double h = (from.bottom - from.top) + ((to.bottom - to.top) - (from.bottom - from.top)) * e;
+    double ang = (place_.right ? -1 : 1) * 0.26 * (1 - e) * (1 - e);  // tipped as it leaves, level as it lands
+    double paper = std::clamp((e - 0.55) / 0.4, 0.0, 1.0);             // 0 yellow .. 1 the memo's own paper
+    int pad = S(28);
+    double co = std::cos(ang), si = std::sin(ang);
+    int bw = (int)(std::fabs(w * co) + std::fabs(h * si)) + pad * 2, bh = (int)(std::fabs(w * si) + std::fabs(h * co)) + pad * 2;
+    Canvas c(bw, bh);
+    double ox = bw / 2.0, oy = bh / 2.0;
+    // A rounded rectangle (w x h about the middle) turned by `ang`, as points: the part from `top` to `bottom`.
+    auto shape = [&](double top, double bottom, double rad) {
+        std::vector<Canvas::PtF> pts;
+        double l = -w / 2, rr = w / 2;
+        struct Corner {
+            double cx, cy, from;
+        } corners[] = {{rr - rad, bottom - rad, 0}, {l + rad, bottom - rad, 1.5708}, {l + rad, top + rad, 3.1416}, {rr - rad, top + rad, 4.7124}};
+        for (const Corner& k : corners)
+            for (int i = 0; i <= 6; ++i) {
+                double a = k.from + 1.5708 * i / 6;
+                double px = k.cx + rad * std::cos(a), py = k.cy + rad * std::sin(a);
+                pts.push_back({(float)(ox + px * co - py * si), (float)(oy + px * si + py * co)});
+            }
+        return pts;
+    };
+    double rad = S(2) + (S(8) - S(2)) * e;
+    // Its shadow, softening and spreading as it rises off the tray.
+    RECT sr{(int)(ox - w / 2), (int)(oy - h / 2), (int)(ox + w / 2), (int)(oy + h / 2)};
+    c.Shadow(sr, (int)rad, S(6) + (int)(S(10) * e), S(4) + (int)(S(4) * std::sin(t * 3.1416)), (BYTE)(70 + 40 * e), RGB(20, 10, 4));
+    COLORREF yellow = kFlagColors[2].color, memoPaper = RGB(255, 252, 240);
+    c.FillPolygons({shape(-h / 2, h / 2, rad)}, Mix(yellow, memoPaper, paper));
+    if (paper > 0) {  // the memo window's title band appearing
+        double band = h * 36 / 380;
+        c.FillPolygons({shape(-h / 2, -h / 2 + band + rad, rad)}, kCream, (BYTE)(255 * paper));
+        c.FillPolygons({shape(-h / 2 + band, -h / 2 + band + rad + 1, 0)}, Mix(yellow, memoPaper, paper));
+    }
+    c.Present(f.hwnd, {(int)(x - ox), (int)(y - oy)});
+    SetWindowPos(f.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
 void Organizer::DrawNotice(Canvas& c, const Geometry& g, int row) {
@@ -726,10 +857,9 @@ void Organizer::ShowNotice(int row, const std::wstring& text) {
 void Organizer::DrawClips(Canvas& c, const Geometry& g) {
     using namespace theme;
     auto S = [this](int v) { return Scale(v, dpi_); };
-    int n = (int)clips_.size();
+    int n = std::min<int>((int)clips_.size(), kClipMax);
     std::wstring label = L"클립보드";
-    if (IsClip(hover_) && drag_.item < 0) label += L" · 클릭하면 복사 · 끌어다 놓으면 붙여넣기";
-    else if (!n) label += L" · 복사한 글과 이미지가 모여요";
+    clipMoreRect_ = n ? LabelLink(c, g.clipLabelY, L"기록 보기", hover_ == kItemClipMore) : RECT{};
     c.Text(label, {g.cardX, g.clipLabelY, g.cardX + S(kCardW), g.clipLabelY + S(kMemoLabelH)}, Ink(), S(12), true,
            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     int size = S(kTile), gap = (S(kCardW) - kClipMax * size) / (kClipMax - 1);
@@ -755,7 +885,7 @@ void Organizer::DrawClips(Canvas& c, const Geometry& g) {
             c.Text(snip, {t.left + S(4), t.top + S(3), t.right - S(3), t.bottom - S(3)}, kForeground, S(9), false,
                    DT_LEFT | DT_TOP | DT_WORDBREAK | DT_EDITCONTROL | DT_END_ELLIPSIS | DT_NOPREFIX);
         } else if (i < (int)clipThumbs_.size()) {
-            if (k.alpha) BlendImage(c, clipThumbs_[i], t.left, t.top);
+            if (k.alpha) c.BlendImage(clipThumbs_[i], t.left, t.top);
             else {
                 c.Shadow(t, S(8), S(hot ? 8 : 5), S(2), hot ? 80 : 55, RGB(20, 10, 4));
                 c.DrawImage(clipThumbs_[i], t, S(8));
@@ -774,6 +904,69 @@ void Organizer::DrawClips(Canvas& c, const Geometry& g) {
     }
 }
 
+// "전체 보기 ›" and the like, at the right end of a section's label row; returns where it is (for clicks).
+RECT Organizer::LabelLink(Canvas& c, int labelY, const std::wstring& text, bool hot) {
+    using namespace theme;
+    auto S = [this](int v) { return Scale(v, dpi_); };
+    Geometry g = Measure((int)host_.OrganizerPiles().size());
+    std::wstring t = text + L" ›";
+    int w = c.MeasureText(t, S(12), true).cx + S(10);
+    RECT r{g.cardX + S(kCardW) - w, labelY, g.cardX + S(kCardW), labelY + S(kMemoLabelH)};
+    if (hot) c.FillRoundRect(r, S(6), Ink(), 30);
+    c.Text(t, r, hot ? Ink() : Mix(Ink(), kMaterials[Mat()].base, 0.3), S(12), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    return r;
+}
+
+// Everything copied lately (kClipHistory), in the same list window as the memos; a row copies it again.
+void Organizer::ShowClipHistory(POINT anchor) {
+    std::weak_ptr<bool> alive = alive_;
+    auto self = this;
+    ListPopupSpec spec;
+    spec.windowClass = L"WindowPilesClipList";
+    spec.title = L"클립보드 기록";
+    spec.button = L"모두 지우기";
+    spec.empty = L"복사한 글과 이미지가 여기에 모여요. 앱을 끄면 함께 지워져요.";
+    spec.rows = [alive, self] {
+        std::vector<ListRow> rows;
+        if (alive.expired() || !*alive.lock()) return rows;
+        int t = Scale(46, self->dpi_);
+        for (const ClipItem& k : self->clips_) {
+            ListRow r;
+            wchar_t time[32];
+            swprintf_s(time, L"%s %d:%02d", k.at.wHour < 12 ? L"오전" : L"오후", (k.at.wHour + 11) % 12 + 1, k.at.wMinute);
+            r.meta = time;
+            if (!k.text.empty()) {
+                size_t nl = k.text.find_first_of(L"\r\n");
+                r.title = k.text.substr(0, nl);
+                size_t rest = k.text.find_first_not_of(L"\r\n", nl == std::wstring::npos ? k.text.size() : nl);
+                r.excerpt = rest == std::wstring::npos ? std::to_wstring(k.text.size()) + L"자" : k.text.substr(rest, 200);
+                for (wchar_t& ch : r.excerpt)
+                    if (ch == L'\r' || ch == L'\n' || ch == L'\t') ch = L' ';
+            } else {
+                r.title = k.alpha ? L"투명 이미지" : L"이미지";
+                r.excerpt = std::to_wstring(k.image.w) + L" × " + std::to_wstring(k.image.h);
+                r.thumb = ClipThumb(k, t, t);
+                r.thumbAlpha = k.alpha;
+            }
+            rows.push_back(std::move(r));
+        }
+        return rows;
+    };
+    spec.open = [alive, self](int row, HWND popup) {
+        if (alive.expired() || !*alive.lock() || row >= (int)self->clips_.size()) return;
+        CopyToClipboard(self->handle_, self->clips_[row]);  // comes back as the newest: moves to the front
+        DestroyWindow(popup);
+    };
+    spec.press = [alive, self](HWND popup) {
+        if (alive.expired() || !*alive.lock()) return;
+        self->clips_.clear();
+        self->clipThumbs_.clear();
+        self->RenderTray();
+        RefreshListPopup(popup);
+    };
+    ShowListPopup(spec, anchor);
+}
+
 void Organizer::AddClip(ClipItem item) {
     if (item.empty() || IsClip(drag_.item)) return;  // ponytail: a copy made while a clip is carried is missed
     for (size_t i = 0; i < clips_.size(); ++i)
@@ -783,11 +976,18 @@ void Organizer::AddClip(ClipItem item) {
             break;
         }
     int size = Scale(kTile, dpi_);
+    GetLocalTime(&item.at);
     clipThumbs_.insert(clipThumbs_.begin(), ClipThumb(item, size, size));
     clips_.insert(clips_.begin(), std::move(item));
+    if ((int)clips_.size() > kClipHistory) {
+        clips_.resize(kClipHistory);
+        clipThumbs_.resize(kClipHistory);
+    }
+    // Off the shelf into the history only: a big image is kept smaller (at most 1024 px on a side).
     if ((int)clips_.size() > kClipMax) {
-        clips_.resize(kClipMax);
-        clipThumbs_.resize(kClipMax);
+        ClipItem& old = clips_[kClipMax];
+        int side = std::max(old.image.w, old.image.h);
+        if (side > 1024) old.image = ClipThumb(old, old.image.w * 1024 / side, old.image.h * 1024 / side);
     }
     if (drag_.item < 0) RenderTray();
 }
@@ -1068,6 +1268,7 @@ int Organizer::ItemAt(POINT client) const {
     RECT pin{g.logo.right - Scale(kPin, dpi_), cy - Scale(kPin, dpi_) / 2, g.logo.right, cy + Scale(kPin, dpi_) / 2};
     if (PtInRect(&pin, client)) return kItemPin;
     if (PtInRect(&g.handle, client)) return kItemHandle;
+    if (hover_ == kItemPlus && drag_.item < 0 && PtInRect(&growRect_, client)) return kItemPlus;  // the grown dispenser
     for (size_t i = 0; i < cardRects_.size(); ++i)
         if (PtInRect(&cardRects_[i], client)) return (int)i;
     for (size_t i = 0; i < memoRects_.size(); ++i)
@@ -1077,8 +1278,9 @@ int Organizer::ItemAt(POINT client) const {
     for (size_t i = 0; i < clipRects_.size(); ++i)
         if (PtInRect(&clipRects_[i], client)) return kItemClip + (int)i;
     if (PtInRect(&dockRect_, client)) return kItemDock;
-    if (PtInRect(&plusRect_, client)) return kItemPlus;
+    if (PtInRect(&restRect_, client)) return kItemPlus;  // the dispenser itself, not the rest of its row
     if (PtInRect(&memoMoreRect_, client)) return kItemMemoMore;
+    if (PtInRect(&clipMoreRect_, client)) return kItemClipMore;
     return -1;
 }
 
@@ -1110,9 +1312,7 @@ void Organizer::Activate(int item, POINT screenPt) {
         CopyToClipboard(handle_, clips_[item - kItemClip]);  // comes back as the newest: moves to the front
         ShowNotice(1, L"복사했어요 · Ctrl+V로 붙여넣기");
     } else if (item == kItemPlus) {
-        HideTray();
-        std::wstring path = NewMemo();
-        if (!path.empty()) OpenMemoWindow(path, anchor);
+        Launch();
     } else if (item >= kItemMemo && item - kItemMemo < (int)memos_.size()) {
         std::wstring path = memos_[item - kItemMemo].path;
         HideTray();
@@ -1120,6 +1320,9 @@ void Organizer::Activate(int item, POINT screenPt) {
     } else if (item == kItemMemoMore) {
         HideTray();
         ShowMemoList(anchor);
+    } else if (item == kItemClipMore) {
+        HideTray();
+        ShowClipHistory(anchor);
     } else if (Pile* pile = PileAt(item)) {
         HideTray();
         host_.OnOrganizerOpen(*pile);  // may change the tray: nothing may touch it afterwards
@@ -1140,7 +1343,10 @@ void Organizer::MemoMenu(int memo, POINT screenPt) {
     if (id == kOpen) OpenMemoWindow(m.path, anchor);
     else if (id == kReveal) RevealInExplorer(m.path);
     else if (id == kRecycle) RecycleMemo(m.path);
-    else if (id >= kColor && id < kColor + kFlagColorCount) SetMemoColor(m.path, id - kColor);
+    else if (id >= kColor && id < kColor + kFlagColorCount) {
+        SetMemoColor(m.path, id - kColor);
+        RefreshMemoTabs();
+    }
     memos_ = ListMemos();
     RenderFlags();
 }
@@ -1250,6 +1456,8 @@ LRESULT Organizer::OnFlags(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_MOUSEACTIVATE:
             return MA_NOACTIVATE;
         case WM_MOUSEMOVE: {
+            if (flagsHover_) return 0;  // counted from when the pointer came onto them, not from its last move
+            flagsHover_ = true;
             TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, flags_, 0};
             TrackMouseEvent(&tme);
             Prepare();
@@ -1257,10 +1465,12 @@ LRESULT Organizer::OnFlags(UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         case WM_MOUSELEAVE:
+            flagsHover_ = false;
             KillTimer(flags_, kTimerOpen);
             return 0;
         case WM_TIMER:
             KillTimer(flags_, kTimerOpen);
+            flagsHover_ = false;
             if (wp == kTimerOpen && GetAsyncKeyState(VK_LBUTTON) >= 0) ShowTray();
             return 0;
         case WM_LBUTTONUP: {
@@ -1346,6 +1556,37 @@ LRESULT Organizer::OnHandle(UINT msg, WPARAM wp, LPARAM lp) {
                 else if (NowMs() - fileHoverSince_ >= 250) {
                     filesDrag_ = true;
                     DragOver(c, true);
+                }
+                return 0;
+            }
+            if (wp == kTimerEdge) {
+                // Folded: the pointer resting against the screen edge anywhere along the tray's height opens it,
+                // as resting on the bookmark does (not while a button is held, nor over a full-screen app).
+                POINT c;
+                GetCursorPos(&c);
+                bool atEdge = visible_ && !trayOpen_ && !handleDragging_ && !GetCapture() &&
+                              (place_.right ? c.x == monitor_.right - 1 : c.x == monitor_.left) && c.y >= monitor_.top &&
+                              c.y < monitor_.bottom && GetAsyncKeyState(VK_LBUTTON) >= 0 && GetAsyncKeyState(VK_RBUTTON) >= 0;
+                if (atEdge) {
+                    Geometry g = Measure((int)host_.OrganizerPiles().size());
+                    atEdge = c.y >= g.screen.top && c.y < g.screen.bottom;
+                }
+                if (atEdge) {
+                    HWND fg = GetForegroundWindow();
+                    RECT fr{};
+                    wchar_t cls[32] = {};
+                    if (fg) GetClassNameW(fg, cls, 32);
+                    bool desktop = fg == GetShellWindow() || wcscmp(cls, L"WorkerW") == 0 || wcscmp(cls, L"Progman") == 0;
+                    if (fg && !desktop && GetWindowRect(fg, &fr) && EqualRect(&fr, &monitor_)) atEdge = false;  // full screen
+                }
+                if (!atEdge) {
+                    edgeSince_ = 0;
+                } else if (!edgeSince_) {
+                    edgeSince_ = NowMs();
+                    Prepare();
+                } else if (NowMs() - edgeSince_ >= kOpenDelayMs) {
+                    edgeSince_ = 0;
+                    ShowTray();
                 }
                 return 0;
             }
@@ -1473,6 +1714,36 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
                 RenderPeek();
                 return 0;
             }
+            if (wp == kTimerSheet) {
+                if (NowMs() - launchAt_ >= kNextMs && NowMs() - upAt_ >= kGrowMs) {
+                    launchAt_ = 0;
+                    KillTimer(tray_, kTimerSheet);
+                }
+                RenderTray();
+                return 0;
+            }
+            if (wp == kTimerFly) {
+                bool flying = false;
+                for (size_t i = 0; i < flights_.size(); ++i) {
+                    Flight& f = flights_[i];
+                    if (!f.start) continue;
+                    double t = (NowMs() - f.start) / kFlyMs;
+                    if (t < 1) {
+                        RenderFlight(f, t);
+                        flying = true;
+                        continue;
+                    }
+                    // There: the memo's own window takes the flying sheet's place (the tray stays as it is, for
+                    // the next one).
+                    f.start = 0;
+                    RECT at = f.to;
+                    HWND sheet = f.hwnd;
+                    OpenMemoWindow(f.path, {(at.left + at.right) / 2, (at.top + at.bottom) / 2}, &at);
+                    ShowWindow(sheet, SW_HIDE);
+                }
+                if (!flying) KillTimer(tray_, kTimerFly);
+                return 0;
+            }
             if (wp == kTimerNotice) {
                 KillTimer(tray_, kTimerNotice);
                 noticeRow_ = -1;
@@ -1586,6 +1857,10 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
             int hc = ItemAt(p);
             if (hc != hover_) {
                 hover_ = hc;
+                if (hc == kItemPlus) {  // the dispenser grows, drawn frame by frame
+                    upAt_ = NowMs();
+                    SetTimer(tray_, kTimerSheet, 15, nullptr);
+                }
                 RenderTray();
                 if (hc >= kItemMemo && hc < kItemPlus) ShowPeek(hc - kItemMemo);
                 else HidePeek();

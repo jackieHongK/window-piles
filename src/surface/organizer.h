@@ -105,13 +105,14 @@ private:
         int cardX = 0, slide = 0;
         RECT logo{};
         int slotTop = 0, slots = 0, more = 0;  // more: piles that don't fit on this screen
-        int memoLabelY = 0, flagTop = 0, flagCount = 0, flagMore = 0;
+        int memoLabelY = 0, flagTop = 0, flagCount = 0;
         int clipLabelY = 0, clipTop = 0;  // the clipboard shelf
         int dockLabelY = 0, dockTop = 0;  // the messenger dock
         RECT plus{};                      // the memo dispenser
         RECT handle{};          // the bookmark, pulled out with the tray
     };
-    Geometry Measure(int pileCount) const;
+    Geometry Measure(int pileCount, bool tallest = false) const;  // tallest: as if all five memo flags were there
+    int SlotsMid(const Geometry& g) const;                        // the pile slots' middle, tray client y
     RECT SlotRect(const Geometry& g, int slot) const;
     RECT FlagRect(const Geometry& g, int i) const;
     // Piles by slot: each in its own slot if it's free and fits, the rest in the first free ones.
@@ -141,8 +142,15 @@ private:
     void ShowNotice(int row, const std::wstring& text);  // over a row of tiles for a moment: 0 dock, 1 clips
     void DrawDock(Canvas& c, const Geometry& g);
     void DrawClips(Canvas& c, const Geometry& g);
-    void DrawDispenser(Canvas& c, const RECT& r, bool hot);
+    void DrawDispenser(Canvas& c, const Geometry& g, bool hot);
     void DrawNotice(Canvas& c, const Geometry& g, int row);
+    RECT LabelLink(Canvas& c, int labelY, const std::wstring& text, bool hot);  // at the right end of a section's label
+    void ShowClipHistory(POINT anchor);
+    // The dispenser: a click shoots its sheet out, which flies to where its memo then opens.
+    void Launch();
+    struct Flight;
+    void RenderFlight(Flight& f, double t);  // a flying sheet, t 0..1 of the way
+    double NextSheet(double now) const;  // the next sheet coming up out of the slot: 0 .. 1
     void DrawBookmark(Canvas& c, const RECT& r, bool hot, bool body = true);  // body = false: grips and count only
     void DrawPileCard(Canvas& c, const RECT& card, Pile& p, bool hot);
     void DrawFlag(Canvas& c, const RECT& flag, const MemoInfo& m, bool hot);
@@ -178,6 +186,8 @@ private:
     std::vector<int> flagTipY_;  // flags_ client y of each tip
     bool visible_ = true;     // not put away with "숨기기"
     bool handleHover_ = false;
+    bool flagsHover_ = false;
+    double edgeSince_ = 0;     // the pointer has rested against the screen edge, along the tray's height, since  // the pointer is on the folded flags (opening them shortly)
     bool trayOpen_ = false;
     bool dropMode_ = false;   // a card is being carried over it
     bool dropAdd_ = false;    // ... or a window or files, to put into one of its piles
@@ -212,7 +222,20 @@ private:
     // Memos (notes/memo_store.h), listed from their folder when the tray opens or a memo changes.
     std::vector<MemoInfo> memos_;
     std::vector<RECT> memoRects_;
-    RECT plusRect_{}, memoMoreRect_{};
+    RECT plusRect_{}, memoMoreRect_{}, clipMoreRect_{};
+    // The dispenser: its sheet as last drawn (tray client px), when one was shot out, and that one's flight.
+    RECT sheetRect_{};
+    double launchAt_ = 0;
+    struct Flight {
+        HWND hwnd = nullptr;  // the flying sheet's own window
+        double start = 0;     // 0: landed, its window free for the next one
+        RECT from{}, to{};    // screen
+        std::wstring path;
+    };
+    std::vector<Flight> flights_;  // several may be in the air at once
+    RECT restRect_{};              // the dispenser at rest: hovering it grows it
+    RECT growRect_{};              // the grown dispenser: all of it a click target while hovered
+    double upAt_ = 0;  // hovered since: the dispenser grows from then
     // The messenger dock (surface/messenger.h): its apps, their tiles, and what their badges said last.
     std::vector<Messenger> messengers_;
     std::vector<RECT> messengerRects_;

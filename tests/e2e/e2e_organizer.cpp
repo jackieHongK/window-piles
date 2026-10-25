@@ -140,9 +140,17 @@ HWND NewMemoFromTray() {
     if (!tray) return nullptr;
     RECT tr;
     GetClientRect(tray, &tr);
-    Click(tray, MAKELPARAM(tr.right / 2, tr.bottom - MulDiv(kDispenserUp, GetDpiForWindow(tray), 96)));  // the dispenser
+    // A click on the dispenser: its sheet is shot out and flies to where the memo opens.
+    // (the box: at the row's screen-edge end, x 264..292 on the right edge)
+    Click(tray, MAKELPARAM(MulDiv(278, GetDpiForWindow(tray), 96), tr.bottom - MulDiv(kDispenserUp, GetDpiForWindow(tray), 96)));
     HWND memo = nullptr;
     PumpUntil([&] { return (memo = FindWindowW(L"WindowPilesMemo", nullptr)) && IsWindowVisible(memo); }, 3000);
+    // The tray stays out for the next one; pushed back in by its bookmark (beside the folded one's height).
+    RECT hr{}, wr{};
+    GetWindowRect(FindWindowW(L"WindowPilesOrganizerHandle", nullptr), &hr);
+    GetWindowRect(tray, &wr);
+    Click(tray, MAKELPARAM(MulDiv(7, GetDpiForWindow(tray), 96), (hr.top + hr.bottom) / 2 - wr.top));
+    PumpUntil([&] { return !IsWindowVisible(tray); }, 3000);
     return memo;
 }
 
@@ -218,7 +226,7 @@ int wmain(int argc, wchar_t** argv) {
         GetWindowRect(tray, &tr);
         MONITORINFO mi{sizeof(mi)};
         GetMonitorInfoW(MonitorFromWindow(tray, MONITOR_DEFAULTTONEAREST), &mi);
-        Check(tr.bottom - tr.top <= (mi.rcWork.bottom - mi.rcWork.top) * 60 / 100 + 2, "2) 트레이는 화면 높이의 60%를 넘지 않음");
+        Check(tr.top >= mi.rcWork.top && tr.bottom <= mi.rcWork.bottom, "2) 트레이는 화면 안에 다 들어감");
     }
 
     // 3) clicking A in the tray opens it
@@ -257,7 +265,15 @@ int wmain(int argc, wchar_t** argv) {
     // 6) memos
     for (const auto& m : Memos()) DeleteFileW(m.c_str());
     HWND memo = NewMemoFromTray();
-    Check(memo != nullptr, "6) 트레이의 새 메모 뽑기를 누르면 메모 창이 열림");
+    Check(memo != nullptr, "6) 디스펜서를 누르면 메모지가 날아가 새 메모 창이 열림");
+    if (memo) {  // it lands 60% across the screen (the organizer is on the right)
+        RECT mr;
+        GetWindowRect(memo, &mr);
+        MONITORINFO mi{sizeof(mi)};
+        GetMonitorInfoW(MonitorFromWindow(memo, MONITOR_DEFAULTTONEAREST), &mi);
+        int cx = (mr.left + mr.right) / 2, ww = mi.rcWork.right - mi.rcWork.left;
+        Check(cx > mi.rcWork.left + ww * 50 / 100 && cx < mi.rcWork.left + ww * 70 / 100, "6) 새 메모 창은 화면 가로 60% 언저리에 열림");
+    }
     Check(Memos().size() == 1, "6) 메모 폴더에 .txt 파일이 생김");
     if (memo) {
         HWND edit = FindWindowExW(memo, nullptr, L"RICHEDIT50W", nullptr);
@@ -284,6 +300,13 @@ int wmain(int argc, wchar_t** argv) {
         PumpUntil([&] { return !IsWindow(memo); }, 3000);
     }
     PumpFor(400);
+    {  // the memo flags' tips on the screen edge stay clear of the bookmark
+        HWND flags = FindWindowW(L"WindowPilesOrganizerFlags", nullptr), bar = FindWindowW(L"WindowPilesOrganizerHandle", nullptr);
+        RECT fr{}, hr{}, both{};
+        if (flags) GetWindowRect(flags, &fr);
+        if (bar) GetWindowRect(bar, &hr);
+        Check(flags && IsWindowVisible(flags) && bar && !IntersectRect(&both, &fr, &hr), "7) 화면 가장자리의 메모 플래그가 막대를 가리지 않음");
+    }
     // Tray layout (DIPs, from the bottom): see kDispenserUp; the memo flags, 26 high every 32, right above it.
     tray = OpenTray();
     RECT tr{};
@@ -372,6 +395,46 @@ int wmain(int argc, wchar_t** argv) {
         int tb = MulDiv(tr.bottom, 96, GetDpiForWindow(tray));
         DragInTray(tray, {38 + 22, tb - 14 - 22}, {38 + 22, tb - 14 - 22});
         Check(PumpUntil([&] { return !IsWindow(w[2]) || !IsWindowVisible(w[2]); }, 3000), "10) 앞에 떠 있는 메신저를 다시 누르면 그 창이 닫힘");
+    }
+
+    // 11) folded, resting on a memo flag's tip at the screen edge opens the tray too
+    PumpFor(600);
+    if (HWND flags = FindWindowW(L"WindowPilesOrganizerFlags", nullptr); flags && IsWindowVisible(flags)) {
+        // The real pointer, briefly (a posted move alone is followed at once by the system's "mouse left").
+        POINT was;
+        GetCursorPos(&was);
+        RECT fr;
+        GetWindowRect(flags, &fr);
+        for (int i = 0; i < 4; ++i) {  // small moves on it, which must not keep putting the opening off
+            SetCursorPos(fr.right - 3, fr.top + 6 + i);
+            PumpFor(50);
+        }
+        HWND shown = nullptr;
+        Check(PumpUntil([&] { return (shown = FindWindowW(L"WindowPilesOrganizerTray", nullptr)) && IsWindowVisible(shown); }, 2000),
+              "11) 접힌 상태에서 메모 플래그에 올리면 트레이가 열림");
+        SetCursorPos(was.x, was.y);
+    } else {
+        Check(false, "11) 접힌 상태에서 메모 플래그가 보임");
+    }
+
+    // 12) folded, the pointer against the screen edge low down along the tray's height (away from the bookmark
+    //     and the flags) opens it as well
+    if (HWND folded = FindWindowW(L"WindowPilesOrganizerTray", nullptr)) {
+        HWND tray = folded;
+        RECT hr{}, wr{};
+        GetWindowRect(FindWindowW(L"WindowPilesOrganizerHandle", nullptr), &hr);
+        GetWindowRect(tray, &wr);
+        if (IsWindowVisible(tray)) {  // pushed back in by its bookmark first
+            Click(tray, MAKELPARAM(MulDiv(7, GetDpiForWindow(tray), 96), (hr.top + hr.bottom) / 2 - wr.top));
+            PumpUntil([&] { return !IsWindowVisible(tray); }, 3000);
+        }
+        POINT was;
+        GetCursorPos(&was);
+        MONITORINFO mi{sizeof(mi)};
+        GetMonitorInfoW(MonitorFromWindow(tray, MONITOR_DEFAULTTONEAREST), &mi);
+        SetCursorPos(mi.rcMonitor.right - 1, wr.bottom - MulDiv(30, GetDpiForWindow(tray), 96));
+        Check(PumpUntil([&] { return IsWindowVisible(tray) != FALSE; }, 2000), "12) 접힌 상태에서 트레이 높이의 화면 끝에 커서를 대면 펼쳐짐");
+        SetCursorPos(was.x, was.y);
     }
 
     PostMessageW(FindWindowW(L"WindowPilesMain", nullptr), WM_ENDSESSION, TRUE, 0);
