@@ -1,7 +1,8 @@
 // Watches other apps' window drags (EVENT_SYSTEM_MOVESIZESTART/END, out-of-context, no injection)
-// and, only while a window is being moved, shows drop zones at the top of *every* monitor:
+// and, only while a window is being moved, shows drop zones near the top of *every* monitor, side by
+// side and the same size, centered (below the open pile's "add here" target, if a pile is open):
 //   [＋ 새 더미]                      always
-//   [－ '이름'에서 빼기]              only when the dragged window already belongs to a pile
+//   [－ '이름'에서 빼기]              only when the dragged window already belongs to a pile (reddish)
 // Validated in PoC-05: zero idle cost, Esc/resize/tiny-drag are told apart.
 #pragma once
 
@@ -29,6 +30,8 @@ public:
     // (a maximized/snapped window is un-maximized by the drag itself).
     virtual void OnDragDrop(HWND dragged, const WINDOWPLACEMENT& before, POINT cursor, DropZone zone) = 0;
     virtual void OnDragEnd() = 0;  // always called last (clear highlights)
+    // A pile is open: its "add here" target takes the top row, and the bars go in the row below it.
+    virtual bool HasOpenPile() = 0;
 };
 
 class DragWatcher {

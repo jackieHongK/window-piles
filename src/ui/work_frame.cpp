@@ -15,6 +15,9 @@ namespace {
 constexpr int kEdge = 4;      // frame thickness (DIP)
 constexpr int kTabH = 30;     // tab height (DIP)
 constexpr int kTabMargin = 10;  // shadow room around the tab (DIP)
+// While a window is dragged, the tab becomes an "add here" card this far down (DIP), this big; the drag
+// watcher's bars line up under it (interaction/drag_watcher.cpp).
+constexpr int kAddTop = 72, kAddW = 2 * 250 + 16, kAddH = 64;
 
 void RegisterClasses() {
     static bool done = false;
@@ -170,32 +173,29 @@ void WorkFrame::RenderTab(Part& p) {
         // Bigger, explicit drop target: "drop the window here to add it to this pile".
         int open = 0;
         for (auto& m : pile_.members) open += !m.hidden;
-        // One line, so it stays clear of the "새 더미" bar below (bars start 48 DIP down).
+        // A card of its own, 72 DIP down: clear of Windows' Snap Layouts at the top edge, and as wide as
+        // the "새 더미" / "빼기" pair right below it.
         std::wstring title = hot_ ? L"놓으면 '" + pile_.name + L"'에 들어가요" : L"＋  여기에 놓아 '" + pile_.name + L"'에 넣기";
-        std::wstring sub = L"창 " + std::to_wstring(open) + L"개 작업 중";
-        int titleW = std::min<int>(MeasureUiText(title, S(14), true).cx, S(460));
-        int subW = MeasureUiText(sub, S(12), false).cx;
-        int w = std::max(S(360), titleW + S(14) + subW + S(44));
-        int h = S(kTabH + 8), m = S(kTabMargin);
-        Canvas c(w + 2 * m, h + m);
+        std::wstring sub = L"지금 펼친 더미 · 창 " + std::to_wstring(open) + L"개 작업 중";
+        int w = S(kAddW), h = S(kAddH), m = S(kTabMargin);
+        Canvas c(w + 2 * m, h + 2 * m);
         int radius = S(12);
-        RECT tab{m, -radius, m + w, h};
+        RECT card{m, m, m + w, m + h};
         COLORREF bg = hot_ ? Mix(pile_.color, RGB(0, 0, 0), 0.18) : pile_.color;
-        c.Shadow({tab.left, 0, tab.right, tab.bottom}, radius, S(10), S(3), hot_ ? 110 : 80);
-        c.FillRoundRect(tab, radius, bg);
+        c.Shadow(card, radius, S(12), S(4), hot_ ? 110 : 80);
+        c.FillRoundRect(card, radius, bg);
         COLORREF fg = ContrastText(pile_.color);
-        RECT inner{tab.left + S(6), S(4), tab.right - S(6), h - S(5)};
+        RECT inner{card.left + S(5), card.top + S(5), card.right - S(5), card.bottom - S(5)};
         if (hot_) c.StrokeRoundRect(inner, S(9), S(2), fg, 230);
         else c.DashedRoundRect(inner, S(9), std::max(1, S(1) + S(1) / 2), S(6), S(4), fg, 170);
-        int x = (tab.left + tab.right - (titleW + S(14) + subW)) / 2;
-        c.Text(title, {x, inner.top, x + titleW, inner.bottom}, fg, S(14), true,
-               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        c.Text(sub, {x + titleW + S(14), inner.top, x + titleW + S(14) + subW, inner.bottom}, fg, S(12), false,
-               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        c.Text(title, {inner.left + S(10), card.top + S(11), inner.right - S(10), card.top + S(11) + S(24)}, fg, S(16), true,
+               DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        c.Text(sub, {inner.left + S(10), card.top + S(36), inner.right - S(10), card.top + S(36) + S(18)}, fg, S(12), false,
+               DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         const RECT& r = p.monitorRect;
-        int tx = (r.left + r.right - w) / 2;
-        p.tabRect = {tx, r.top, tx + w, r.top + h};
-        p.tabPos = {tx - m, r.top};
+        int tx = (r.left + r.right - w) / 2, ty = r.top + S(kAddTop);
+        p.tabRect = {tx, ty, tx + w, ty + h};
+        p.tabPos = {tx - m, ty - m};
         c.Present(p.tab, p.tabPos);
         return;
     }

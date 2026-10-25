@@ -11,12 +11,12 @@ namespace {
 constexpr UINT_PTR kTimerId = 1;
 constexpr int kTickMs = 33;        // ~30 Hz, only while a drag is in progress
 constexpr int kShowDelayMs = 250;  // short clicks/drags never flash the bar
-constexpr int kBarW = 320, kRemoveW = 260, kBarH = 68, kGap = 12;
+constexpr int kBarW = 250, kBarH = 64, kGap = 16;  // two bars side by side: as wide as the "add here" target
 constexpr int kMargin = 14;  // room for the shadow around a bar
-// Distance from the top of each monitor's work area. Kept clear of the very top edge: dragging a
-// window to the top edge triggers Windows' maximize / Snap Layouts, which must not be confused
-// with our bars.
-constexpr int kBarTop = 48;
+// Distance from the top of each monitor's work area. Kept well clear of the top edge, where dragging a
+// window brings up Windows' Snap Layouts: first row 72 (the open pile's "add here" target, else the
+// bars), second row below the 64-high target.
+constexpr int kBarTop = 72, kBarTopBelowAdd = 72 + 64 + 16;
 constexpr COLORREF kDestructive = RGB(220, 38, 38);  // shadcn destructive (red-600)
 
 }  // namespace
@@ -177,10 +177,12 @@ void DragWatcher::ShowBars() {
     for (const RECT& work : works) {
         POINT probe{(work.left + work.right) / 2, work.top + 1};
         UINT dpi = DpiForPoint(probe);
-        int h = Scale(kBarH, dpi), m = Scale(kMargin, dpi), y = work.top + Scale(kBarTop, dpi);
-        int newW = Scale(kBarW, dpi), remW = Scale(kRemoveW, dpi), gap = Scale(kGap, dpi);
-        // "새 더미" stays centered where it always is; "빼기" sits to its right.
-        int newX = (work.left + work.right - newW) / 2;
+        int h = Scale(kBarH, dpi), m = Scale(kMargin, dpi);
+        int y = work.top + Scale(host_.HasOpenPile() ? kBarTopBelowAdd : kBarTop, dpi);
+        int barW = Scale(kBarW, dpi), gap = Scale(kGap, dpi);
+        // The bars as a pair (or "새 더미" alone), centered: balanced under the "add here" target.
+        int total = withRemove ? 2 * barW + gap : barW;
+        int newX = (work.left + work.right - total) / 2;
         auto place = [&](DropZone zone, int x, int w) {
             Bar& b = BarAt(used++);
             b.zone = zone;
@@ -192,8 +194,8 @@ void DragWatcher::ShowBars() {
             RenderBar(b);
             SetWindowPos(b.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
         };
-        place(DropZone::NewPile, newX, newW);
-        if (withRemove) place(DropZone::RemoveFromPile, newX + newW + gap, remW);
+        place(DropZone::NewPile, newX, barW);
+        if (withRemove) place(DropZone::RemoveFromPile, newX + barW + gap, barW);
     }
     for (size_t i = used; i < bars_.size(); ++i) {
         bars_[i].shown = false;
@@ -229,7 +231,9 @@ void DragWatcher::RenderBar(Bar& b) {
         title = L"이 창은 넣을 수 없어요";
         sub = L"관리자 권한 창이나 대화상자는 제외돼요";
     } else {
-        bg = kBackground, fg = remove ? kDestructive : kForeground, subFg = kMutedFg;
+        // "빼기" is tinted red even at rest: it takes a window out.
+        bg = remove ? RGB(254, 226, 226) : kBackground, fg = remove ? kDestructive : kForeground;
+        subFg = remove ? RGB(185, 28, 28) : kMutedFg;
         title = remove ? L"－  이 더미에서 빼기" : L"＋  새 더미";
         sub = remove ? L"'" + pileName_ + L"'에서 꺼내요" : L"창을 여기에 놓으면 새 더미가 생겨요";
     }

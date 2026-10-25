@@ -59,6 +59,7 @@ public:
     void OnDragHover(HWND dragged, POINT cursor) override;
     void OnDragDrop(HWND dragged, const WINDOWPLACEMENT& before, POINT cursor, DropZone zone) override;
     void OnDragEnd() override;
+    bool HasOpenPile() override { return frame_ != nullptr; }
 
 private:
     static LRESULT CALLBACK MainProc(HWND, UINT, WPARAM, LPARAM);
