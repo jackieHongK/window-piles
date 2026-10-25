@@ -88,6 +88,40 @@ float Pattern(const char* id, int x, int y, float k, COLORREF& tint, float& tint
     if (is("ceramic")) return Generic({0.002f, 0.004f, 24, 24, 0, 0, 0, 0, 0}, x, y, k);
     if (is("felt") || is("felt-gray")) return Generic({0.070f, 0.040f, 4, 4, 0.01f, 0.10f, 0.01f, 0.10f, 0}, x, y, k);
     if (is("acrylic")) return Generic({0.010f, 0.018f, 26, 26, 0, 0, 0.002f, 0.03f, 0}, x, y, k);  // a fine frost
+    if (is("acrylic-cobalt")) return Generic({0.004f, 0.010f, 40, 40, 0, 0, 0, 0, 0}, x, y, k);    // solid and glossy
+    if (is("quartz")) {
+        // White quartz with glitter: a soft cloud, and here and there a fleck that catches the light, some
+        // of them in a color.
+        float n = Generic({0.012f, 0.045f, 12, 12, 0.004f, 0.12f, 0, 0, 0}, x, y, k);
+        float s = Hash(x, y, 71);
+        if (s > 0.985f) n += 0.18f + 0.30f * (s - 0.985f) / 0.015f;
+        if (s > 0.996f) {
+            tint = Hue(Hash(x, y, 72));
+            tintAmount = 0.45f;
+        }
+        return n;
+    }
+    if (is("nacre")) {
+        // Mother-of-pearl: a pastel rainbow drifting in waves over a pearly white.
+        tint = Hue(0.55f + 0.30f * Fbm(x, y, (int)(70 * k), 81) + 0.08f * std::sin((x + y) / (22.0f * k)));
+        tintAmount = 0.22f;
+        return 0.05f * std::sin(y / (5.0f * k) + 6.0f * Fbm(x, y, (int)(50 * k), 82)) + (Hash(x, y, 83) - 0.5f) * 0.02f;
+    }
+    if (is("burl")) {
+        // Burl: grain swirled around knots and eyes.
+        float g = std::sin(55.0f * Fbm(x, y, (int)(28 * k), 41));
+        return 0.10f * g - 0.14f * std::pow(std::max(0.0f, g), 6.0f) + (Hash(x, y, 42) - 0.5f) * 0.03f;
+    }
+    if (is("onyx")) {
+        // Banded onyx: honey and cream layers flowing across the slab.
+        float g = std::sin(y * 0.045f / k + 7.0f * Fbm(x, y, (int)(60 * k), 51));
+        return 0.12f * g + (Fbm(x, y, (int)(20 * k), 52) - 0.5f) * 0.06f;
+    }
+    if (is("damascus")) {
+        // Damascus steel: folded layers rippling through the blade.
+        float g = std::sin((x * 0.05f + y * 0.02f) / k + 10.0f * Fbm(x, y, (int)(50 * k), 61));
+        return 0.16f * g * std::fabs(g) + (Hash(x, y, 62) - 0.5f) * 0.02f;
+    }
     if (is("cork")) return Generic({0.050f, 0.140f, 2, 2, 0.06f, 0.30f, 0.03f, 0.12f, 0}, x, y, k);
     if (is("concrete")) return Generic({0.030f, 0.080f, 14, 14, 0.015f, 0.35f, 0.004f, 0.08f, 0}, x, y, k);
     if (is("brass")) return Generic({0.010f, 0.060f, 120, 1, 0, 0, 0, 0, 0}, x, y, k);
@@ -112,10 +146,11 @@ float Pattern(const char* id, int x, int y, float k, COLORREF& tint, float& tint
         bool over = ((x / t) + (y / t)) & 1;
         return (over ? row : col) * 0.10f + (ValueNoise(x, y, (int)(30 * k), (int)(3 * k), 13) - 0.5f) * 0.06f;
     }
-    if (is("oak") || is("black-ash")) {
-        // Long grain lines along x, wavy, with darker latewood bands (ash: the stain gathers in them).
+    if (is("oak") || is("black-ash") || is("ebony")) {
+        // Long grain lines along x, wavy, with darker latewood bands (ash: the stain gathers in them; ebony:
+        // fine streaks in near-black).
         float g = std::sin(y / (2.2f * k) + 9.0f * Fbm(x / 6, y, (int)(40 * k), 21));
-        float bands = is("black-ash") ? 0.22f : 0.08f;
+        float bands = is("black-ash") ? 0.22f : is("ebony") ? 0.16f : 0.08f;
         return 0.06f * g - bands * std::pow(std::max(0.0f, g), 8.0f) + (ValueNoise(x, y, (int)(80 * k), 1, 22) - 0.5f) * 0.05f;
     }
     if (is("hologram")) {
@@ -127,32 +162,43 @@ float Pattern(const char* id, int x, int y, float k, COLORREF& tint, float& tint
     return 0;  // liquid glass: handled as a whole in FillMaterial
 }
 
-}  // namespace
-
-void FillMaterial(Canvas& c, const RECT& r, int radius, int m, UINT dpi) {
-    m = ClampMaterial(m);
-    const Material& mat = kMaterials[m];
+// Shades the material over every drawn pixel in `area` (filled with its base color just before), as if the
+// whole thing were `ref`: sheen and glass fade along `ref`'s height, so parts of one piece match. `rims`:
+// the glass edges, for a single rounded rect (`ref`, `radius`).
+void Shade(Canvas& c, const RECT& area, const Material& mat, UINT dpi, const RECT& ref, bool rims, int radius) {
     float k = dpi / 96.0f;
-    c.FillRoundRect(r, radius, mat.base);
     uint32_t* px = c.pixels();
-    int y0 = std::max<int>(0, r.top), y1 = std::min<int>(c.height(), r.bottom);
-    int x0 = std::max<int>(0, r.left), x1 = std::min<int>(c.width(), r.right);
-    float h = (float)std::max<LONG>(1, r.bottom - r.top);
+    int y0 = std::max<int>(0, area.top), y1 = std::min<int>(c.height(), area.bottom);
+    int x0 = std::max<int>(0, area.left), x1 = std::min<int>(c.width(), area.right);
+    float h = (float)std::max<LONG>(1, ref.bottom - ref.top);
 
     if (mat.translucent) {
-        // Liquid glass: the desktop shows through a cool, light pane; brighter toward the top, with a
-        // lit rim. Scaling premultiplied pixels keeps the rounded edge anti-aliased.
+        // Glass: the desktop shows through. Liquid glass is a cool, light pane, brighter toward the top;
+        // clear glass is barely there, with a soft diagonal reflection. Scaling premultiplied pixels keeps
+        // the rounded edges anti-aliased.
+        bool clear = std::strcmp(mat.id, "clear-glass") == 0;
         for (int y = y0; y < y1; ++y) {
-            float t = (y - r.top) / h, keep = 0.62f + 0.18f * (1 - t);
+            float t = (y - ref.top) / h, keep = clear ? 0.38f : 0.62f + 0.18f * (1 - t);
             for (int x = x0; x < x1; ++x) {
                 uint32_t& p = px[(size_t)y * c.width() + x];
-                auto ch = [&](int shift) { return (uint32_t)(((p >> shift) & 255) * keep); };
+                if (!(p >> 24)) continue;
+                float shine = 0;
+                if (clear) {  // a band of light across the pane, from canvas position so pieces line up
+                    float d = std::fmod((x + y * 0.55f) / (240.0f * k), 1.0f) - 0.3f;
+                    shine = 0.22f * std::exp(-d * d / 0.004f);
+                }
+                auto ch = [&](int shift) {
+                    float v = ((p >> shift) & 255) * keep;
+                    return (uint32_t)std::min(255.0f, v + (255 - v) * shine);
+                };
                 p = (ch(24) << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0);
             }
         }
-        c.StrokeRoundRect(r, radius, std::max(1, (int)std::lround(1.5f * k)), RGB(255, 255, 255), 220);
-        RECT inner{r.left + 2, r.top + 2, r.right - 2, r.bottom - 2};
-        c.StrokeRoundRect(inner, std::max(0, radius - 2), 1, RGB(170, 190, 215), 60);
+        if (rims) {
+            c.StrokeRoundRect(ref, radius, std::max(1, (int)std::lround(1.5f * k)), RGB(255, 255, 255), 220);
+            RECT inner{ref.left + 2, ref.top + 2, ref.right - 2, ref.bottom - 2};
+            c.StrokeRoundRect(inner, std::max(0, radius - 2), 1, RGB(170, 190, 215), 60);
+        }
         return;
     }
     if (std::strcmp(mat.id, "walnut") == 0) {  // the scan itself, not a pattern over the base color
@@ -167,14 +213,14 @@ void FillMaterial(Canvas& c, const RECT& r, int radius, int m, UINT dpi) {
         return;
     }
 
-    float sheen = std::strcmp(mat.id, "aluminum") == 0 || std::strcmp(mat.id, "brass") == 0 ? 0.05f
-                  : std::strcmp(mat.id, "leather") == 0 || std::strcmp(mat.id, "hologram") == 0 ? 0.06f
-                  : std::strcmp(mat.id, "titanium") == 0 || std::strcmp(mat.id, "ceramic") == 0 ||
-                            std::strcmp(mat.id, "acrylic") == 0
-                        ? 0.04f
-                                                                                                    : 0.0f;
+    auto is = [&](const char* s) { return std::strcmp(mat.id, s) == 0; };
+    float sheen = is("aluminum") || is("brass") || is("damascus")              ? 0.05f
+                  : is("leather") || is("hologram")                          ? 0.06f
+                  : is("titanium") || is("ceramic") || is("acrylic") || is("nacre") ? 0.04f
+                  : is("acrylic-cobalt")                                     ? 0.12f
+                                                                             : 0.0f;
     for (int y = y0; y < y1; ++y) {
-        float sh = sheen * (0.5f - (y - r.top) / h) * 2;
+        float sh = sheen * (0.5f - (y - ref.top) / h) * 2;
         for (int x = x0; x < x1; ++x) {
             uint32_t& p = px[(size_t)y * c.width() + x];
             int a = p >> 24;
@@ -191,12 +237,30 @@ void FillMaterial(Canvas& c, const RECT& r, int radius, int m, UINT dpi) {
                 ch(0, GetBValue(tint));
         }
     }
+}
+
+}  // namespace
+
+void FillMaterial(Canvas& c, const RECT& r, int radius, int m, UINT dpi) {
+    const Material& mat = kMaterials[ClampMaterial(m)];
+    c.FillRoundRect(r, radius, mat.base);
+    Shade(c, r, mat, dpi, r, true, radius);
     if (std::strcmp(mat.id, "leather") == 0) {  // saddle stitching just inside the edge, in a lighter thread
         int in = Scale(5, dpi);
         RECT s{r.left + in, r.top + in, r.right - in, r.bottom - in};
         c.DashedRoundRect(s, std::max(0, radius - in), std::max(1, Scale(1, dpi)), Scale(4, dpi), Scale(3, dpi),
                           RGB(232, 205, 170), 170);
     }
+}
+
+void FillMaterialShape(Canvas& c, std::initializer_list<MaterialPart> parts, const RECT& shading, int m, UINT dpi) {
+    const Material& mat = kMaterials[ClampMaterial(m)];
+    RECT area{};
+    for (const MaterialPart& part : parts) {
+        c.FillRoundRect(part.r, part.radius, mat.base);
+        UnionRect(&area, &area, &part.r);
+    }
+    Shade(c, area, mat, dpi, shading, false, 0);
 }
 
 int MaterialFromId(const char* id) {

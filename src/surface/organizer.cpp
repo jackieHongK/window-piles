@@ -281,12 +281,14 @@ void Organizer::SetVisible(bool show) {
 }
 
 // The walnut bookmark: rounded toward the desktop, flush on the other side, with grip ridges.
-void Organizer::DrawBookmark(Canvas& c, const RECT& b, bool hot) {
+void Organizer::DrawBookmark(Canvas& c, const RECT& b, bool hot, bool body) {
     auto S = [this](int v) { return Scale(v, dpi_); };
     int w = b.right - b.left, h = b.bottom - b.top, r = S(7);
-    RECT body = place_.right ? RECT{b.left, b.top, b.right + r, b.bottom} : RECT{b.left - r, b.top, b.right, b.bottom};
-    FillMaterial(c, body, r, Mat(), dpi_);
-    if (hot) c.FillRoundRect(body, r, RGB(255, 255, 255), 30);
+    if (body) {
+        RECT shape = place_.right ? RECT{b.left, b.top, b.right + r, b.bottom} : RECT{b.left - r, b.top, b.right, b.bottom};
+        FillMaterial(c, shape, r, Mat(), dpi_);
+        if (hot) c.FillRoundRect(shape, r, RGB(255, 255, 255), 30);
+    }
     int gx = place_.right ? b.left + S(5) : b.right - S(10);
     for (int i = -1; i <= 1; ++i)
         c.FillRoundRect({gx, b.top + h / 2 + i * S(6) - S(1), gx + S(5), b.top + h / 2 + i * S(6) + S(1)}, S(1), Ink(), 200);
@@ -463,16 +465,21 @@ void Organizer::RenderTray(bool present) {
 
     trayCanvas_ = std::make_unique<Canvas>(g.w, g.h);
     Canvas& c = *trayCanvas_;
-    int r = S(12);
+    // The tray and the bookmark it was pulled out by are one piece: filled and shaded together (the sheen of
+    // metal and acrylic, the transparency of glass run across both), so nothing marks where they meet.
+    int r = S(12), hr = S(7);
     RECT body = place_.right ? RECT{g.bodyLeft, 0, g.w + r, g.h} : RECT{-r, 0, g.bodyRight, g.h};
-    FillMaterial(c, body, r, Mat(), dpi_);
-    // A light rim along the tray's outline (the part off the screen edge isn't drawn).
+    RECT tab = place_.right ? RECT{g.handle.left, g.handle.top, g.handle.right + hr, g.handle.bottom}
+                            : RECT{g.handle.left - hr, g.handle.top, g.handle.right, g.handle.bottom};
+    FillMaterialShape(c, {{body, r}, {tab, hr}}, body, Mat(), dpi_);
+    // A light rim along the tray's outline (the part off the screen edge isn't drawn), mended where the
+    // bookmark joins it: those pixels are filled again exactly as the piece was.
     RECT rim = body;
     InflateRect(&rim, -1, -1);
     c.StrokeRoundRect(rim, r - 1, std::max(1, S(1)), RGB(255, 255, 255), 50);
-    // The bookmark it was pulled out by: one piece with the tray, drawn over its rim in the same wood, so
-    // there is no line where they meet.
-    DrawBookmark(c, g.handle, false);
+    int jx = place_.right ? g.bodyLeft : g.bodyRight;
+    FillMaterialShape(c, {{{jx - S(3), g.handle.top, jx + S(3), g.handle.bottom}, 0}}, body, Mat(), dpi_);
+    DrawBookmark(c, g.handle, false, false);
 
     // The wordmark carved into the wood; while something is carried over it, what a drop would do.
     bool full = pileCount >= g.slots;

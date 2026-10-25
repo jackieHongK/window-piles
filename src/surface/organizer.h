@@ -21,8 +21,8 @@
 
 namespace wp {
 
-// What the organizer (the drawer and its bookmark) can be made of: walnut, and five paid materials (all
-// selectable during the beta). Ids are material ids (ui/material.h).
+// What the organizer (the drawer and its bookmark) can be made of: walnut, and paid materials, the rarer
+// and costlier further down (all selectable during the beta). Ids are material ids (ui/material.h).
 struct OrganizerMaterial {
     const wchar_t* name;
     const char* id;
@@ -30,6 +30,8 @@ struct OrganizerMaterial {
 inline constexpr OrganizerMaterial kOrganizerMaterials[] = {
     {L"월넛 원목", "walnut"},  {L"오크 원목", "oak"},     {L"블랙 애시", "black-ash"},
     {L"헤어라인 알루미늄", "aluminum"}, {L"무광 아크릴", "acrylic"}, {L"그레이 펠트", "felt-gray"},
+    {L"투명 글래스", "clear-glass"}, {L"불투명 아크릴 · 코발트", "acrylic-cobalt"}, {L"글리터 석영", "quartz"},
+    {L"자개", "nacre"}, {L"버얼 월넛", "burl"}, {L"흑단", "ebony"}, {L"오닉스", "onyx"}, {L"다마스커스 강철", "damascus"},
 };
 
 class OrganizerHost {
@@ -122,7 +124,7 @@ private:
     Pile* PileAt(int item);
     void Activate(int item, POINT screenPt);  // a click on an item
     void MemoMenu(int memo, POINT screenPt);
-    void DrawBookmark(Canvas& c, const RECT& r, bool hot);
+    void DrawBookmark(Canvas& c, const RECT& r, bool hot, bool body = true);  // body = false: grips and count only
     void DrawPileCard(Canvas& c, const RECT& card, Pile& p, bool hot);
     void DrawFlag(Canvas& c, const RECT& flag, const MemoInfo& m, bool hot);
     void DrawTrash(Canvas& c, const RECT& area, double now);

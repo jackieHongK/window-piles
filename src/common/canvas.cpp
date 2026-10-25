@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace wp {
 
@@ -306,6 +307,57 @@ SIZE Canvas::MeasureText(const std::wstring& text, int sizePx, bool bold, int wr
 }
 
 void Canvas::Text(const std::wstring& text, const RECT& r, COLORREF color, int sizePx, bool bold, UINT format) {
+    RECT cr{std::max<LONG>(0, r.left), std::max<LONG>(0, r.top), std::min<LONG>(w_, r.right), std::min<LONG>(h_, r.bottom)};
+    if (cr.right <= cr.left || cr.bottom <= cr.top) return;
+    bool seeThrough = false;
+    for (int y = cr.top; y < cr.bottom && !seeThrough; ++y)
+        for (int x = cr.left; x < cr.right; ++x)
+            if ((px_[(size_t)y * w_ + x] >> 24) != 255) {
+                seeThrough = true;
+                break;
+            }
+    if (seeThrough) {
+        // On glass GDI's ClearType has nothing solid to blend with: draw the text as a coverage mask
+        // (grayscale anti-aliasing) and lay the color over the pixels by it, keeping them see-through.
+        int w = cr.right - cr.left, h = cr.bottom - cr.top;
+        BITMAPINFO bi{};
+        bi.bmiHeader = {sizeof(BITMAPINFOHEADER), w, -h, 1, 32, BI_RGB};
+        void* bits = nullptr;
+        HDC mdc = CreateCompatibleDC(dc_);
+        HBITMAP bmp = CreateDIBSection(mdc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+        if (!bmp) {
+            DeleteDC(mdc);
+            return;
+        }
+        HGDIOBJ oldBmp = SelectObject(mdc, bmp);
+        memset(bits, 0, (size_t)w * h * 4);
+        HFONT font = CreateFontW(-sizePx, 0, 0, 0, bold ? FW_BOLD : FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                 ANTIALIASED_QUALITY, 0, L"Malgun Gothic");
+        HGDIOBJ oldFont = SelectObject(mdc, font);
+        SetBkMode(mdc, TRANSPARENT);
+        SetTextColor(mdc, RGB(255, 255, 255));
+        RECT tr{r.left - cr.left, r.top - cr.top, r.right - cr.left, r.bottom - cr.top};
+        DrawTextW(mdc, text.c_str(), -1, &tr, format | DT_NOPREFIX);
+        GdiFlush();
+        const uint32_t* mask = (const uint32_t*)bits;
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                uint32_t cov = (mask[(size_t)y * w + x] >> 8) & 255;  // green: the grayscale coverage
+                if (!cov) continue;
+                uint32_t& p = px_[(size_t)(cr.top + y) * w_ + cr.left + x];
+                auto over = [&](uint32_t src, int shift) {
+                    return (src * cov + ((p >> shift) & 255) * (255 - cov)) / 255;
+                };
+                p = (over(255, 24) << 24) | (over(GetRValue(color), 16) << 16) | (over(GetGValue(color), 8) << 8) |
+                    over(GetBValue(color), 0);
+            }
+        SelectObject(mdc, oldFont);
+        DeleteObject(font);
+        SelectObject(mdc, oldBmp);
+        DeleteObject(bmp);
+        DeleteDC(mdc);
+        return;
+    }
     ProtectAlpha(r, [&] {
         HFONT font = CreateUiFont(sizePx, bold);
         HGDIOBJ old = SelectObject(dc_, font);
