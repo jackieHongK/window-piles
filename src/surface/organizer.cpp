@@ -8,6 +8,7 @@
 
 #include "common/canvas.h"
 #include "common/win_util.h"
+#include "notes/memo_format.h"
 #include "notes/memo_store.h"
 #include "notes/memo_window.h"
 #include "ui/material.h"
@@ -35,14 +36,17 @@ constexpr int kMinSlots = 2;
 constexpr int kItemMemo = 1000, kItemPlus = 2000, kItemMemoMore = 2001, kItemHandle = 2002;
 constexpr int kLift = 10;            // a hovered card slides this far out of the tray
 constexpr double kHideAfterMs = 350;  // the pointer left the bookmark and tray this long ago: put it away
-constexpr UINT_PTR kTimerWatch = 1, kTimerOpen = 2, kTimerAnim = 3, kTimerFiles = 4, kTimerSlide = 5;
+constexpr UINT_PTR kTimerWatch = 1, kTimerOpen = 2, kTimerAnim = 3, kTimerFiles = 4, kTimerSlide = 5, kTimerPeek = 6;
 constexpr double kSlideMs = 240;  // the brand motion: 240 ms ease-out
+constexpr double kPeekMs = 160;   // a memo unfolding from under the tray
+constexpr int kPeekW = 300, kPeekMaxH = 380;
 // Crumpling a memo into the trash: it is slowly crushed into a ball until kBallAt, falls in until kLandAt
 // (the lid starts shutting at kShutAt), then the can settles.
 constexpr double kCrumpleMs = 1050, kBallAt = 0.62, kShutAt = 0.79, kLandAt = 0.82;
 constexpr wchar_t kHandleClass[] = L"WindowPilesOrganizerHandle";
 constexpr wchar_t kTrayClass[] = L"WindowPilesOrganizerTray";
 constexpr wchar_t kFlagsClass[] = L"WindowPilesOrganizerFlags";
+constexpr wchar_t kPeekClass[] = L"WindowPilesOrganizerPeek";
 const COLORREF kCream = RGB(246, 238, 228);
 const COLORREF kFlagPaper = RGB(252, 250, 244);
 // Post-it flag colors, as on a real index-flag pad.
@@ -104,6 +108,8 @@ Organizer::Organizer(OrganizerHost& host, const Place& place) : host_(host), pla
     handle_ = MakeWindow(kHandleClass, &Organizer::HandleProc, this, L"Neverflow 오거나이저");
     tray_ = MakeWindow(kTrayClass, &Organizer::TrayProc, this, L"Neverflow 오거나이저 트레이");
     flags_ = MakeWindow(kFlagsClass, &Organizer::FlagsProc, this, L"Neverflow 메모 플래그");
+    peek_ = MakeWindow(kPeekClass, &Organizer::PeekProc, this, L"Neverflow 메모 미리보기");
+    SetWindowLongPtrW(peek_, GWL_EXSTYLE, GetWindowLongPtrW(peek_, GWL_EXSTYLE) | WS_EX_TRANSPARENT);  // only to look at
     DragAcceptFiles(tray_, TRUE);  // files dropped on a card in the tray join that pile
     // ponytail: polls the button every 150 ms for Explorer drags; an OLE drop target needs an STA thread
     // (this one is MTA for WinRT capture), worth it only if the poll ever shows up.
@@ -117,7 +123,7 @@ Organizer::Organizer(OrganizerHost& host, const Place& place) : host_(host), pla
 
 Organizer::~Organizer() {
     *alive_ = false;
-    for (HWND h : {handle_, tray_, flags_})
+    for (HWND h : {handle_, tray_, flags_, peek_})
         if (h) {
             SetWindowLongPtrW(h, GWLP_USERDATA, 0);
             DestroyWindow(h);
@@ -626,6 +632,7 @@ void Organizer::HideTray() {
     KillTimer(tray_, kTimerAnim);
     slideStart_ = 0;
     KillTimer(tray_, kTimerSlide);
+    HidePeek();
     if (GetCapture() == tray_) ReleaseCapture();
     if (visible_) {
         handleHover_ = false;
@@ -773,6 +780,90 @@ LRESULT CALLBACK Organizer::HandleProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 LRESULT CALLBACK Organizer::TrayProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     auto* self = (Organizer*)GetWindowLongPtrW(h, GWLP_USERDATA);
     return self ? self->OnTray(msg, wp, lp) : DefWindowProcW(h, msg, wp, lp);
+}
+
+LRESULT CALLBACK Organizer::PeekProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+    return msg == WM_MOUSEACTIVATE ? MA_NOACTIVATE : DefWindowProcW(h, msg, wp, lp);
+}
+
+void Organizer::ShowPeek(int memo) {
+    if (memo == peekMemo_ || memo < 0 || memo >= (int)memos_.size() || drag_.item >= 0 || dropMode_) return;
+    using namespace theme;
+    auto S = [this](int v) { return Scale(v, dpi_); };
+    peekMemo_ = memo;
+    // The memo as it reads in its window: headings bigger, list markers as bullets, then body text.
+    const MemoInfo& m = memos_[memo];
+    std::wstring text = ReadMemo(m.path);
+    struct Line {
+        std::wstring s;
+        int size;
+        bool bold;
+    };
+    std::vector<Line> lines;
+    int h = S(10) + S(12), maxH = S(kPeekMaxH);
+    bool clipped = false;
+    for (size_t pos = 0; pos <= text.size();) {
+        size_t end = std::min(text.find(L'\n', pos), text.size());
+        std::wstring s = text.substr(pos, end - pos);
+        if (!s.empty() && s.back() == L'\r') s.pop_back();
+        pos = end + 1;
+        if (s.empty() && lines.empty()) continue;
+        MemoLineInfo info = ClassifyMemoLine(s);
+        int size = info.kind == MemoLine::H1 ? 17 : info.kind == MemoLine::H2 ? 15 : info.kind == MemoLine::H3 ? 13 : 12;
+        bool bold = info.kind == MemoLine::H1 || info.kind == MemoLine::H2 || info.kind == MemoLine::H3;
+        if (info.kind == MemoLine::Bullet) s = L"•  " + s.substr(info.markerLen);
+        else if (bold) s = s.substr(info.markerLen);
+        int lh = S(size) + S(bold ? 10 : 7);
+        if (h + lh > maxH - S(24)) {
+            clipped = true;
+            break;
+        }
+        lines.push_back({s, size, bold});
+        h += lh;
+        if (end >= text.size()) break;
+    }
+    if (lines.empty()) lines.push_back({L"빈 메모", 12, false});
+    h = std::max(h, S(60)) + (clipped ? S(20) : 0) + S(12);
+    int w = S(kPeekW);
+    peekCanvas_ = std::make_unique<Canvas>(w, h);
+    Canvas& c = *peekCanvas_;
+    c.FillRoundRect({0, 0, w, h}, S(3), kFlagPaper);
+    c.FillRoundRect({0, 0, w, S(6)}, 0, FlagColorOf(m));  // its flag's color along the top
+    c.StrokeRoundRect({0, 0, w, h}, S(3), 1, RGB(214, 204, 186));
+    int y = S(6) + S(12);
+    for (const Line& l : lines) {
+        int lh = S(l.size) + S(l.bold ? 10 : 7);
+        c.Text(l.s, {S(16), y, w - S(16), y + lh}, l.bold || &l == &lines.front() ? kForeground : kSubtleFg, S(l.size),
+               l.bold, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        y += lh;
+    }
+    if (clipped) c.Text(L"…  눌러서 열기", {S(16), y, w - S(16), y + S(18)}, kMutedFg, S(11), false, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    // It comes out from under the tray's edge, level with its flag, toward the desktop.
+    Geometry g = Measure((int)host_.OrganizerPiles().size());
+    RECT f = FlagRect(g, memo);
+    int edge = trayRect_.left + (place_.right ? g.bodyLeft : g.bodyRight);
+    int top = std::clamp<int>(trayRect_.top + f.top - S(8), work_.top + S(8), std::max<int>(work_.top + S(8), work_.bottom - S(8) - h));
+    peekRect_ = place_.right ? RECT{edge - w, top, edge, top + h} : RECT{edge, top, edge + w, top + h};
+    peekStart_ = NowMs();
+    SetTimer(tray_, kTimerPeek, 10, nullptr);
+    RenderPeek();
+}
+
+void Organizer::RenderPeek() {
+    if (peekMemo_ < 0 || !peekCanvas_) return;
+    double t = std::min(1.0, (NowMs() - peekStart_) / kPeekMs), e = 1 - std::pow(1 - t, 3);
+    int w = peekRect_.right - peekRect_.left, off = (int)std::lround((1 - e) * w);
+    POINT at{peekRect_.left + (place_.right ? off : -off), peekRect_.top};
+    peekCanvas_->Present(peek_, at);
+    // Just under the tray, so its hidden part is still under the tray's edge while it unfolds.
+    SetWindowPos(peek_, tray_, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+void Organizer::HidePeek() {
+    if (peekMemo_ < 0) return;
+    peekMemo_ = -1;
+    KillTimer(tray_, kTimerPeek);
+    ShowWindow(peek_, SW_HIDE);
 }
 
 LRESULT CALLBACK Organizer::FlagsProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
@@ -981,6 +1072,11 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
                 PresentTray();
                 return 0;
             }
+            if (wp == kTimerPeek) {
+                if (NowMs() - peekStart_ >= kPeekMs) KillTimer(tray_, kTimerPeek);
+                RenderPeek();
+                return 0;
+            }
             if (wp != kTimerWatch || dropMode_ || menuOpen_ || drag_.item >= 0 || crumpleStart_) return 0;
             // Stays open while the pointer is over the bookmark or the tray; goes away shortly after it leaves.
             POINT c;
@@ -997,8 +1093,17 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
             }
             return 0;
         }
+        case WM_MOUSELEAVE:
+            if (drag_.item < 0 && hover_ != -1) {
+                hover_ = -1;
+                HidePeek();
+                RenderTray();
+            }
+            return 0;
         case WM_MOUSEMOVE: {
             POINT p{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, tray_, 0};
+            TrackMouseEvent(&tme);
             if (drag_.item >= 0) {
                 drag_.y = p.y;
                 bool memo = drag_.item >= kItemMemo;
@@ -1029,6 +1134,7 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
                 const RECT* from = pressed_ < kItemMemo ? (pressed_ < (int)cardRects_.size() ? &cardRects_[pressed_] : nullptr)
                                                         : (pressed_ - kItemMemo < (int)memoRects_.size() ? &memoRects_[pressed_ - kItemMemo] : nullptr);
                 if (from) {
+                    HidePeek();
                     drag_ = {};
                     drag_.item = pressed_;
                     drag_.grabDy = pressPt_.y - from->top;
@@ -1043,6 +1149,8 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
             if (hc != hover_) {
                 hover_ = hc;
                 RenderTray();
+                if (hc >= kItemMemo && hc < kItemPlus) ShowPeek(hc - kItemMemo);
+                else HidePeek();
             }
             return 0;
         }
@@ -1085,6 +1193,7 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
             POINT c;
             GetCursorPos(&c);
             // The drawer stays out while its menu is up (and after, while the pointer is still on it).
+            HidePeek();
             menuOpen_ = true;
             auto alive = alive_;
             if (item >= kItemMemo && item < kItemPlus) MemoMenu(item - kItemMemo, c);
