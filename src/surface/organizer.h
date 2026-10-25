@@ -11,6 +11,7 @@
 
 #include <windows.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -41,6 +42,7 @@ public:
         bool right = true;
         int yPermille = 500;  // bookmark center, as a share of the monitor's work-area height
         std::wstring monitor;  // device name (\\.\DISPLAY1); empty or unknown → primary monitor
+        bool slide = true;     // the tray slides out (240 ms) rather than just appearing
     };
 
     Organizer(OrganizerHost& host, const Place& place);
@@ -53,6 +55,9 @@ public:
     // or files, which go into the pile whose card they are dropped on (otherwise a desktop card, which docks).
     void DragOver(POINT pt, bool add = false);
     void DragEnd();
+    // A window is being dragged while a pile is open: the tray comes out and stays out until the drag ends.
+    void OpenForAdd();
+    void SetSlide(bool on) { place_.slide = on; }
     bool IsDropTarget(POINT pt) const;  // dropping a card here keeps it in the tray
     // How many piles it holds: like a real tray it has a fixed number of slots, as many as fit in 60% of
     // the screen's height (at least 2). A card dropped on a full tray stays on the desktop.
@@ -107,10 +112,17 @@ private:
     void DrawFlag(Canvas& c, const RECT& flag, const MemoInfo& m, bool hot);
     void DrawTrash(Canvas& c, const RECT& area, double now);
     void EndDrag(POINT client);
+    void PresentTray();  // trayCanvas_ where the tray is, or on its way out while it slides
 
     OrganizerHost& host_;
     Place place_;
     HWND handle_ = nullptr, tray_ = nullptr, flags_ = nullptr;
+    // Set to false when this is destroyed: a menu shown from inside it may rebuild or remove the organizer.
+    std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
+    std::unique_ptr<Canvas> trayCanvas_;  // the tray as last drawn
+    double slideStart_ = 0;               // sliding out since
+    bool menuOpen_ = false;               // a right-click menu is up: the tray stays out meanwhile
+    bool stickyDrop_ = false;             // opened for a window drag: stays out until it ends
     RECT monitor_{}, work_{};
     UINT dpi_ = 96;
     RECT handleRect_{};  // screen

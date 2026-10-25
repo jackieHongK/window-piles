@@ -35,7 +35,8 @@ constexpr int kMinSlots = 2;
 constexpr int kItemMemo = 1000, kItemPlus = 2000, kItemMemoMore = 2001, kItemHandle = 2002;
 constexpr int kLift = 10;            // a hovered card slides this far out of the tray
 constexpr double kHideAfterMs = 350;  // the pointer left the bookmark and tray this long ago: put it away
-constexpr UINT_PTR kTimerWatch = 1, kTimerOpen = 2, kTimerAnim = 3, kTimerFiles = 4;
+constexpr UINT_PTR kTimerWatch = 1, kTimerOpen = 2, kTimerAnim = 3, kTimerFiles = 4, kTimerSlide = 5;
+constexpr double kSlideMs = 240;  // the brand motion: 240 ms ease-out
 // Crumpling a memo into the trash: it is slowly crushed into a ball until kBallAt, falls in until kLandAt
 // (the lid starts shutting at kShutAt), then the can settles.
 constexpr double kCrumpleMs = 1050, kBallAt = 0.62, kShutAt = 0.79, kLandAt = 0.82;
@@ -115,6 +116,7 @@ Organizer::Organizer(OrganizerHost& host, const Place& place) : host_(host), pla
 }
 
 Organizer::~Organizer() {
+    *alive_ = false;
     for (HWND h : {handle_, tray_, flags_})
         if (h) {
             SetWindowLongPtrW(h, GWLP_USERDATA, 0);
@@ -443,9 +445,8 @@ void Organizer::RenderTray() {
     std::vector<Pile*> by = BySlot(g.slots, &overflow);
     trayRect_ = g.screen;
 
-    Canvas c(g.w, g.h);
-    // The bookmark it was pulled out by, coming out from under the tray's edge.
-    DrawBookmark(c, g.handle, hover_ == kItemHandle);
+    trayCanvas_ = std::make_unique<Canvas>(g.w, g.h);
+    Canvas& c = *trayCanvas_;
     int r = S(12);
     RECT body = place_.right ? RECT{g.bodyLeft, 0, g.w + r, g.h} : RECT{-r, 0, g.bodyRight, g.h};
     FillMaterial(c, body, r, WalnutIndex(), dpi_);
@@ -453,6 +454,9 @@ void Organizer::RenderTray() {
     RECT rim = body;
     InflateRect(&rim, -1, -1);
     c.StrokeRoundRect(rim, r - 1, std::max(1, S(1)), RGB(255, 255, 255), 50);
+    // The bookmark it was pulled out by: one piece with the tray, drawn over its rim in the same wood, so
+    // there is no line where they meet.
+    DrawBookmark(c, g.handle, false);
 
     // The wordmark carved into the wood; while something is carried over it, what a drop would do.
     bool full = pileCount >= g.slots;
@@ -490,9 +494,15 @@ void Organizer::RenderTray() {
     for (int s = 0; s < g.slots; ++s) {
         RECT sr = SlotRect(g, s);
         bool target = (draggedPile >= 0 && s == drag_.slot) || (dropMode_ && !dropAdd_ && s == dropSlot_);
-        if (target) c.FillRoundRect(sr, S(1), RGB(255, 255, 255), 30);
         if (!by[s] || (draggedPile >= 0 && cardSlots_[draggedPile] == s)) {
-            c.DashedRoundRect(sr, S(1), S(1), S(5), S(4), kCream, target ? 220 : 70);
+            // An empty slot is cut into the wood: a recess a card would sit right in. Shade under its top
+            // and left lips, light on the far edges.
+            c.FillRoundRect(sr, S(2), RGB(0, 0, 0), 55);
+            c.FillRoundRect({sr.left, sr.top, sr.right, sr.top + S(3)}, 0, RGB(0, 0, 0), 60);
+            c.FillRoundRect({sr.left, sr.top, sr.left + S(2), sr.bottom}, 0, RGB(0, 0, 0), 40);
+            c.FillRoundRect({sr.left, sr.bottom - S(1), sr.right, sr.bottom}, 0, RGB(255, 226, 196), 60);
+            c.FillRoundRect({sr.right - S(1), sr.top, sr.right, sr.bottom}, 0, RGB(255, 226, 196), 35);
+            if (target) c.FillRoundRect(sr, S(2), RGB(255, 255, 255), 45);
             if (pileCount == 0 && s == 0)
                 c.Text(L"바탕화면의 더미 카드를 이 막대로 끌어 와 빈 칸에 놓으면 꽂혀요.", {sr.left + S(12), sr.top, sr.right - S(12), sr.bottom},
                        RGB(222, 206, 190), S(12), false, DT_LEFT | DT_VCENTER | DT_WORDBREAK);
@@ -566,7 +576,17 @@ void Organizer::RenderTray() {
         drag_.card = f;
         DrawFlag(c, f, memos_[draggedMemo], true);
     }
-    c.Present(tray_, {trayRect_.left, trayRect_.top});
+    PresentTray();
+}
+
+void Organizer::PresentTray() {
+    if (!trayCanvas_) return;
+    int off = 0;
+    if (slideStart_) {
+        double t = std::min(1.0, (NowMs() - slideStart_) / kSlideMs), e = 1 - std::pow(1 - t, 3);  // ease-out
+        off = (int)std::lround((1 - e) * (trayRect_.right - trayRect_.left));
+    }
+    trayCanvas_->Present(tray_, {trayRect_.left + (place_.right ? off : -off), trayRect_.top});
 }
 
 void Organizer::Refresh() {
@@ -584,6 +604,8 @@ void Organizer::ShowTray() {
     outsideSince_ = 0;
     hover_ = -1;
     memos_ = ListMemos();
+    slideStart_ = place_.slide ? NowMs() : 0;  // pulled out of the screen edge
+    if (slideStart_) SetTimer(tray_, kTimerSlide, 10, nullptr);
     RenderTray();
     SetWindowPos(tray_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     // The bookmark and the flag tips are on the tray now, pulled out with it.
@@ -602,6 +624,8 @@ void Organizer::HideTray() {
     drag_ = {};
     crumpleStart_ = 0;
     KillTimer(tray_, kTimerAnim);
+    slideStart_ = 0;
+    KillTimer(tray_, kTimerSlide);
     if (GetCapture() == tray_) ReleaseCapture();
     if (visible_) {
         handleHover_ = false;
@@ -618,13 +642,23 @@ Pile* Organizer::PileAtScreen(POINT pt) {
     return PileAt(ItemAt(pt));
 }
 
+void Organizer::OpenForAdd() {
+    if (!visible_) return;
+    stickyDrop_ = true;
+    dropMode_ = true;
+    dropAdd_ = true;
+    ShowTray();
+    seenInside_ = true;
+    RenderTray();
+}
+
 void Organizer::DragOver(POINT pt, bool add) {
     // Near the bookmark (within a card's width of the edge, around its height) the tray opens to catch it.
     int reach = Scale(kCardW, dpi_);
     bool nearEdge = place_.right ? pt.x >= monitor_.right - reach && pt.x <= monitor_.right
                                  : pt.x <= monitor_.left + reach && pt.x >= monitor_.left;
     bool nearHandle = nearEdge && pt.y >= handleRect_.top - reach && pt.y <= handleRect_.bottom + reach;
-    if (nearHandle || (trayOpen_ && IsDropTarget(pt))) {
+    if (stickyDrop_ || nearHandle || (trayOpen_ && IsDropTarget(pt))) {
         bool changed = !dropMode_ || dropAdd_ != add;
         dropAdd_ = add;
         if (!dropMode_) {
@@ -659,6 +693,7 @@ void Organizer::DragEnd() {
     if (!dropMode_) return;
     dropMode_ = false;
     dropAdd_ = false;
+    stickyDrop_ = false;
     dropSlot_ = -1;
     HideTray();
 }
@@ -715,7 +750,6 @@ void Organizer::MemoMenu(int memo, POINT screenPt) {
     if (memo < 0 || memo >= (int)memos_.size()) return;
     MemoInfo m = memos_[memo];
     POINT anchor{place_.right ? trayRect_.left : trayRect_.right, screenPt.y};
-    HideTray();
     enum { kOpen = 1, kReveal, kRecycle, kColor = 100 };
     std::vector<MenuItem> items = {{kOpen, L"열기"}, {kReveal, L"파일 위치 열기"}, {0, L""}};
     for (int i = 0; i < kFlagColorCount; ++i)
@@ -939,7 +973,15 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
                 RenderTray();
                 return 0;
             }
-            if (wp != kTimerWatch || dropMode_ || drag_.item >= 0 || crumpleStart_) return 0;
+            if (wp == kTimerSlide) {
+                if (NowMs() - slideStart_ >= kSlideMs) {
+                    slideStart_ = 0;
+                    KillTimer(tray_, kTimerSlide);
+                }
+                PresentTray();
+                return 0;
+            }
+            if (wp != kTimerWatch || dropMode_ || menuOpen_ || drag_.item >= 0 || crumpleStart_) return 0;
             // Stays open while the pointer is over the bookmark or the tray; goes away shortly after it leaves.
             POINT c;
             GetCursorPos(&c);
@@ -1042,13 +1084,15 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
             int item = ItemAt(p);
             POINT c;
             GetCursorPos(&c);
-            if (item >= kItemMemo && item < kItemPlus) {
-                MemoMenu(item - kItemMemo, c);
-                return 0;
-            }
-            Pile* pile = PileAt(item);
-            HideTray();
-            host_.OnOrganizerMenu(pile, c);
+            // The drawer stays out while its menu is up (and after, while the pointer is still on it).
+            menuOpen_ = true;
+            auto alive = alive_;
+            if (item >= kItemMemo && item < kItemPlus) MemoMenu(item - kItemMemo, c);
+            else host_.OnOrganizerMenu(PileAt(item), c);  // may rebuild or remove the organizer
+            if (!*alive) return 0;
+            menuOpen_ = false;
+            outsideSince_ = 0;
+            Refresh();
             return 0;
         }
     }

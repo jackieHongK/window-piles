@@ -62,6 +62,7 @@ enum MenuId : UINT {
     kMenuDock,
     kMenuOrganizer,
     kMenuOrganizerSide,
+    kMenuOrganizerSlide,
     kMenuMemoFolder,
     kMenuOnTop,
     kMenuHideUi,
@@ -225,6 +226,7 @@ Organizer::Place LoadOrganizerPlace() {
     p.yPermille = (int)GetPrivateProfileIntW(L"organizer", L"y", 500, ini.c_str());
     GetPrivateProfileStringW(L"organizer", L"monitor", L"", buf, 64, ini.c_str());
     p.monitor = buf;
+    p.slide = GetPrivateProfileIntW(L"organizer", L"slide", 1, ini.c_str()) != 0;
     return p;
 }
 
@@ -233,6 +235,7 @@ void SaveOrganizerPlace(const Organizer::Place& p) {
     WritePrivateProfileStringW(L"organizer", L"side", p.right ? L"right" : L"left", ini.c_str());
     WritePrivateProfileStringW(L"organizer", L"y", std::to_wstring(p.yPermille).c_str(), ini.c_str());
     WritePrivateProfileStringW(L"organizer", L"monitor", p.monitor.c_str(), ini.c_str());
+    WritePrivateProfileStringW(L"organizer", L"slide", p.slide ? L"1" : L"0", ini.c_str());
 }
 
 void SetFlag(const wchar_t* name, bool on) {
@@ -531,6 +534,9 @@ std::wstring App::PileNameOf(HWND hwnd) {
 
 void App::OnDragTargetsShown(HWND) {
     if (frame_) frame_->SetDropMode(true);  // the top tab grows into a "drop here to add" target
+    // Working in an open pile, a window picked up may well be for another pile: the drawer comes out with
+    // its cards, ready to take it.
+    if (frame_ && organizer_ && !OrganizerPiles().empty()) organizer_->OpenForAdd();
 }
 
 void App::OnDragHover(HWND, POINT cursor) {
@@ -1521,14 +1527,21 @@ void App::OnOrganizerMenu(Pile* pile, POINT pt) {
         return;
     }
     if (!organizer_) return;
-    bool right = organizer_->place().right;
+    bool right = organizer_->place().right, slide = organizer_->place().slide;
     std::vector<MenuItem> items = {
+        {kMenuOrganizerSlide, L"서랍이 스르륵 열리기", slide ? L"켜짐 ✓" : L"꺼짐 · 바로 나타나요"},
         {kMenuMemoFolder, L"메모 폴더 열기", L".txt 파일"},
         {kMenuOrganizerSide, right ? L"왼쪽 가장자리로 옮기기" : L"오른쪽 가장자리로 옮기기"},
         {kMenuOrganizer, L"가장자리 오거나이저 끄기", L"카드는 바탕화면으로"},
     };
     UINT id = ShowMenu(items, pt);
     if (id == kMenuMemoFolder) ShellExecuteW(nullptr, L"open", MemoDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    if (id == kMenuOrganizerSlide && organizer_) {
+        Organizer::Place place = organizer_->place();
+        place.slide = !slide;
+        SaveOrganizerPlace(place);
+        organizer_->SetSlide(place.slide);
+    }
     if (id == kMenuOrganizerSide && organizer_) {
         Organizer::Place place = organizer_->place();
         place.right = !right;
