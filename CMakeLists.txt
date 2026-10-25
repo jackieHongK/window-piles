@@ -33,6 +33,7 @@ add_executable(WindowPiles WIN32
     src/surface/pile_window.cpp
     src/surface/organizer.cpp
     src/surface/messenger.cpp
+    src/surface/clipboard_shelf.cpp
     src/notes/memo_format.cpp
     src/notes/memo_store.cpp
     src/notes/memo_window.cpp
@@ -48,7 +49,7 @@ add_executable(WindowPiles WIN32
     src/ui/wordmark.cpp
     src/ui/material.cpp)
 target_include_directories(WindowPiles PRIVATE src)
-target_link_libraries(WindowPiles PRIVATE user32 gdi32 dwmapi shell32 shlwapi shcore advapi32 comdlg32 wtsapi32 kernel32 d3d11 dxgi windowsapp ole32 version)
+target_link_libraries(WindowPiles PRIVATE user32 gdi32 dwmapi shell32 shlwapi shcore advapi32 comdlg32 wtsapi32 kernel32 d3d11 dxgi windowsapp ole32 version windowscodecs)
 
 # The exe's icon (Explorer, shortcuts, pinned items) is generated at build time from the same drawing
 # code the app uses at runtime (DrawMark), so there is no binary .ico in the repo to keep in sync.
