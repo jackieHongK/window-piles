@@ -99,7 +99,9 @@ private:
     LRESULT OnFlags(UINT msg, WPARAM wp, LPARAM lp);
     void Layout();  // monitor, dpi, bookmark rect from place_
     void RenderHandle();
-    void RenderTray();
+    void RenderTray(bool present = true);  // present = false: only draw trayCanvas_ (ahead of opening)
+    void Prepare();                         // memos read and tray drawn while the pointer rests on the bookmark
+    void SlideOut();                        // the opening motion, in step with the screen
     void RenderFlags();  // the flag tips at the screen edge while the tray is put away
     void ShowTray();
     void HideTray();
@@ -125,7 +127,7 @@ private:
     // Set to false when this is destroyed: a menu shown from inside it may rebuild or remove the organizer.
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
     std::unique_ptr<Canvas> trayCanvas_;  // the tray as last drawn
-    double slideStart_ = 0;               // sliding out since
+    bool prepared_ = false;               // trayCanvas_ is ready for the next opening
     bool menuOpen_ = false;               // a right-click menu is up: the tray stays out meanwhile
     bool stickyDrop_ = false;             // opened for a window drag: stays out until it ends
     int peekMemo_ = -1;

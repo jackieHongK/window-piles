@@ -1,5 +1,6 @@
 #include "organizer.h"
 
+#include <dwmapi.h>
 #include <shellapi.h>
 #include <windowsx.h>
 
@@ -36,8 +37,9 @@ constexpr int kMinSlots = 2;
 constexpr int kItemMemo = 1000, kItemPlus = 2000, kItemMemoMore = 2001, kItemHandle = 2002;
 constexpr int kLift = 10;            // a hovered card slides this far out of the tray
 constexpr double kHideAfterMs = 350;  // the pointer left the bookmark and tray this long ago: put it away
-constexpr UINT_PTR kTimerWatch = 1, kTimerOpen = 2, kTimerAnim = 3, kTimerFiles = 4, kTimerSlide = 5, kTimerPeek = 6;
+constexpr UINT_PTR kTimerWatch = 1, kTimerOpen = 2, kTimerAnim = 3, kTimerFiles = 4, kTimerPeek = 6;
 constexpr double kSlideMs = 240;  // the brand motion: 240 ms ease-out
+constexpr UINT kOpenDelayMs = 120;  // resting on the bookmark this long opens the drawer
 constexpr double kPeekMs = 160;   // a memo unfolding from under the tray
 constexpr int kPeekW = 300, kPeekMaxH = 380;
 // Crumpling a memo into the trash: it is slowly crushed into a ball until kBallAt, falls in until kLandAt
@@ -441,8 +443,8 @@ void Organizer::DrawTrash(Canvas& c, const RECT& area, double now) {
            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 }
 
-void Organizer::RenderTray() {
-    if (!trayOpen_) return;
+void Organizer::RenderTray(bool present) {
+    if (!trayOpen_ && present) return;
     using namespace theme;
     auto S = [this](int v) { return Scale(v, dpi_); };
     std::vector<Pile*> overflow;
@@ -582,20 +584,42 @@ void Organizer::RenderTray() {
         drag_.card = f;
         DrawFlag(c, f, memos_[draggedMemo], true);
     }
-    PresentTray();
+    if (present) PresentTray();
 }
 
 void Organizer::PresentTray() {
-    if (!trayCanvas_) return;
-    int off = 0;
-    if (slideStart_) {
-        double t = std::min(1.0, (NowMs() - slideStart_) / kSlideMs), e = 1 - std::pow(1 - t, 3);  // ease-out
-        off = (int)std::lround((1 - e) * (trayRect_.right - trayRect_.left));
+    if (trayCanvas_) trayCanvas_->Present(tray_, {trayRect_.left, trayRect_.top});
+}
+
+void Organizer::Prepare() {
+    if (trayOpen_ || prepared_) return;
+    memos_ = ListMemos();
+    hover_ = -1;
+    RenderTray(false);
+    prepared_ = true;
+}
+
+// The drawer comes out from where its bookmark is: it starts with only the bookmark showing, exactly over
+// the one on the screen edge, and eases out. The picture is sent once; each frame only moves the window,
+// timed by the compositor (DwmFlush), so no frame is late or dropped.
+void Organizer::SlideOut() {
+    int w = trayRect_.right - trayRect_.left, start = w - Scale(kHandleW, dpi_);
+    auto at = [&](int off) { return POINT{trayRect_.left + (place_.right ? off : -off), trayRect_.top}; };
+    POINT p = at(start);
+    trayCanvas_->Present(tray_, p);
+    SetWindowPos(tray_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    ShowWindow(handle_, SW_HIDE);
+    double t0 = NowMs();
+    for (double t = 0; t < 1;) {
+        if (FAILED(DwmFlush())) Sleep(8);
+        t = std::min(1.0, (NowMs() - t0) / kSlideMs);
+        p = at((int)std::lround((1 - (1 - std::pow(1 - t, 3))) * start));  // ease-out
+        SetWindowPos(tray_, nullptr, p.x, p.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
     }
-    trayCanvas_->Present(tray_, {trayRect_.left + (place_.right ? off : -off), trayRect_.top});
 }
 
 void Organizer::Refresh() {
+    prepared_ = false;  // what it holds changed: draw it again when it opens
     RenderHandle();
     RenderTray();
     RenderFlags();
@@ -608,15 +632,22 @@ void Organizer::ShowTray() {
     trayOpen_ = true;
     seenInside_ = false;
     outsideSince_ = 0;
+    if (!prepared_) {  // usually done already, while the pointer rested on the bookmark
+        trayOpen_ = false;
+        Prepare();
+        trayOpen_ = true;
+    }
+    prepared_ = false;
     hover_ = -1;
-    memos_ = ListMemos();
-    slideStart_ = place_.slide ? NowMs() : 0;  // pulled out of the screen edge
-    if (slideStart_) SetTimer(tray_, kTimerSlide, 10, nullptr);
-    RenderTray();
-    SetWindowPos(tray_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     // The bookmark and the flag tips are on the tray now, pulled out with it.
-    ShowWindow(handle_, SW_HIDE);
     ShowWindow(flags_, SW_HIDE);
+    if (place_.slide && trayCanvas_) {
+        SlideOut();
+    } else {
+        PresentTray();
+        SetWindowPos(tray_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        ShowWindow(handle_, SW_HIDE);
+    }
     SetTimer(tray_, kTimerWatch, 100, nullptr);
 }
 
@@ -630,8 +661,6 @@ void Organizer::HideTray() {
     drag_ = {};
     crumpleStart_ = 0;
     KillTimer(tray_, kTimerAnim);
-    slideStart_ = 0;
-    KillTimer(tray_, kTimerSlide);
     HidePeek();
     if (GetCapture() == tray_) ReleaseCapture();
     if (visible_) {
@@ -654,6 +683,7 @@ void Organizer::OpenForAdd() {
     stickyDrop_ = true;
     dropMode_ = true;
     dropAdd_ = true;
+    prepared_ = false;  // drawn for a drop, not as prepared on hover
     ShowTray();
     seenInside_ = true;
     RenderTray();
@@ -670,6 +700,7 @@ void Organizer::DragOver(POINT pt, bool add) {
         dropAdd_ = add;
         if (!dropMode_) {
             dropMode_ = true;
+            prepared_ = false;  // drawn for a drop, not as prepared on hover
             ShowTray();
             seenInside_ = true;
         }
@@ -879,7 +910,8 @@ LRESULT Organizer::OnFlags(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_MOUSEMOVE: {
             TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, flags_, 0};
             TrackMouseEvent(&tme);
-            SetTimer(flags_, kTimerOpen, 220, nullptr);
+            Prepare();
+            SetTimer(flags_, kTimerOpen, kOpenDelayMs, nullptr);
             return 0;
         }
         case WM_MOUSELEAVE:
@@ -915,8 +947,10 @@ LRESULT Organizer::OnHandle(UINT msg, WPARAM wp, LPARAM lp) {
                 TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, handle_, 0};
                 TrackMouseEvent(&tme);
                 RenderHandle();
-                // A short hover opens the tray; grabbing the bookmark right away moves it instead.
-                SetTimer(handle_, kTimerOpen, 220, nullptr);
+                // A short rest opens the tray (drawn meanwhile, so it opens at once); grabbing the bookmark right
+                // away moves it instead.
+                Prepare();
+                SetTimer(handle_, kTimerOpen, kOpenDelayMs, nullptr);
             }
             if (handlePressed_) {
                 POINT c;
@@ -1062,14 +1096,6 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
                     KillTimer(tray_, kTimerAnim);
                 }
                 RenderTray();
-                return 0;
-            }
-            if (wp == kTimerSlide) {
-                if (NowMs() - slideStart_ >= kSlideMs) {
-                    slideStart_ = 0;
-                    KillTimer(tray_, kTimerSlide);
-                }
-                PresentTray();
                 return 0;
             }
             if (wp == kTimerPeek) {
