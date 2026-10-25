@@ -16,8 +16,22 @@ struct MemoInfo {
     std::wstring title;    // first line (markers removed); empty for an empty memo
     std::wstring excerpt;  // second line
     FILETIME created{};
-    int color = 0;  // its flag's color: index into the organizer's Post-it colors
+    int color = 0;  // its flag's color: index into kMemoColors
 };
+
+// Post-it flag colors, as on a real index-flag pad.
+struct MemoColor {
+    const wchar_t* name;
+    COLORREF color;
+};
+inline constexpr MemoColor kMemoColors[] = {
+    {L"빨강", RGB(232, 72, 64)},  {L"주황", RGB(246, 146, 48)}, {L"노랑", RGB(246, 206, 52)}, {L"초록", RGB(84, 180, 90)},
+    {L"파랑", RGB(48, 146, 214)}, {L"보라", RGB(150, 92, 188)}, {L"분홍", RGB(236, 98, 160)},
+};
+inline constexpr int kMemoColorCount = sizeof(kMemoColors) / sizeof(kMemoColors[0]);
+inline COLORREF MemoColorOf(const MemoInfo& m) {
+    return kMemoColors[m.color >= 0 && m.color < kMemoColorCount ? m.color : 0].color;
+}
 
 std::wstring MemoDir();                // created if missing
 std::vector<MemoInfo> ListMemos();     // in the order the user arranged them; ones not placed yet on top, newest first
