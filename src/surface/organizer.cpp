@@ -35,6 +35,8 @@ constexpr int kMaxHeightPercent = 60;  // of the work area: the tray never gets 
 constexpr int kMinSlots = 2;
 // Hit codes for what isn't a pile card (pile cards are their index).
 constexpr int kItemMemo = 1000, kItemPlus = 2000, kItemMemoMore = 2001, kItemHandle = 2002, kItemPin = 2003;
+constexpr int kItemDock = 2999, kItemMessenger = 3000;  // the dock's row; + index: one of its apps
+constexpr int kTile = 44;                               // a messenger's tile
 constexpr int kPin = 28;  // the pin button at the end of the logo row
 constexpr int kLift = 10;            // a hovered card slides this far out of the tray
 constexpr double kHideAfterMs = 350;  // the pointer left the bookmark and tray this long ago: put it away
@@ -119,6 +121,7 @@ Organizer::Organizer(OrganizerHost& host, const Place& place) : host_(host), pla
     SetTimer(handle_, kTimerFiles, 150, nullptr);
     Layout();
     memos_ = ListMemos();
+    messengers_ = LoadMessengers();
     RenderHandle();
     ShowWindow(handle_, SW_SHOWNOACTIVATE);
     RenderFlags();
@@ -181,7 +184,7 @@ int Organizer::Capacity() const {
     // Counted with the memo flags at their most, so the number of slots doesn't move as memos come and go.
     int maxH = (work_.bottom - work_.top) * kMaxHeightPercent / 100;
     int fixed = S(kTrayPad + kLogoH + kSectionGap + kSectionGap + kMemoLabelH + 6 + kFlagMax * (kFlagH + kFlagGap) +
-                  kMoreH + 6 + kPlusH + kTrayPad);
+                  kMoreH + 6 + kMemoLabelH + 6 + kTile + 12 + kPlusH + kTrayPad);
     return std::max(kMinSlots, (maxH - fixed + S(kCardGap)) / S(kCardH + kCardGap));
 }
 
@@ -215,6 +218,11 @@ Organizer::Geometry Organizer::Measure(int pileCount) const {
         if (g.flagMore) y += S(kMoreH);
         y += S(6);
     }
+    // The messenger dock: its label and one row of app tiles (the empty places too, ready to take one).
+    g.dockLabelY = y;
+    y += S(kMemoLabelH + 6);
+    g.dockTop = y;
+    y += S(kTile + 12);
     g.plus = {g.cardX, y, g.cardX + S(kCardW), y + S(kPlusH)};
     g.h = y + S(kPlusH + kTrayPad);
     int cy = (handleRect_.top + handleRect_.bottom) / 2;
@@ -605,6 +613,7 @@ void Organizer::RenderTray(bool present) {
         c.Text(L"메모 " + std::to_wstring(g.flagMore) + L"개 더 · 폴더 열기", memoMoreRect_, Ink(), S(12), hover_ == kItemMemoMore,
                DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     }
+    DrawDock(c, g);
     // "＋ 새 메모", as wide as a card; the trash can while a memo is carried or going in.
     plusRect_ = {g.bodyLeft + S(kTrayPad), g.plus.top, g.bodyRight - S(kTrayPad), g.plus.bottom};
     if (draggedMemo >= 0 || crumpleStart_) {
@@ -631,6 +640,77 @@ void Organizer::RenderTray(bool present) {
         DrawFlag(c, f, memos_[draggedMemo], true);
     }
     if (present) PresentTray();
+}
+
+// The messenger dock: chat and mail apps kept at hand whatever the pile, each with what it says is unread.
+void Organizer::DrawDock(Canvas& c, const Geometry& g) {
+    using namespace theme;
+    auto S = [this](int v) { return Scale(v, dpi_); };
+    int n = (int)messengers_.size();
+    std::wstring label = L"메신저";
+    if (hover_ >= kItemMessenger && hover_ - kItemMessenger < n) label += L" · " + messengers_[hover_ - kItemMessenger].name;
+    else if (!n) label += L" · 앱 창이나 바로가기를 끌어다 놓기";
+    c.Text(label, {g.cardX, g.dockLabelY, g.cardX + S(kCardW), g.dockLabelY + S(kMemoLabelH)}, Ink(), S(12), true,
+           DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    dockRect_ = {g.bodyLeft + S(kTrayPad), g.dockLabelY, g.bodyRight - S(kTrayPad), g.dockTop + S(kTile) + S(6)};
+    bool dropping = hover_ == kItemDock;
+    if (dropping)
+        c.DashedRoundRect({g.cardX - S(5), g.dockTop - S(5), g.cardX + S(kCardW) + S(5), g.dockTop + S(kTile) + S(5)}, S(12),
+                          S(2), S(6), S(4), Ink(), 220);
+    int gap = (S(kCardW) - kMessengerMax * S(kTile)) / (kMessengerMax - 1);
+    messengerRects_.clear();
+    for (int i = 0; i < kMessengerMax; ++i) {
+        int x = g.cardX + i * (S(kTile) + gap);
+        RECT t{x, g.dockTop, x + S(kTile), g.dockTop + S(kTile)};
+        if (i >= n) {  // an empty place, carved in; a "+" in the first
+            c.FillRoundRect(t, S(10), RGB(0, 0, 0), dropping ? 25 : 45);
+            c.FillRoundRect({t.left + S(4), t.top, t.right - S(4), t.top + S(2)}, 0, RGB(0, 0, 0), 50);
+            if (i == n)
+                c.Text(L"+", t, dropping ? Ink() : Mix(Ink(), kMaterials[Mat()].base, 0.4), S(18), false,
+                       DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            continue;
+        }
+        messengerRects_.push_back(t);
+        const Messenger& m = messengers_[i];
+        bool hot = hover_ == kItemMessenger + i;
+        if (hot) OffsetRect(&t, 0, -S(2));
+        c.Shadow(t, S(10), S(hot ? 8 : 5), S(2), hot ? 80 : 55, RGB(20, 10, 4));
+        c.FillRoundRect(t, S(10), kFlagPaper);
+        int is = S(30);
+        if (HICON icon = MessengerIcon(m)) c.DrawIcon(icon, t.left + (S(kTile) - is) / 2, t.top + (S(kTile) - is) / 2, is);
+        else c.Text(m.name.substr(0, 1), t, kForeground, S(16), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        // Unread: the count its window titles show, or a dot when they only say "something's new".
+        UnreadInfo u = MessengerUnread(m);
+        if (u.count > 0 || u.marker) {
+            std::wstring num = u.count > 99 ? L"99+" : u.count ? std::to_wstring(u.count) : L"";
+            int bh = num.empty() ? S(10) : S(18);
+            int bw = num.empty() ? S(10) : std::max<int>(S(18), c.MeasureText(num, S(10), true).cx + S(10));
+            RECT b{t.right - bw + S(5), t.top - S(5), t.right + S(5), t.top - S(5) + bh};
+            c.FillRoundRect(b, bh / 2, RGB(232, 64, 58));
+            if (!num.empty()) c.Text(num, b, RGB(255, 255, 255), S(10), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
+        if (hot) c.StrokeRoundRect(t, S(10), S(2), Ink());
+    }
+}
+
+bool Organizer::AddMessenger(const Messenger& m) {
+    for (const Messenger& k : messengers_)
+        if (_wcsicmp(k.exe.c_str(), m.exe.c_str()) == 0) return false;
+    if ((int)messengers_.size() >= kMessengerMax) return false;
+    messengers_.push_back(m);
+    SaveMessengers(messengers_);
+    return true;
+}
+
+bool Organizer::DropWindowOnDock(HWND hwnd, POINT pt) {
+    if (!trayOpen_) return false;
+    ScreenToClient(tray_, &pt);
+    int item = ItemAt(pt);
+    if (item != kItemDock && item < kItemMessenger) return false;
+    Messenger m;
+    if (MessengerFromWindow(hwnd, m)) AddMessenger(m);
+    RenderTray();
+    return true;
 }
 
 void Organizer::PresentTray() {
@@ -779,7 +859,7 @@ void Organizer::DragOver(POINT pt, bool add) {
             POINT c = pt;
             ScreenToClient(tray_, &c);
             int item = ItemAt(c);
-            item = item >= 0 && item < kItemMemo ? item : -1;
+            item = item >= 0 && item < kItemMemo ? item : item == kItemDock || item >= kItemMessenger ? kItemDock : -1;
             changed |= item != hover_;
             hover_ = item;
         } else {  // the empty slot it would land in lights up
@@ -824,6 +904,9 @@ int Organizer::ItemAt(POINT client) const {
         if (PtInRect(&cardRects_[i], client)) return (int)i;
     for (size_t i = 0; i < memoRects_.size(); ++i)
         if (PtInRect(&memoRects_[i], client)) return kItemMemo + (int)i;
+    for (size_t i = 0; i < messengerRects_.size(); ++i)
+        if (PtInRect(&messengerRects_[i], client)) return kItemMessenger + (int)i;
+    if (PtInRect(&dockRect_, client)) return kItemDock;
     if (PtInRect(&plusRect_, client)) return kItemPlus;
     if (PtInRect(&memoMoreRect_, client)) return kItemMemoMore;
     return -1;
@@ -849,6 +932,10 @@ void Organizer::Activate(int item, POINT screenPt) {
             host_.OnOrganizerMoved();
         }
         HideTray(true);
+    } else if (item >= kItemMessenger && item - kItemMessenger < (int)messengers_.size()) {
+        Messenger m = messengers_[item - kItemMessenger];
+        HideTray();
+        OpenMessenger(m);
     } else if (item == kItemPlus) {
         HideTray();
         std::wstring path = NewMemo();
@@ -1185,6 +1272,18 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
                 RenderPeek();
                 return 0;
             }
+            if (wp == kTimerWatch && !messengers_.empty() && ++watchTicks_ % 10 == 0 && drag_.item < 0) {
+                // About once a second: the messengers' unread badges, redrawn only when one changed.
+                std::wstring now;
+                for (const Messenger& m : messengers_) {
+                    UnreadInfo u = MessengerUnread(m);
+                    now += std::to_wstring(u.count) + (u.marker ? L"*," : L",");
+                }
+                if (now != badges_) {
+                    badges_ = now;
+                    RenderTray();
+                }
+            }
             if (wp != kTimerWatch || place_.pinned || dropMode_ || menuOpen_ || drag_.item >= 0 || crumpleStart_) return 0;
             // Stays open while the pointer is over the bookmark or the tray; goes away shortly after it leaves.
             POINT c;
@@ -1289,7 +1388,18 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
             POINT p{};
             DragQueryPoint(drop, &p);
             std::vector<std::wstring> paths = DroppedPaths(drop);  // releases the drop
-            Pile* pile = PileAt(ItemAt(p));
+            int item = ItemAt(p);
+            if (item == kItemDock || item >= kItemMessenger) {  // a program or its shortcut, for the messenger dock
+                for (const std::wstring& path : paths) {
+                    Messenger m;
+                    if (MessengerFromFile(path, m)) AddMessenger(m);
+                }
+                filesDrag_ = false;
+                DragEnd();
+                RenderTray();
+                return 0;
+            }
+            Pile* pile = PileAt(item);
             filesDrag_ = false;
             DragEnd();
             if (pile && !paths.empty()) host_.OnOrganizerFilesDropped(*pile, paths);
@@ -1304,8 +1414,19 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
             HidePeek();
             menuOpen_ = true;
             auto alive = alive_;
-            if (item >= kItemMemo && item < kItemPlus) MemoMenu(item - kItemMemo, c);
-            else host_.OnOrganizerMenu(PileAt(item), c);  // may rebuild or remove the organizer
+            if (item >= kItemMessenger && item - kItemMessenger < (int)messengers_.size()) {
+                int i = item - kItemMessenger;
+                UINT id = ShowMenu({{1, L"열기"}, {0, L""}, {2, L"메신저에서 빼기", L"앱은 그대로"}}, c);
+                if (id == 1) OpenMessenger(messengers_[i]);
+                else if (id == 2) {
+                    messengers_.erase(messengers_.begin() + i);
+                    SaveMessengers(messengers_);
+                }
+            } else if (item >= kItemMemo && item < kItemPlus) {
+                MemoMenu(item - kItemMemo, c);
+            } else {
+                host_.OnOrganizerMenu(PileAt(item), c);  // may rebuild or remove the organizer
+            }
             if (!*alive) return 0;
             menuOpen_ = false;
             outsideSince_ = 0;

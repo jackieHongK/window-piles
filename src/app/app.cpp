@@ -616,6 +616,12 @@ void App::OnDragDrop(HWND hwnd, const WINDOWPLACEMENT& before, POINT cursor, Dro
         TakeOut(hwnd, before);
         return;
     }
+    // Over the organizer's messenger dock: its app is kept there; the window goes back where it was.
+    if (zone == DropZone::None && organizer_ && organizer_->DropWindowOnDock(hwnd, cursor)) {
+        Log("drop: window's app kept in the messenger dock");
+        RestoreWindow(hwnd, before, false);
+        return;
+    }
     bool canPile = CanPile(hwnd);
     bool onBar = zone == DropZone::NewPile;
     Pile* target = onBar ? nullptr : PileAt(cursor);

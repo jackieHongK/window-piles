@@ -13,6 +13,8 @@
 //      (what "＋ 새 메모" becomes while a memo is carried) → its file is gone
 //   8. with A and B both in the organizer, drag A below B → the new order is saved
 //   9. pin the tray, then open B from it    → the tray stays out (and pinned is saved); unpin it again
+//  10. with the test windows' program kept in the messenger dock, minimize B's window and click its tile
+//      → the window is brought back up
 #include "poc_common.h"
 
 #include <cstring>
@@ -283,7 +285,8 @@ int wmain(int argc, wchar_t** argv) {
     RECT tr{};
     if (tray) GetClientRect(tray, &tr);
     int bottom = tray ? MulDiv(tr.bottom, 96, GetDpiForWindow(tray)) : 0, mid = tray ? MulDiv(tr.right / 2, 96, GetDpiForWindow(tray)) : 0;
-    int plusY = bottom - 14 - 18, memo2Y = bottom - 14 - 36 - 6 - 32 + 13, memo1Y = memo2Y - 32;
+    // (between the flags and the button: 6, the messenger dock's label 22 + 6 and its 44-high tiles + 12)
+    int plusY = bottom - 14 - 18, memo2Y = bottom - 14 - 36 - 12 - 44 - 28 - 6 - 32 + 13, memo1Y = memo2Y - 32;
     if (tray) DragInTray(tray, {mid, memo1Y}, {mid, memo2Y});
     Check(!first.empty() && MemoOrder().rfind(FileName(first) + L"|", 0) == 0, "7) 메모 카드를 끌어 순서를 바꾸면 그 순서가 기억됨");
     if (tray) DragInTray(tray, {mid, memo1Y}, {mid, plusY});
@@ -320,6 +323,10 @@ int wmain(int argc, wchar_t** argv) {
                      state.find("\"dockOrder\":0", b) != std::string::npos;
     if (!reordered) Print("   state: %s\n", state.c_str());
     Check(d != std::string::npos && reordered, "8) 오거나이저 안에서 더미 카드를 끌어 순서를 바꾸면 저장됨");
+    // For step 10: the test windows' program kept in the messenger dock (exe \t shortcut \t app id \t name).
+    std::wstring ini = DataDir() + L"\\organizer.ini";
+    WritePrivateProfileStringW(L"messengers", L"count", L"1", ini.c_str());
+    WritePrivateProfileStringW(L"messengers", L"0", (g_bin + L"\\TestWindows.exe\t\t\tTestWindows").c_str(), ini.c_str());
     app = Launch(appExe, L"--autostart");
     PumpUntil([&] { return FindWindowW(L"WindowPilesMain", nullptr) != nullptr; }, 8000);
     PumpFor(500);
@@ -341,6 +348,18 @@ int wmain(int argc, wchar_t** argv) {
     PumpFor(300);
     GetPrivateProfileStringW(L"organizer", L"pinned", L"", pinned, 8, (DataDir() + L"\\organizer.ini").c_str());
     Check(pinned[0] == L'0', "9) 핀을 빼면 저장된 상태도 풀림");
+
+    // 10) the messenger dock: B's window (TestWindows, kept in the dock) minimized, then its tile clicked → it is
+    //     brought back up. The first tile is 22 in from the cards' left (38 + 22), 12 + 22 above the button.
+    ShowWindow(w[2], SW_MINIMIZE);
+    PumpFor(400);
+    tray = OpenTray();
+    if (tray) {
+        GetClientRect(tray, &tr);
+        int tb = MulDiv(tr.bottom, 96, GetDpiForWindow(tray));
+        DragInTray(tray, {38 + 22, tb - 14 - 36 - 12 - 22}, {38 + 22, tb - 14 - 36 - 12 - 22});
+    }
+    Check(PumpUntil([&] { return !IsIconic(w[2]); }, 3000), "10) 메신저 칸의 앱을 누르면 그 앱 창이 다시 올라옴");
 
     PostMessageW(FindWindowW(L"WindowPilesMain", nullptr), WM_ENDSESSION, TRUE, 0);
     WaitForSingleObject(app, 5000);

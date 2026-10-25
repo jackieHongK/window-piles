@@ -18,6 +18,7 @@
 #include "common/canvas.h"
 #include "groups/pile.h"
 #include "notes/memo_store.h"
+#include "surface/messenger.h"
 
 namespace wp {
 
@@ -86,6 +87,8 @@ public:
     void SetVisible(bool show);  // "숨기기" in the tray icon menu
     RECT HandleRect() const;            // screen px: where folding/opening animations meet the tray
     Pile* PileAtScreen(POINT pt);       // the pile whose card in the open tray is at `pt`
+    // A window let go at `pt` over the messenger dock: its app is kept there. True if it was over the dock.
+    bool DropWindowOnDock(HWND hwnd, POINT pt);
     const Place& place() const { return place_; }
 
 private:
@@ -98,6 +101,7 @@ private:
         RECT logo{};
         int slotTop = 0, slots = 0, more = 0;  // more: piles that don't fit on this screen
         int memoLabelY = 0, flagTop = 0, flagCount = 0, flagMore = 0;
+        int dockLabelY = 0, dockTop = 0;  // the messenger dock
         RECT plus{};
         RECT handle{};          // the bookmark, pulled out with the tray
     };
@@ -126,6 +130,8 @@ private:
     Pile* PileAt(int item);
     void Activate(int item, POINT screenPt);  // a click on an item
     void MemoMenu(int memo, POINT screenPt);
+    bool AddMessenger(const Messenger& m);  // kept (and saved) unless it's there already or the dock is full
+    void DrawDock(Canvas& c, const Geometry& g);
     void DrawBookmark(Canvas& c, const RECT& r, bool hot, bool body = true);  // body = false: grips and count only
     void DrawPileCard(Canvas& c, const RECT& card, Pile& p, bool hot);
     void DrawFlag(Canvas& c, const RECT& flag, const MemoInfo& m, bool hot);
@@ -196,6 +202,12 @@ private:
     std::vector<MemoInfo> memos_;
     std::vector<RECT> memoRects_;
     RECT plusRect_{}, memoMoreRect_{};
+    // The messenger dock (surface/messenger.h): its apps, their tiles, and what their badges said last.
+    std::vector<Messenger> messengers_;
+    std::vector<RECT> messengerRects_;
+    RECT dockRect_{};
+    std::wstring badges_;
+    int watchTicks_ = 0;
 };
 
 }  // namespace wp
