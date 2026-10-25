@@ -21,6 +21,17 @@
 
 namespace wp {
 
+// What the organizer (the drawer and its bookmark) can be made of: walnut, and five paid materials (all
+// selectable during the beta). Ids are material ids (ui/material.h).
+struct OrganizerMaterial {
+    const wchar_t* name;
+    const char* id;
+};
+inline constexpr OrganizerMaterial kOrganizerMaterials[] = {
+    {L"월넛 원목", "walnut"},  {L"오크 원목", "oak"},     {L"블랙 애시", "black-ash"},
+    {L"헤어라인 알루미늄", "aluminum"}, {L"무광 아크릴", "acrylic"}, {L"그레이 펠트", "felt-gray"},
+};
+
 class OrganizerHost {
 public:
     virtual ~OrganizerHost() = default;
@@ -43,6 +54,7 @@ public:
         int yPermille = 500;  // bookmark center, as a share of the monitor's work-area height
         std::wstring monitor;  // device name (\\.\DISPLAY1); empty or unknown → primary monitor
         bool slide = true;     // the tray slides out (240 ms) rather than just appearing
+        std::string material = "walnut";  // one of kOrganizerMaterials
     };
 
     Organizer(OrganizerHost& host, const Place& place);
@@ -58,6 +70,7 @@ public:
     // A window is being dragged while a pile is open: the tray comes out and stays out until the drag ends.
     void OpenForAdd();
     void SetSlide(bool on) { place_.slide = on; }
+    void SetMaterial(const std::string& id);
     bool IsDropTarget(POINT pt) const;  // dropping a card here keeps it in the tray
     // How many piles it holds: like a real tray it has a fixed number of slots, as many as fit in 60% of
     // the screen's height (at least 2). A card dropped on a full tray stays on the desktop.
@@ -114,6 +127,8 @@ private:
     void DrawFlag(Canvas& c, const RECT& flag, const MemoInfo& m, bool hot);
     void DrawTrash(Canvas& c, const RECT& area, double now);
     void EndDrag(POINT client);
+    int Mat() const;       // the material, as an index into kMaterials
+    COLORREF Ink() const;  // labels, grips and lines on it: cream on dark materials, ink on light ones
     void PresentTray();  // trayCanvas_ where the tray is, or on its way out while it slides
     // Hovering a memo flag: the memo unfolds to the side of the tray (from under it) to be read at a glance.
     void ShowPeek(int memo);

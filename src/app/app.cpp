@@ -66,6 +66,7 @@ enum MenuId : UINT {
     kMenuMemoFolder,
     kMenuOnTop,
     kMenuHideUi,
+    kMenuOrganizerMaterial = 1000,  // ... + index into kOrganizerMaterials
 };
 
 std::wstring FileName(const std::wstring& path) {
@@ -227,6 +228,8 @@ Organizer::Place LoadOrganizerPlace() {
     GetPrivateProfileStringW(L"organizer", L"monitor", L"", buf, 64, ini.c_str());
     p.monitor = buf;
     p.slide = GetPrivateProfileIntW(L"organizer", L"slide", 1, ini.c_str()) != 0;
+    GetPrivateProfileStringW(L"organizer", L"material", L"walnut", buf, 64, ini.c_str());
+    p.material = Utf8(buf);
     return p;
 }
 
@@ -236,6 +239,7 @@ void SaveOrganizerPlace(const Organizer::Place& p) {
     WritePrivateProfileStringW(L"organizer", L"y", std::to_wstring(p.yPermille).c_str(), ini.c_str());
     WritePrivateProfileStringW(L"organizer", L"monitor", p.monitor.c_str(), ini.c_str());
     WritePrivateProfileStringW(L"organizer", L"slide", p.slide ? L"1" : L"0", ini.c_str());
+    WritePrivateProfileStringW(L"organizer", L"material", Widen(p.material).c_str(), ini.c_str());
 }
 
 void SetFlag(const wchar_t* name, bool on) {
@@ -1531,10 +1535,22 @@ void App::OnOrganizerMenu(Pile* pile, POINT pt) {
     std::vector<MenuItem> items = {
         {kMenuOrganizerSlide, L"서랍이 스르륵 열리기", slide ? L"켜짐 ✓" : L"꺼짐 · 바로 나타나요"},
         {kMenuMemoFolder, L"메모 폴더 열기", L".txt 파일"},
+        {},
         {kMenuOrganizerSide, right ? L"왼쪽 가장자리로 옮기기" : L"오른쪽 가장자리로 옮기기"},
         {kMenuOrganizer, L"가장자리 오거나이저 끄기", L"카드는 바탕화면으로"},
     };
+    // What it is made of: walnut, or one of the paid materials (all of them free during the beta).
+    std::string mat = organizer_->place().material;
+    for (int i = 0; i < (int)std::size(kOrganizerMaterials); ++i)
+        items.push_back({(UINT)(kMenuOrganizerMaterial + i), std::wstring(L"재질 · ") + kOrganizerMaterials[i].name,
+                         mat == kOrganizerMaterials[i].id ? L"✓" : i ? L"유료 · 베타 동안 무료" : L"기본"});
     UINT id = ShowMenu(items, pt);
+    if (id >= kMenuOrganizerMaterial && id < kMenuOrganizerMaterial + std::size(kOrganizerMaterials) && organizer_) {
+        Organizer::Place place = organizer_->place();
+        place.material = kOrganizerMaterials[id - kMenuOrganizerMaterial].id;
+        SaveOrganizerPlace(place);
+        organizer_->SetMaterial(place.material);
+    }
     if (id == kMenuMemoFolder) ShellExecuteW(nullptr, L"open", MemoDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     if (id == kMenuOrganizerSlide && organizer_) {
         Organizer::Place place = organizer_->place();

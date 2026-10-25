@@ -64,7 +64,6 @@ constexpr int kFlagColorCount = sizeof(kFlagColors) / sizeof(kFlagColors[0]);
 
 COLORREF FlagColorOf(const MemoInfo& m) { return kFlagColors[std::clamp(m.color, 0, kFlagColorCount - 1)].color; }
 
-int WalnutIndex() { return MaterialFromId("walnut"); }
 
 HWND MakeWindow(const wchar_t* cls, WNDPROC proc, void* self, const wchar_t* title) {
     WNDCLASSW wc{};
@@ -164,6 +163,15 @@ void Organizer::Layout() {
 }
 
 RECT Organizer::HandleRect() const { return handleRect_; }
+
+int Organizer::Mat() const { return MaterialFromId(place_.material.c_str()); }
+
+COLORREF Organizer::Ink() const { return kMaterials[Mat()].dark ? kCream : RGB(58, 50, 42); }
+
+void Organizer::SetMaterial(const std::string& id) {
+    place_.material = id;
+    Refresh();
+}
 
 int Organizer::Capacity() const {
     auto S = [this](int v) { return Scale(v, dpi_); };
@@ -277,13 +285,13 @@ void Organizer::DrawBookmark(Canvas& c, const RECT& b, bool hot) {
     auto S = [this](int v) { return Scale(v, dpi_); };
     int w = b.right - b.left, h = b.bottom - b.top, r = S(7);
     RECT body = place_.right ? RECT{b.left, b.top, b.right + r, b.bottom} : RECT{b.left - r, b.top, b.right, b.bottom};
-    FillMaterial(c, body, r, WalnutIndex(), dpi_);
+    FillMaterial(c, body, r, Mat(), dpi_);
     if (hot) c.FillRoundRect(body, r, RGB(255, 255, 255), 30);
     int gx = place_.right ? b.left + S(5) : b.right - S(10);
     for (int i = -1; i <= 1; ++i)
-        c.FillRoundRect({gx, b.top + h / 2 + i * S(6) - S(1), gx + S(5), b.top + h / 2 + i * S(6) + S(1)}, S(1), kCream, 200);
+        c.FillRoundRect({gx, b.top + h / 2 + i * S(6) - S(1), gx + S(5), b.top + h / 2 + i * S(6) + S(1)}, S(1), Ink(), 200);
     size_t n = host_.OrganizerPiles().size();
-    if (n) c.Text(std::to_wstring(n), {b.left, b.top + S(8), b.left + w, b.top + S(22)}, kCream, S(10), true,
+    if (n) c.Text(std::to_wstring(n), {b.left, b.top + S(8), b.left + w, b.top + S(22)}, Ink(), S(10), true,
                   DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 }
 
@@ -355,7 +363,7 @@ void Organizer::DrawPileCard(Canvas& c, const RECT& card, Pile& p, bool hot) {
         if (kMaterials[ClampMaterial(p.material)].translucent) c.FillRoundRect(strip, r, RGB(250, 251, 253));
         c.Text(t, strip, dark ? RGB(228, 220, 209) : kSubtleFg, S(12), false, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     }
-    if (hot) c.StrokeRoundRect(card, r, S(2), kCream);
+    if (hot) c.StrokeRoundRect(card, r, S(2), Ink());
 }
 
 // A Post-it index flag: a paper label with the memo's title in the middle of its height, and the colored
@@ -373,7 +381,7 @@ void Organizer::DrawFlag(Canvas& c, const RECT& flag, const MemoInfo& m, bool ho
     RECT text{label.left + S(10), label.top, label.right - S(10), label.bottom};
     c.Text(m.title.empty() ? L"빈 메모" : m.title, text, m.title.empty() ? kMutedFg : kForeground, S(12), !m.title.empty(),
            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-    if (hot) c.StrokeRoundRect(flag, S(2), S(2), kCream);
+    if (hot) c.StrokeRoundRect(flag, S(2), S(2), Ink());
 }
 
 // The trash can "＋ 새 메모" turns into while a memo is carried. A memo dropped in is slowly crumpled into
@@ -385,7 +393,7 @@ void Organizer::DrawTrash(Canvas& c, const RECT& area, double now) {
     constexpr double kPi = 3.14159265358979;
     double t = crumpleStart_ ? std::min(1.0, (now - crumpleStart_) / kCrumpleMs) : -1;  // 0..1 while crumpling
     if (drag_.overTrash) c.FillRoundRect(area, (int)S(8), RGB(255, 255, 255), 40);
-    c.DashedRoundRect(area, (int)S(8), (int)S(1) + drag_.overTrash, (int)S(5), (int)S(4), kCream, drag_.overTrash ? 230 : 150);
+    c.DashedRoundRect(area, (int)S(8), (int)S(1) + drag_.overTrash, (int)S(5), (int)S(4), Ink(), drag_.overTrash ? 230 : 150);
 
     float cx = area.left + S(34), bottom = area.bottom - S(7), mouth = bottom - S(19);
     float bounce = t >= kLandAt ? S(2) * (float)std::sin((t - kLandAt) / (1 - kLandAt) * kPi) : 0;
@@ -422,7 +430,7 @@ void Organizer::DrawTrash(Canvas& c, const RECT& area, double now) {
     }
     // The can: a tapered bucket with three ribs.
     c.FillPolygons({{{cx - S(9), mouth + bounce}, {cx + S(9), mouth + bounce}, {cx + S(7), bottom + bounce}, {cx - S(7), bottom + bounce}}},
-                   kCream, 235);
+                   Ink(), 235);
     for (int i = -1; i <= 1; ++i)
         c.FillRoundRect({(int)(cx + i * S(4)), (int)(mouth + bounce + S(4)), (int)(cx + i * S(4) + S(1)), (int)(bottom + bounce - S(3))},
                         0, RGB(150, 110, 80), 170);
@@ -436,10 +444,10 @@ void Organizer::DrawTrash(Canvas& c, const RECT& area, double now) {
         return out;
     };
     c.FillPolygons({lid({{-S(22), -S(3)}, {0.f, -S(3)}, {0.f, 0.f}, {-S(22), 0.f}}), lid({{-S(15), -S(5)}, {-S(7), -S(5)}, {-S(7), -S(3)}, {-S(15), -S(3)}})},
-                   kCream, 235);
+                   Ink(), 235);
 
     std::wstring label = t >= 0 ? L"휴지통에 버렸어요" : drag_.overTrash ? L"놓으면 휴지통으로" : L"여기에 놓아 버리기";
-    c.Text(label, {(int)(cx + S(22)), area.top, area.right - (int)S(10), area.bottom}, kCream, (int)S(12), true,
+    c.Text(label, {(int)(cx + S(22)), area.top, area.right - (int)S(10), area.bottom}, Ink(), (int)S(12), true,
            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 }
 
@@ -457,7 +465,7 @@ void Organizer::RenderTray(bool present) {
     Canvas& c = *trayCanvas_;
     int r = S(12);
     RECT body = place_.right ? RECT{g.bodyLeft, 0, g.w + r, g.h} : RECT{-r, 0, g.bodyRight, g.h};
-    FillMaterial(c, body, r, WalnutIndex(), dpi_);
+    FillMaterial(c, body, r, Mat(), dpi_);
     // A light rim along the tray's outline (the part off the screen edge isn't drawn).
     RECT rim = body;
     InflateRect(&rim, -1, -1);
@@ -472,15 +480,19 @@ void Organizer::RenderTray(bool present) {
         std::wstring label = dropAdd_ ? L"더미 카드 위에 놓으면 그 더미에 들어가요"
                              : full   ? L"자리가 없어요 · " + std::to_wstring(g.slots) + L"칸이 다 찼어요"
                                       : L"빈 칸에 놓으면 그 자리에 꽂혀요";
-        c.Text(label, g.logo, kCream, S(12), true, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        c.Text(label, g.logo, Ink(), S(12), true, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     } else {
         int lh = S(15), ly = g.logo.top + (g.logo.bottom - g.logo.top - lh) / 2;
-        DrawWordmark(c, g.logo.left, ly + 1, lh, RGB(160, 118, 86));  // the lit lower edge of the cut
-        DrawWordmark(c, g.logo.left, ly, lh, RGB(56, 34, 22));         // the cut itself
+        COLORREF base = kMaterials[Mat()].base;
+        // A cut is darker than the surface, its lower edge lit; in near-black stained wood (black ash) the cut
+        // shows the paler wood under the stain instead, its lower edge in shadow.
+        bool deep = 0.2126 * GetRValue(base) + 0.7152 * GetGValue(base) + 0.0722 * GetBValue(base) < 70;
+        DrawWordmark(c, g.logo.left, ly + 1, lh, deep ? Mix(base, RGB(0, 0, 0), 0.6) : Mix(base, RGB(255, 255, 255), 0.35));
+        DrawWordmark(c, g.logo.left, ly, lh, deep ? Mix(base, RGB(255, 255, 255), 0.22) : Mix(base, RGB(0, 0, 0), 0.5));
     }
     if (dropMode_ && !dropAdd_ && !full) {
         RECT o{g.bodyLeft + S(4), S(4), g.bodyRight - S(4), g.h - S(4)};
-        c.DashedRoundRect(o, S(10), S(2), S(6), S(4), kCream, 200);
+        c.DashedRoundRect(o, S(10), S(2), S(6), S(4), Ink(), 200);
     }
 
     // Slots: every one drawn, filled or not. A pile sits in the one it was put in.
@@ -513,7 +525,7 @@ void Organizer::RenderTray(bool present) {
             if (target) c.FillRoundRect(sr, S(2), RGB(255, 255, 255), 45);
             if (pileCount == 0 && s == 0)
                 c.Text(L"바탕화면의 더미 카드를 이 막대로 끌어 와 빈 칸에 놓으면 꽂혀요.", {sr.left + S(12), sr.top, sr.right - S(12), sr.bottom},
-                       RGB(222, 206, 190), S(12), false, DT_LEFT | DT_VCENTER | DT_WORDBREAK);
+                       Mix(Ink(), kMaterials[Mat()].base, 0.2), S(12), false, DT_LEFT | DT_VCENTER | DT_WORDBREAK);
         }
     }
     for (size_t i = 0; i < cardIds_.size(); ++i) {
@@ -526,7 +538,7 @@ void Organizer::RenderTray(bool present) {
     int y = g.slotTop + g.slots * unit - S(kCardGap);
     if (g.more)
         c.Text(L"이 화면에 다 못 놓은 더미 " + std::to_wstring(g.more) + L"개", {g.cardX, y, g.cardX + S(kCardW), y + S(kMoreH)},
-               kCream, S(12), false, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+               Ink(), S(12), false, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     // Memos: Post-it flags, in the order they were arranged; the carried one leaves a gap where it would go.
     int draggedMemo = drag_.item >= kItemMemo && drag_.item - kItemMemo < g.flagCount ? drag_.item - kItemMemo : -1;
@@ -535,7 +547,7 @@ void Organizer::RenderTray(bool present) {
     memoRects_.clear();
     if (g.flagCount)
         c.Text(L"메모 · " + std::to_wstring(memos_.size()) + L"개", {g.cardX, g.memoLabelY, g.cardX + S(kCardW), g.memoLabelY + S(kMemoLabelH)},
-               kCream, S(12), true, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+               Ink(), S(12), true, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     for (int i = 0; i < g.flagCount; ++i) {
         int k = i;
         if (draggedMemo >= 0) {
@@ -556,7 +568,7 @@ void Organizer::RenderTray(bool present) {
     if (g.flagMore) {
         int my = g.flagTop + g.flagCount * flagUnit;
         memoMoreRect_ = {g.cardX, my, g.cardX + S(kCardW), my + S(kMoreH)};
-        c.Text(L"메모 " + std::to_wstring(g.flagMore) + L"개 더 · 폴더 열기", memoMoreRect_, kCream, S(12), hover_ == kItemMemoMore,
+        c.Text(L"메모 " + std::to_wstring(g.flagMore) + L"개 더 · 폴더 열기", memoMoreRect_, Ink(), S(12), hover_ == kItemMemoMore,
                DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     }
     // "＋ 새 메모", as wide as a card; the trash can while a memo is carried or going in.
@@ -566,8 +578,8 @@ void Organizer::RenderTray(bool present) {
     } else {
         bool hot = hover_ == kItemPlus;
         if (hot) c.FillRoundRect(g.plus, S(8), RGB(255, 255, 255), 36);
-        c.DashedRoundRect(g.plus, S(8), S(1) + hot, S(5), S(4), kCream, hot ? 230 : 150);
-        c.Text(L"＋  새 메모", g.plus, kCream, S(12), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        c.DashedRoundRect(g.plus, S(8), S(1) + hot, S(5), S(4), Ink(), hot ? 230 : 150);
+        c.Text(L"＋  새 메모", g.plus, Ink(), S(12), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
     // The carried card or flag, on top of everything, following the pointer.

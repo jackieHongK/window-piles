@@ -38,6 +38,9 @@ constexpr Material kMaterials[] = {
     {L"콘크리트 (실험)", "concrete", RGB(178, 176, 171), false, true, false},
     {L"오크 원목 (실험)", "oak", RGB(198, 160, 116), false, true, false},
     {L"월넛 원목 (실험)", "walnut", RGB(114, 80, 57), true, true, false},  // the scan's middle tone
+    {L"블랙 애시 (실험)", "black-ash", RGB(50, 46, 43), true, true, false},     // ash stained near black, grain showing
+    {L"무광 아크릴 (실험)", "acrylic", RGB(232, 234, 236), false, true, false},  // frosted, matte
+    {L"그레이 펠트 (실험)", "felt-gray", RGB(128, 128, 125), true, true, false},
 };
 constexpr int kMaterialCount = sizeof(kMaterials) / sizeof(kMaterials[0]);
 

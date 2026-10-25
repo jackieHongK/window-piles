@@ -86,7 +86,8 @@ float Pattern(const char* id, int x, int y, float k, COLORREF& tint, float& tint
     if (is("aluminum")) return Generic({0.012f, 0.050f, 90, 1, 0, 0, 0, 0, 0}, x, y, k);
     if (is("titanium")) return Generic({0.035f, 0.012f, 6, 6, 0, 0, 0, 0, 0}, x, y, k);
     if (is("ceramic")) return Generic({0.002f, 0.004f, 24, 24, 0, 0, 0, 0, 0}, x, y, k);
-    if (is("felt")) return Generic({0.070f, 0.040f, 4, 4, 0.01f, 0.10f, 0.01f, 0.10f, 0}, x, y, k);
+    if (is("felt") || is("felt-gray")) return Generic({0.070f, 0.040f, 4, 4, 0.01f, 0.10f, 0.01f, 0.10f, 0}, x, y, k);
+    if (is("acrylic")) return Generic({0.010f, 0.018f, 26, 26, 0, 0, 0.002f, 0.03f, 0}, x, y, k);  // a fine frost
     if (is("cork")) return Generic({0.050f, 0.140f, 2, 2, 0.06f, 0.30f, 0.03f, 0.12f, 0}, x, y, k);
     if (is("concrete")) return Generic({0.030f, 0.080f, 14, 14, 0.015f, 0.35f, 0.004f, 0.08f, 0}, x, y, k);
     if (is("brass")) return Generic({0.010f, 0.060f, 120, 1, 0, 0, 0, 0, 0}, x, y, k);
@@ -111,11 +112,11 @@ float Pattern(const char* id, int x, int y, float k, COLORREF& tint, float& tint
         bool over = ((x / t) + (y / t)) & 1;
         return (over ? row : col) * 0.10f + (ValueNoise(x, y, (int)(30 * k), (int)(3 * k), 13) - 0.5f) * 0.06f;
     }
-    if (is("oak")) {
-        // Long grain lines along x, wavy, with darker latewood bands.
+    if (is("oak") || is("black-ash")) {
+        // Long grain lines along x, wavy, with darker latewood bands (ash: the stain gathers in them).
         float g = std::sin(y / (2.2f * k) + 9.0f * Fbm(x / 6, y, (int)(40 * k), 21));
-        return 0.06f * g - 0.08f * std::pow(std::max(0.0f, g), 8.0f) +
-               (ValueNoise(x, y, (int)(80 * k), 1, 22) - 0.5f) * 0.05f;
+        float bands = is("black-ash") ? 0.22f : 0.08f;
+        return 0.06f * g - bands * std::pow(std::max(0.0f, g), 8.0f) + (ValueNoise(x, y, (int)(80 * k), 1, 22) - 0.5f) * 0.05f;
     }
     if (is("hologram")) {
         // Iridescent foil: a diagonal rainbow, bent by noise, over brushed silver.
@@ -168,7 +169,9 @@ void FillMaterial(Canvas& c, const RECT& r, int radius, int m, UINT dpi) {
 
     float sheen = std::strcmp(mat.id, "aluminum") == 0 || std::strcmp(mat.id, "brass") == 0 ? 0.05f
                   : std::strcmp(mat.id, "leather") == 0 || std::strcmp(mat.id, "hologram") == 0 ? 0.06f
-                  : std::strcmp(mat.id, "titanium") == 0 || std::strcmp(mat.id, "ceramic") == 0 ? 0.04f
+                  : std::strcmp(mat.id, "titanium") == 0 || std::strcmp(mat.id, "ceramic") == 0 ||
+                            std::strcmp(mat.id, "acrylic") == 0
+                        ? 0.04f
                                                                                                     : 0.0f;
     for (int y = y0; y < y1; ++y) {
         float sh = sheen * (0.5f - (y - r.top) / h) * 2;
