@@ -55,18 +55,14 @@ enum MenuId : UINT {
     kMenuDissolve,
     kMenuClearMissing,
     kMenuRestoreAll,
-    kMenuAutostart,
-    kMenuHelp,
+    kMenuHelp,  // 설정 · 사용법
     kMenuQuit,
     kMenuStats,
     kMenuDock,
     kMenuOrganizer,
-    kMenuOrganizerSide,
-    kMenuOrganizerSlide,
     kMenuMemoFolder,
     kMenuOnTop,
     kMenuHideUi,
-    kMenuOrganizerMaterial = 1000,  // ... + index into kOrganizerMaterials
 };
 
 std::wstring FileName(const std::wstring& path) {
@@ -293,7 +289,47 @@ int App::Run() {
     Log("run: main window %p", main_);
     AddTrayIcon();
     Log("run: tray icon added");
-    guide_ = std::make_unique<GuideWindow>();
+    // 설정 · 사용법: reads the settings as they are, and applies what was changed there.
+    guide_ = std::make_unique<GuideWindow>(
+        [this] {
+            AppSettings s;
+            s.autostart = AutostartEnabled();
+            s.shown = !uiHidden_;
+            s.organizer = organizer_ != nullptr;
+            Organizer::Place p = organizer_ ? organizer_->place() : LoadOrganizerPlace();
+            s.right = p.right;
+            s.slide = p.slide;
+            s.material = p.material;
+            s.memoDir = MemoDir();
+            return s;
+        },
+        [this](const AppSettings& s) {
+            if (s.autostart != AutostartEnabled()) {
+                SetAutostart(s.autostart);
+                SetFlag(L"autostart.off", !s.autostart);  // remember the user's choice across launches
+            }
+            if (s.shown == uiHidden_) SetUiHidden(!s.shown);
+            if (s.organizer != (organizer_ != nullptr)) {
+                SetOrganizer(s.organizer);
+                SetFlag(L"organizer.off", !s.organizer);
+            }
+            Organizer::Place place = organizer_ ? organizer_->place() : LoadOrganizerPlace();
+            bool moved = place.right != s.right;
+            if (!moved && place.slide == s.slide && place.material == s.material) return;
+            place.right = s.right;
+            place.slide = s.slide;
+            place.material = s.material;
+            SaveOrganizerPlace(place);
+            if (!organizer_) return;
+            if (moved) {
+                organizer_ = std::make_unique<Organizer>(*this, place);  // rebuilt on the other edge
+                if (uiHidden_) organizer_->SetVisible(false);
+                organizer_->Refresh();
+            } else {
+                organizer_->SetSlide(s.slide);
+                organizer_->SetMaterial(s.material);
+            }
+        });
 
     // Start with Windows unless the user turned it off; refresh the path (the exe may have moved
     // with an update).
@@ -1399,23 +1435,22 @@ void App::Notify(const std::wstring& title, const std::wstring& text) {
     Shell_NotifyIconW(NIM_MODIFY, &n);
 }
 
-void App::ShowGuide() { guide_->Show(); }
+void App::ShowGuide() { guide_->Show(GuideWindow::Tab::Usage); }
+
+void App::ShowSettings() { guide_->Show(GuideWindow::Tab::Settings); }
 
 void App::ShowTrayMenu() {
     POINT pt;
     GetCursorPos(&pt);
     int hidden = 0;
     for (auto& p : piles_) hidden += p->HiddenCount();
-    bool autostart = AutostartEnabled();
     std::vector<MenuItem> items = {
         {kMenuOnTop, L"항상 위로", uiHidden_ ? L"기본값" : L"✓"},
         {kMenuHideUi, L"숨기기", uiHidden_ ? L"✓" : L"카드·오거나이저 잠시 치우기"},
         {},
         {kMenuRestoreAll, L"모든 창 꺼내기", hidden ? std::to_wstring(hidden) + L"개" : L"", hidden == 0},
         {kMenuStats, L"작업 기록", L"오늘 쓴 시간"},
-        {kMenuAutostart, L"Windows 시작 시 자동 실행", autostart ? L"켜짐 ✓" : L"꺼짐"},
-        {kMenuOrganizer, L"가장자리 오거나이저", organizer_ ? L"켜짐 ✓" : L"꺼짐"},
-        {kMenuHelp, L"사용법"},
+        {kMenuHelp, L"설정 · 사용법"},
         {},
         {kMenuQuit, L"Neverflow 종료", L"창을 모두 꺼내요"},
     };
@@ -1423,14 +1458,7 @@ void App::ShowTrayMenu() {
     if (id == kMenuOnTop || id == kMenuHideUi) SetUiHidden(id == kMenuHideUi);
     else if (id == kMenuRestoreAll) RestoreAll();
     else if (id == kMenuStats) ShowStats();
-    else if (id == kMenuAutostart) {
-        SetAutostart(!autostart);
-        SetFlag(L"autostart.off", autostart);  // remember the user's choice across launches
-    } else if (id == kMenuOrganizer) {
-        bool on = organizer_ != nullptr;
-        SetOrganizer(!on);
-        SetFlag(L"organizer.off", on);
-    } else if (id == kMenuHelp) ShowGuide();
+    else if (id == kMenuHelp) ShowSettings();
     else if (id == kMenuQuit) Quit();
 }
 
@@ -1531,40 +1559,17 @@ void App::OnOrganizerMenu(Pile* pile, POINT pt) {
         return;
     }
     if (!organizer_) return;
-    bool right = organizer_->place().right, slide = organizer_->place().slide;
+    // Quick things here; side, slide, material and the rest are in 설정 · 사용법.
     std::vector<MenuItem> items = {
-        {kMenuOrganizerSlide, L"서랍이 스르륵 열리기", slide ? L"켜짐 ✓" : L"꺼짐 · 바로 나타나요"},
         {kMenuMemoFolder, L"메모 폴더 열기", L".txt 파일"},
+        {kMenuHelp, L"오거나이저 설정…", L"위치 · 재질 · 서랍"},
         {},
-        {kMenuOrganizerSide, right ? L"왼쪽 가장자리로 옮기기" : L"오른쪽 가장자리로 옮기기"},
         {kMenuOrganizer, L"가장자리 오거나이저 끄기", L"카드는 바탕화면으로"},
     };
-    // What it is made of: walnut, or one of the paid materials (all of them free during the beta).
-    std::string mat = organizer_->place().material;
-    for (int i = 0; i < (int)std::size(kOrganizerMaterials); ++i)
-        items.push_back({(UINT)(kMenuOrganizerMaterial + i), std::wstring(L"재질 · ") + kOrganizerMaterials[i].name,
-                         mat == kOrganizerMaterials[i].id ? L"✓" : i ? L"유료 · 베타 동안 무료" : L"기본"});
     UINT id = ShowMenu(items, pt);
-    if (id >= kMenuOrganizerMaterial && id < kMenuOrganizerMaterial + std::size(kOrganizerMaterials) && organizer_) {
-        Organizer::Place place = organizer_->place();
-        place.material = kOrganizerMaterials[id - kMenuOrganizerMaterial].id;
-        SaveOrganizerPlace(place);
-        organizer_->SetMaterial(place.material);
-    }
     if (id == kMenuMemoFolder) ShellExecuteW(nullptr, L"open", MemoDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-    if (id == kMenuOrganizerSlide && organizer_) {
-        Organizer::Place place = organizer_->place();
-        place.slide = !slide;
-        SaveOrganizerPlace(place);
-        organizer_->SetSlide(place.slide);
-    }
-    if (id == kMenuOrganizerSide && organizer_) {
-        Organizer::Place place = organizer_->place();
-        place.right = !right;
-        SaveOrganizerPlace(place);
-        organizer_ = std::make_unique<Organizer>(*this, place);  // rebuilt on the other edge
-        organizer_->Refresh();
-    } else if (id == kMenuOrganizer) {
+    else if (id == kMenuHelp) ShowSettings();
+    else if (id == kMenuOrganizer) {
         SetOrganizer(false);
         SetFlag(L"organizer.off", true);
     }

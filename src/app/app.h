@@ -137,7 +137,8 @@ private:
     // shell
     void AddTrayIcon();
     void ShowTrayMenu();
-    void ShowGuide();
+    void ShowGuide();     // 설정 · 사용법, on 사용법
+    void ShowSettings();  // ... on 설정
     void Notify(const std::wstring& title, const std::wstring& text);
     POINT NextSlot(POINT nearPt);
     std::wstring AutoName(const Pile& pile) const;
