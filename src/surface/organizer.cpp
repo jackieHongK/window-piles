@@ -480,8 +480,15 @@ void Organizer::RenderTray(bool present) {
     RECT rim = body;
     InflateRect(&rim, -1, -1);
     c.StrokeRoundRect(rim, r - 1, std::max(1, S(1)), RGB(255, 255, 255), 50);
+    // The bookmark gets the same rim on its outer sides; what of it (and of the tray's) runs where the two meet
+    // is mended away, so one outline goes round the whole piece.
+    RECT tabRim = tab;
+    InflateRect(&tabRim, -1, -1);
+    c.StrokeRoundRect(tabRim, hr - 1, std::max(1, S(1)), RGB(255, 255, 255), 50);
     int jx = place_.right ? g.bodyLeft : g.bodyRight;
-    FillMaterialShape(c, {{{jx - S(3), g.handle.top, jx + S(3), g.handle.bottom}, 0}}, body, Mat(), dpi_);
+    RECT joint = place_.right ? RECT{jx, g.handle.top, jx + hr + S(3), g.handle.bottom}
+                              : RECT{jx - hr - S(3), g.handle.top, jx, g.handle.bottom};
+    FillMaterialShape(c, {{joint, 0}}, body, Mat(), dpi_);
     DrawBookmark(c, g.handle, false, false);
 
     // The wordmark carved into the wood; while something is carried over it, what a drop would do.
@@ -509,8 +516,9 @@ void Organizer::RenderTray(bool present) {
         bool hot = hover_ == kItemPin;
         if (place_.pinned) c.FillRoundRect(pin, S(kPin) / 2, Ink(), hot ? 70 : 50);
         else if (hot) c.FillRoundRect(pin, S(kPin) / 2, Ink(), 28);
-        c.Glyph(place_.pinned ? 0xE841 : 0xE718, pin, place_.pinned || hot ? Ink() : Mix(Ink(), kMaterials[Mat()].base, 0.35),
-                S(14));  // PinnedFill / Pin
+        COLORREF ink = place_.pinned || hot ? Ink() : Mix(Ink(), kMaterials[Mat()].base, 0.35);
+        if (place_.pinned) c.Glyph(0xE841, pin, ink, S(14));  // PinnedFill: the head filled ...
+        c.Glyph(0xE718, pin, ink, S(14));                       // ... and the outline over it, so the needle shows
     }
     if (dropMode_ && !dropAdd_ && !full) {
         RECT o{g.bodyLeft + S(4), S(4), g.bodyRight - S(4), g.h - S(4)};
@@ -554,8 +562,12 @@ void Organizer::RenderTray(bool present) {
         if ((int)i == draggedPile) continue;
         RECT sr = SlotRect(g, cardSlots_[i]);
         bool hot = (int)i == hover_ && drag_.item < 0;
+        // The pile being worked on sits a little out of its slot toward the desktop (still in the tray), so it
+        // reads as the one taken out; hovered, any card comes out the whole way.
+        bool open = by[cardSlots_[i]]->active;
         if (hot) OffsetRect(&sr, g.slide, 0);
-        DrawPileCard(c, sr, *by[cardSlots_[i]], hot);
+        else if (open) OffsetRect(&sr, g.slide * 4 / 5, 0);
+        DrawPileCard(c, sr, *by[cardSlots_[i]], hot || open);
     }
     int y = g.slotTop + g.slots * unit - S(kCardGap);
     if (g.more)
