@@ -419,21 +419,20 @@ int wmain(int argc, wchar_t** argv) {
 
     // 12) folded, the pointer against the screen edge low down along the tray's height (away from the bookmark
     //     and the flags) opens it as well
-    if (HWND folded = FindWindowW(L"WindowPilesOrganizerTray", nullptr)) {
-        HWND tray = folded;
+    if (HWND drawer = FindWindowW(L"WindowPilesOrganizerTray", nullptr)) {
         RECT hr{}, wr{};
         GetWindowRect(FindWindowW(L"WindowPilesOrganizerHandle", nullptr), &hr);
-        GetWindowRect(tray, &wr);
-        if (IsWindowVisible(tray)) {  // pushed back in by its bookmark first
-            Click(tray, MAKELPARAM(MulDiv(7, GetDpiForWindow(tray), 96), (hr.top + hr.bottom) / 2 - wr.top));
-            PumpUntil([&] { return !IsWindowVisible(tray); }, 3000);
+        GetWindowRect(drawer, &wr);
+        if (IsWindowVisible(drawer)) {  // pushed back in by its bookmark first
+            Click(drawer, MAKELPARAM(MulDiv(7, GetDpiForWindow(drawer), 96), (hr.top + hr.bottom) / 2 - wr.top));
+            PumpUntil([&] { return !IsWindowVisible(drawer); }, 3000);
         }
         POINT was;
         GetCursorPos(&was);
         MONITORINFO mi{sizeof(mi)};
-        GetMonitorInfoW(MonitorFromWindow(tray, MONITOR_DEFAULTTONEAREST), &mi);
-        SetCursorPos(mi.rcMonitor.right - 1, wr.bottom - MulDiv(30, GetDpiForWindow(tray), 96));
-        Check(PumpUntil([&] { return IsWindowVisible(tray) != FALSE; }, 2000), "12) 접힌 상태에서 트레이 높이의 화면 끝에 커서를 대면 펼쳐짐");
+        GetMonitorInfoW(MonitorFromWindow(drawer, MONITOR_DEFAULTTONEAREST), &mi);
+        SetCursorPos(mi.rcMonitor.right - 1, wr.bottom - MulDiv(30, GetDpiForWindow(drawer), 96));
+        Check(PumpUntil([&] { return IsWindowVisible(drawer) != FALSE; }, 2000), "12) 접힌 상태에서 트레이 높이의 화면 끝에 커서를 대면 펼쳐짐");
         SetCursorPos(was.x, was.y);
     }
 

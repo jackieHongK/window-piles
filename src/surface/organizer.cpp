@@ -421,8 +421,8 @@ void Organizer::DrawFlag(Canvas& c, const RECT& flag, const MemoInfo& m, bool ho
     if (hot) c.StrokeRoundRect(flag, S(2), S(2), Ink());
 }
 
-// The trash can "＋ 새 메모" turns into while a memo is carried. A memo dropped in is slowly crumpled into
-// a ball above the open can, falls in, and the lid closes with a small bounce.
+// The trash can the dispenser's row turns into while a memo, messenger or clip is carried. What is dropped in
+// is slowly crumpled into a ball above the open can, falls in, and the lid closes with a small bounce.
 void Organizer::DrawTrash(Canvas& c, const RECT& area, double now) {
     using namespace theme;
     using PtF = Canvas::PtF;
