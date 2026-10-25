@@ -89,39 +89,9 @@ float Pattern(const char* id, int x, int y, float k, COLORREF& tint, float& tint
     if (is("felt") || is("felt-gray")) return Generic({0.070f, 0.040f, 4, 4, 0.01f, 0.10f, 0.01f, 0.10f, 0}, x, y, k);
     if (is("acrylic")) return Generic({0.010f, 0.018f, 26, 26, 0, 0, 0.002f, 0.03f, 0}, x, y, k);  // a fine frost
     if (is("acrylic-cobalt")) return Generic({0.004f, 0.010f, 40, 40, 0, 0, 0, 0, 0}, x, y, k);    // solid and glossy
-    if (is("quartz")) {
-        // White quartz with glitter: a soft cloud, and here and there a fleck that catches the light, some
-        // of them in a color.
-        float n = Generic({0.012f, 0.045f, 12, 12, 0.004f, 0.12f, 0, 0, 0}, x, y, k);
-        float s = Hash(x, y, 71);
-        if (s > 0.985f) n += 0.18f + 0.30f * (s - 0.985f) / 0.015f;
-        if (s > 0.996f) {
-            tint = Hue(Hash(x, y, 72));
-            tintAmount = 0.45f;
-        }
-        return n;
-    }
-    if (is("nacre")) {
-        // Mother-of-pearl: a pastel rainbow drifting in waves over a pearly white.
-        tint = Hue(0.55f + 0.30f * Fbm(x, y, (int)(70 * k), 81) + 0.08f * std::sin((x + y) / (22.0f * k)));
-        tintAmount = 0.22f;
-        return 0.05f * std::sin(y / (5.0f * k) + 6.0f * Fbm(x, y, (int)(50 * k), 82)) + (Hash(x, y, 83) - 0.5f) * 0.02f;
-    }
-    if (is("burl")) {
-        // Burl: grain swirled around knots and eyes.
-        float g = std::sin(55.0f * Fbm(x, y, (int)(28 * k), 41));
-        return 0.10f * g - 0.14f * std::pow(std::max(0.0f, g), 6.0f) + (Hash(x, y, 42) - 0.5f) * 0.03f;
-    }
-    if (is("onyx")) {
-        // Banded onyx: honey and cream layers flowing across the slab.
-        float g = std::sin(y * 0.045f / k + 7.0f * Fbm(x, y, (int)(60 * k), 51));
-        return 0.12f * g + (Fbm(x, y, (int)(20 * k), 52) - 0.5f) * 0.06f;
-    }
-    if (is("damascus")) {
-        // Damascus steel: folded layers rippling through the blade.
-        float g = std::sin((x * 0.05f + y * 0.02f) / k + 10.0f * Fbm(x, y, (int)(50 * k), 61));
-        return 0.16f * g * std::fabs(g) + (Hash(x, y, 62) - 0.5f) * 0.02f;
-    }
+    // Quartz, mother-of-pearl, burl, ebony, onyx and Damascus are clean solids in their color (with the sheen
+    // below where it fits): no pattern to read the cards against.
+    if (is("quartz") || is("nacre") || is("burl") || is("ebony") || is("onyx") || is("damascus")) return 0;
     if (is("cork")) return Generic({0.050f, 0.140f, 2, 2, 0.06f, 0.30f, 0.03f, 0.12f, 0}, x, y, k);
     if (is("concrete")) return Generic({0.030f, 0.080f, 14, 14, 0.015f, 0.35f, 0.004f, 0.08f, 0}, x, y, k);
     if (is("brass")) return Generic({0.010f, 0.060f, 120, 1, 0, 0, 0, 0, 0}, x, y, k);
@@ -146,11 +116,10 @@ float Pattern(const char* id, int x, int y, float k, COLORREF& tint, float& tint
         bool over = ((x / t) + (y / t)) & 1;
         return (over ? row : col) * 0.10f + (ValueNoise(x, y, (int)(30 * k), (int)(3 * k), 13) - 0.5f) * 0.06f;
     }
-    if (is("oak") || is("black-ash") || is("ebony")) {
-        // Long grain lines along x, wavy, with darker latewood bands (ash: the stain gathers in them; ebony:
-        // fine streaks in near-black).
+    if (is("oak") || is("black-ash")) {
+        // Long grain lines along x, wavy, with darker latewood bands (ash: the stain gathers in them).
         float g = std::sin(y / (2.2f * k) + 9.0f * Fbm(x / 6, y, (int)(40 * k), 21));
-        float bands = is("black-ash") ? 0.22f : is("ebony") ? 0.16f : 0.08f;
+        float bands = is("black-ash") ? 0.22f : 0.08f;
         return 0.06f * g - bands * std::pow(std::max(0.0f, g), 8.0f) + (ValueNoise(x, y, (int)(80 * k), 1, 22) - 0.5f) * 0.05f;
     }
     if (is("hologram")) {
