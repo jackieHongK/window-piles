@@ -10,6 +10,7 @@
 
 #include "activity/activity_log.h"
 #include "app/app_icon.h"
+#include "app/arrival.h"
 #include "common/win_util.h"
 #include "groups/pile_store.h"
 #include "recovery/journal.h"
@@ -345,6 +346,8 @@ int App::Run() {
     int recovered = RestoreSavedPiles();
     Log("run: %zu piles restored, %d leftover windows recovered", piles_.size(), recovered);
     if (!FlagExists(L"organizer.off")) SetOrganizer(true);
+    RegisterUrlProtocol();  // windowpiles:// for the unboxing page's hand-off
+    if (int y = TakePendingArrive(); y >= 0) PostMessageW(main_, WM_APP_ARRIVE, (WPARAM)y, 0);
 
     drag_ = std::make_unique<DragWatcher>(*this);
     // Member windows closing or showing themselves. Out-of-context: no injection.
@@ -1839,6 +1842,15 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case WM_APP_SHOW_GUIDE: ShowGuide(); return 0;
         case WM_APP_SHOW_STATS: ShowStats(); return 0;
+        case WM_APP_ARRIVE:  // the unboxing page: the rack touched the screen edge; the real tray comes out of it
+            if (uiHidden_) SetUiHidden(false);
+            if (!organizer_) SetOrganizer(true);
+            if (organizer_) {
+                RECT h = organizer_->HandleRect();
+                PlayArrivalPulse({organizer_->place().right ? h.right : h.left, (h.top + h.bottom) / 2});
+                organizer_->Present();
+            }
+            return 0;
         case WM_APP_MEMBER_GONE: OnMemberGone((HWND)wp); return 0;
         case WM_APP_MEMBER_SHOWN: OnMemberShown((HWND)wp); return 0;
         case WM_APP_RECLAIM: TryReclaim((HWND)wp, lp != 0); return 0;

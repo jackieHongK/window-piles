@@ -75,6 +75,9 @@ public:
     void DragEnd();
     // A window is being dragged while a pile is open: the tray comes out and stays out until the drag ends.
     void OpenForAdd();
+    // Slide the tray out now, as if the bookmark had been hovered (the unboxing hand-off); it folds away once the
+    // pointer has been in it and left, like any opening.
+    void Present();
     void SetSlide(bool on) { place_.slide = on; }
     void SetMaterial(const std::string& id);
     bool IsDropTarget(POINT pt) const;  // dropping a card here keeps it in the tray

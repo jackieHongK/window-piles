@@ -2,6 +2,7 @@
 //   (no args) / --autostart   the app: tray icon + piles (--autostart: launched at sign-in)
 //   --watchdog <pid>           recovery watchdog started by the app itself (same exe, no UI)
 //   --stats                    opens "작업 기록" in the running instance
+//   windowpiles://organizer/arrive?y=0.5   the unboxing page's hand-off: pulse at the screen edge, the tray slides out
 #include <windows.h>
 #include <appmodel.h>
 #include <shellapi.h>
@@ -11,6 +12,7 @@
 #include <string>
 
 #include "app/app.h"
+#include "app/arrival.h"
 #include "common/win_util.h"
 #include "recovery/journal.h"
 
@@ -76,12 +78,23 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     }
     bool automatic = false;  // started by Windows / the watchdog, not by the user
     bool stats = false;      // open "작업 기록" in the running instance
+    int arrive = -1;         // windowpiles://organizer/arrive: the unboxing page's hand-off (y in permille)
     for (int i = 1; i < argc; ++i) {
         std::wstring a = argv[i];
         if (a == L"--autostart" || a == L"--restarted") automatic = true;
         if (a == L"--stats") stats = true;
+        int y;
+        if (wp::ParseArriveUrl(a, &y)) arrive = y;
     }
     LocalFree(argv);
+    if (arrive >= 0) {
+        if (HWND existing = FindWindowW(wp::kMainWindowClass, nullptr)) {
+            AllowSetForegroundWindow(ASFW_ANY);
+            PostMessageW(existing, wp::WM_APP_ARRIVE, (WPARAM)arrive, 0);
+            return 0;
+        }
+        wp::SetPendingArrive(arrive);  // not running yet: this launch starts the app, which then plays it
+    }
     if (stats)
         if (HWND existing = FindWindowW(wp::kMainWindowClass, nullptr)) {
             PostMessageW(existing, wp::WM_APP_SHOW_STATS, 0, 0);

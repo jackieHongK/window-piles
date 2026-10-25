@@ -22,6 +22,7 @@ add_executable(WindowPiles WIN32
     src/app/main.cpp
     src/app/app.cpp
     src/app/app_icon.cpp
+    src/app/arrival.cpp
     src/common/win_util.cpp
     src/common/canvas.cpp
     src/common/json.cpp

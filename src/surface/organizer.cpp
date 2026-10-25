@@ -993,6 +993,10 @@ Pile* Organizer::PileAtScreen(POINT pt) {
     return PileAt(ItemAt(pt));
 }
 
+void Organizer::Present() {
+    if (visible_) ShowTray();
+}
+
 void Organizer::OpenForAdd() {
     if (!visible_) return;
     stickyDrop_ = true;
