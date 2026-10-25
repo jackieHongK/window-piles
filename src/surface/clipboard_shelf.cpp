@@ -6,6 +6,7 @@
 #include <wincodec.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <thread>
 
@@ -302,16 +303,19 @@ Image ClipThumb(const ClipItem& item, int w, int h) {
     const Image& src = item.image;
     // Transparent: fitted inside, its transparency kept. Otherwise it fills the tile, cropped to fit.
     double k = item.alpha ? std::min((double)w / src.w, (double)h / src.h) : std::max((double)w / src.w, (double)h / src.h);
-    int sw = std::max(1, (int)(src.w * k)), sh = std::max(1, (int)(src.h * k));
+    // Rounded up, so a filled tile has no empty edge; a small image is enlarged (nearest pixel).
+    int sw = std::max(1, (int)std::ceil(src.w * k)), sh = std::max(1, (int)std::ceil(src.h * k));
     Image scaled = Shrink(src, std::max(sw, sh));
     out.w = w;
     out.h = h;
     out.px.assign((size_t)w * h, 0);
-    int ox = (w - scaled.w) / 2, oy = (h - scaled.h) / 2;
+    int ox = (w - sw) / 2, oy = (h - sh) / 2;
     for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x) {
-            int sx = x - ox, sy = y - oy;
-            if (sx >= 0 && sy >= 0 && sx < scaled.w && sy < scaled.h) out.px[(size_t)y * w + x] = scaled.px[(size_t)sy * scaled.w + sx];
+            int dx = x - ox, dy = y - oy;
+            if (dx < 0 || dy < 0 || dx >= sw || dy >= sh) continue;
+            int sx = std::min(scaled.w - 1, dx * scaled.w / sw), sy = std::min(scaled.h - 1, dy * scaled.h / sh);
+            out.px[(size_t)y * w + x] = scaled.px[(size_t)sy * scaled.w + sx];
         }
     return out;
 }

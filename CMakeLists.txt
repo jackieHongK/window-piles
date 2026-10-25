@@ -41,6 +41,7 @@ add_executable(WindowPiles WIN32
     src/notes/memo_list_window.cpp
     src/interaction/drag_watcher.cpp
     src/ui/popup_base.cpp
+    src/ui/list_popup.cpp
     src/ui/menu.cpp
     src/ui/guide_window.cpp
     src/ui/pile_editor.cpp

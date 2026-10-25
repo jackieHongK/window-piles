@@ -47,6 +47,8 @@ public:
     void FillPolygons(const std::vector<std::vector<PtF>>& contours, COLORREF color, BYTE alpha = 255);
     // Scales `img` into `dst` (box filter down, nearest up), clipped to the rounded rect `radius`.
     void DrawImage(const Image& img, const RECT& dst, int radius = 0);
+    // A premultiplied image with transparent parts, source-over at (x, y), unscaled.
+    void BlendImage(const Image& img, int x, int y);
     // GDI text. Only pixels that were already opaque keep the text, so text must sit on an opaque fill.
     void Text(const std::wstring& text, const RECT& r, COLORREF color, int sizePx, bool bold, UINT format);
     void DrawIcon(HICON icon, int x, int y, int size);  // icon must sit on an opaque fill

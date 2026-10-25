@@ -17,11 +17,13 @@ struct ClipItem {
     std::wstring text;  // a text item, or
     Image image;        // an image (premultiplied BGRA, at most 2048 px on a side)
     bool alpha = false;  // the image has transparent parts
+    SYSTEMTIME at{};     // when it was copied (local time)
     bool empty() const { return text.empty() && image.empty(); }
     bool Same(const ClipItem& o) const;
 };
 
-constexpr int kClipMax = 5;
+constexpr int kClipMax = 5;       // tiles on the shelf
+constexpr int kClipHistory = 20;  // kept for the history list (past the shelf, images smaller)
 
 // What the clipboard holds now, if it's text or an image that may be kept. False otherwise.
 bool ReadClipboard(HWND owner, ClipItem& out);

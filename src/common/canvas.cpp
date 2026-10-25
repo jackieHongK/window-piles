@@ -228,6 +228,19 @@ void Canvas::FillPolygons(const std::vector<std::vector<PtF>>& contours, COLORRE
     }
 }
 
+void Canvas::BlendImage(const Image& img, int x, int y) {
+    for (int j = std::max(0, -y); j < img.h && y + j < h_; ++j)
+        for (int i = std::max(0, -x); i < img.w && x + i < w_; ++i) {
+            uint32_t s = img.px[(size_t)j * img.w + i], a = s >> 24;
+            if (!a) continue;
+            uint32_t& d = px_[(size_t)(y + j) * w_ + x + i];
+            uint32_t out = 0;
+            for (int sh = 0; sh < 32; sh += 8)
+                out |= std::min<uint32_t>(((s >> sh) & 255) + ((d >> sh) & 255) * (255 - a) / 255, 255) << sh;
+            d = out;
+        }
+}
+
 void Canvas::DrawImage(const Image& img, const RECT& dst, int radius) {
     if (img.empty()) return;
     int dw = dst.right - dst.left, dh = dst.bottom - dst.top;
