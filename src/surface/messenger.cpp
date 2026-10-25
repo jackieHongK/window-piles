@@ -187,6 +187,16 @@ HICON MessengerIcon(const Messenger& m) {
     return icon;
 }
 
+void ToggleMessenger(const Messenger& m) {
+    std::vector<HWND> windows = MessengerWindows(m);
+    // The tray never takes the focus, so the window in front is still the one that was there before the click.
+    if (!windows.empty() && !IsIconic(windows.front()) && GetForegroundWindow() == windows.front()) {
+        PostMessageW(windows.front(), WM_CLOSE, 0, 0);
+        return;
+    }
+    OpenMessenger(m);
+}
+
 void OpenMessenger(const Messenger& m) {
     std::vector<HWND> windows = MessengerWindows(m);
     if (!windows.empty()) {

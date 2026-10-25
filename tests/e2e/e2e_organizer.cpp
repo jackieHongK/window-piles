@@ -7,7 +7,7 @@
 //   3. click A in the tray                   → A opens (W1, W2 shown)
 //   4. fold A from its top tab               → its windows go away and no card appears on the desktop
 //   5. quit and start again                  → still kept in the organizer (saved)
-//   6. "＋ 새 메모" at the bottom of the tray   → a memo window and a .txt file in the memo folder; what is
+//   6. "새 메모 뽑기" (the dispenser below the flags)   → a memo window and a .txt file in the memo folder; what is
 //      typed is in the file after closing; a memo closed empty leaves no file
 //   7. drag a memo card below the next one   → their order is remembered; drag one onto the trash can
 //      (what "＋ 새 메모" becomes while a memo is carried) → its file is gone
@@ -129,6 +129,10 @@ std::wstring MemoOrder() {
     return buf;
 }
 
+// The memo dispenser's middle, up from the tray's bottom (DIPs): 14 padding, the messenger dock (label 22 + 6,
+// tiles 44), 14, the clipboard shelf (the same), 14, then half the 36-high dispenser.
+constexpr int kDispenserUp = 14 + 72 + 14 + 72 + 14 + 18;
+
 std::wstring FileName(const std::wstring& path) { return path.substr(path.find_last_of(L'\\') + 1); }
 
 HWND NewMemoFromTray() {
@@ -136,7 +140,7 @@ HWND NewMemoFromTray() {
     if (!tray) return nullptr;
     RECT tr;
     GetClientRect(tray, &tr);
-    Click(tray, MAKELPARAM(tr.right / 2, tr.bottom - MulDiv(14 + 18, GetDpiForWindow(tray), 96)));  // padding + half the button
+    Click(tray, MAKELPARAM(tr.right / 2, tr.bottom - MulDiv(kDispenserUp, GetDpiForWindow(tray), 96)));  // the dispenser
     HWND memo = nullptr;
     PumpUntil([&] { return (memo = FindWindowW(L"WindowPilesMemo", nullptr)) && IsWindowVisible(memo); }, 3000);
     return memo;
@@ -253,7 +257,7 @@ int wmain(int argc, wchar_t** argv) {
     // 6) memos
     for (const auto& m : Memos()) DeleteFileW(m.c_str());
     HWND memo = NewMemoFromTray();
-    Check(memo != nullptr, "6) 트레이의 ＋ 버튼을 누르면 메모 창이 열림");
+    Check(memo != nullptr, "6) 트레이의 새 메모 뽑기를 누르면 메모 창이 열림");
     Check(Memos().size() == 1, "6) 메모 폴더에 .txt 파일이 생김");
     if (memo) {
         HWND edit = FindWindowExW(memo, nullptr, L"RICHEDIT50W", nullptr);
@@ -280,19 +284,18 @@ int wmain(int argc, wchar_t** argv) {
         PumpUntil([&] { return !IsWindow(memo); }, 3000);
     }
     PumpFor(400);
-    // Tray layout (DIPs, from the bottom): 14 padding, the 36-high button, 6, then memo flags 26 high every 32.
+    // Tray layout (DIPs, from the bottom): see kDispenserUp; the memo flags, 26 high every 32, right above it.
     tray = OpenTray();
     RECT tr{};
     if (tray) GetClientRect(tray, &tr);
     int bottom = tray ? MulDiv(tr.bottom, 96, GetDpiForWindow(tray)) : 0, mid = tray ? MulDiv(tr.right / 2, 96, GetDpiForWindow(tray)) : 0;
-    // (between the flags and the button: 6, the messenger dock's label 22 + 6 and its 44-high tiles + 12)
-    int plusY = bottom - 14 - 18, memo2Y = bottom - 14 - 36 - 12 - 44 - 28 - 6 - 32 + 13, memo1Y = memo2Y - 32;
+    int plusY = bottom - kDispenserUp, memo2Y = plusY - 18 - 32 + 13, memo1Y = memo2Y - 32;
     if (tray) DragInTray(tray, {mid, memo1Y}, {mid, memo2Y});
     Check(!first.empty() && MemoOrder().rfind(FileName(first) + L"|", 0) == 0, "7) 메모 카드를 끌어 순서를 바꾸면 그 순서가 기억됨");
     if (tray) DragInTray(tray, {mid, memo1Y}, {mid, plusY});
     PumpFor(900);  // the crumple animation
     files = Memos();
-    Check(files.size() == 1 && files[0] != first, "7) 메모 카드를 휴지통(새 메모 자리)에 끌어 넣으면 버려짐");
+    Check(files.size() == 1 && files[0] != first, "7) 메모 카드를 휴지통(디스펜서 자리)에 끌어 넣으면 버려짐");
 
     // 8) both piles in the organizer: drag A (top) below B
     PostMessageW(FindWindowW(L"WindowPilesMain", nullptr), WM_ENDSESSION, TRUE, 0);
@@ -350,16 +353,26 @@ int wmain(int argc, wchar_t** argv) {
     Check(pinned[0] == L'0', "9) 핀을 빼면 저장된 상태도 풀림");
 
     // 10) the messenger dock: B's window (TestWindows, kept in the dock) minimized, then its tile clicked → it is
-    //     brought back up. The first tile is 22 in from the cards' left (38 + 22), 12 + 22 above the button.
+    //     brought back up; clicked again while it's the window in front, it is closed. The first tile is 22 in
+    //     from the cards' left (38 + 22), at the very bottom (14 padding + half the tile).
     ShowWindow(w[2], SW_MINIMIZE);
     PumpFor(400);
     tray = OpenTray();
     if (tray) {
         GetClientRect(tray, &tr);
         int tb = MulDiv(tr.bottom, 96, GetDpiForWindow(tray));
-        DragInTray(tray, {38 + 22, tb - 14 - 36 - 12 - 22}, {38 + 22, tb - 14 - 36 - 12 - 22});
+        DragInTray(tray, {38 + 22, tb - 14 - 22}, {38 + 22, tb - 14 - 22});
     }
     Check(PumpUntil([&] { return !IsIconic(w[2]); }, 3000), "10) 메신저 칸의 앱을 누르면 그 앱 창이 다시 올라옴");
+    PumpFor(400);
+    if (GetForegroundWindow() != w[2]) {
+        Print("   (10b skipped: the restored window didn't get the foreground)\n");
+    } else if ((tray = OpenTray())) {
+        GetClientRect(tray, &tr);
+        int tb = MulDiv(tr.bottom, 96, GetDpiForWindow(tray));
+        DragInTray(tray, {38 + 22, tb - 14 - 22}, {38 + 22, tb - 14 - 22});
+        Check(PumpUntil([&] { return !IsWindow(w[2]) || !IsWindowVisible(w[2]); }, 3000), "10) 앞에 떠 있는 메신저를 다시 누르면 그 창이 닫힘");
+    }
 
     PostMessageW(FindWindowW(L"WindowPilesMain", nullptr), WM_ENDSESSION, TRUE, 0);
     WaitForSingleObject(app, 5000);

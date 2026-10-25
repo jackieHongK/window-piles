@@ -6,7 +6,8 @@
 // off the tray (the card follows the pointer, as it does going in); windows and files dragged onto a
 // card in the tray join that pile. The bookmark itself can be dragged along the edge, to the other
 // side or monitor. Below the piles, memos are Post-it flags whose colored tips stick out of the screen
-// edge even while the tray is put away, and "＋ 새 메모" turns into a trash can while one is carried.
+// edge even while the tray is put away, pulled from a dispenser below them that turns into a trash can while
+// a memo, messenger or clip is carried. At the bottom: the clipboard shelf, then the messenger dock.
 #pragma once
 
 #include <windows.h>
@@ -18,6 +19,7 @@
 #include "common/canvas.h"
 #include "groups/pile.h"
 #include "notes/memo_store.h"
+#include "surface/clipboard_shelf.h"
 #include "surface/messenger.h"
 
 namespace wp {
@@ -101,8 +103,9 @@ private:
         RECT logo{};
         int slotTop = 0, slots = 0, more = 0;  // more: piles that don't fit on this screen
         int memoLabelY = 0, flagTop = 0, flagCount = 0, flagMore = 0;
+        int clipLabelY = 0, clipTop = 0;  // the clipboard shelf
         int dockLabelY = 0, dockTop = 0;  // the messenger dock
-        RECT plus{};
+        RECT plus{};                      // the memo dispenser
         RECT handle{};          // the bookmark, pulled out with the tray
     };
     Geometry Measure(int pileCount) const;
@@ -131,7 +134,12 @@ private:
     void Activate(int item, POINT screenPt);  // a click on an item
     void MemoMenu(int memo, POINT screenPt);
     bool AddMessenger(const Messenger& m);  // kept (and saved) unless it's there already or the dock is full
+    void AddClip(ClipItem item);            // the newest first; one already there moves to the front
+    void ShowNotice(int row, const std::wstring& text);  // over a row of tiles for a moment: 0 dock, 1 clips
     void DrawDock(Canvas& c, const Geometry& g);
+    void DrawClips(Canvas& c, const Geometry& g);
+    void DrawDispenser(Canvas& c, const RECT& r, bool hot);
+    void DrawNotice(Canvas& c, const Geometry& g, int row);
     void DrawBookmark(Canvas& c, const RECT& r, bool hot, bool body = true);  // body = false: grips and count only
     void DrawPileCard(Canvas& c, const RECT& card, Pile& p, bool hot);
     void DrawFlag(Canvas& c, const RECT& flag, const MemoInfo& m, bool hot);
@@ -184,11 +192,11 @@ private:
     int pressed_ = -1;
     POINT pressPt_{};  // tray client
     struct Drag {
-        int item = -1;          // pile index or kItemMemo + memo index, while moving
-        int grabDy = 0;         // pointer to card top
-        int y = 0;              // pointer, tray client
-        int slot = -1;          // where it would land (slot, or index among the flags)
-        bool overTrash = false;  // a memo over the trash can
+        int item = -1;          // pile index, or kItemMemo / kItemMessenger / kItemClip + index, while moving
+        int grabDx = 0, grabDy = 0;  // pointer to card top-left
+        int x = 0, y = 0;            // pointer, tray client
+        int slot = -1;          // where it would land (slot, or index among the flags or messengers)
+        bool overTrash = false;  // a memo, messenger or clip over the trash can
         RECT card{};            // where it was drawn last, tray client
     } drag_;
     // a memo just dropped into the trash: crumpled and dropped in (animation only; the file is already gone)
@@ -208,6 +216,12 @@ private:
     RECT dockRect_{};
     std::wstring badges_;
     int watchTicks_ = 0;
+    // The clipboard shelf (surface/clipboard_shelf.h): what was copied lately, newest first, and their tiles.
+    std::vector<ClipItem> clips_;
+    std::vector<Image> clipThumbs_;  // drawn at tile size
+    std::vector<RECT> clipRects_;
+    int noticeRow_ = -1;  // a notice over a row of tiles (0 dock, 1 clips), until kTimerNotice
+    std::wstring notice_;
 };
 
 }  // namespace wp

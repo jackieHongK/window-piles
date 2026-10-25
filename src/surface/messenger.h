@@ -31,5 +31,7 @@ std::vector<HWND> MessengerWindows(const Messenger& m);
 UnreadInfo MessengerUnread(const Messenger& m);  // added up over its window titles
 HICON MessengerIcon(const Messenger& m);          // large, cached; nullptr if there is none
 void OpenMessenger(const Messenger& m);           // its window forward (restored if minimized), else started
+// A click on its tile: its window already in front is closed (as its own close button would); otherwise opened.
+void ToggleMessenger(const Messenger& m);
 
 }  // namespace wp
