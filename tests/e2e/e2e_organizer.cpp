@@ -12,6 +12,7 @@
 //   7. drag a memo card below the next one   → their order is remembered; drag one onto the trash can
 //      (what "＋ 새 메모" becomes while a memo is carried) → its file is gone
 //   8. with A and B both in the organizer, drag A below B → the new order is saved
+//   9. pin the tray, then open B from it    → the tray stays out (and pinned is saved); unpin it again
 #include "poc_common.h"
 
 #include <cstring>
@@ -322,6 +323,24 @@ int wmain(int argc, wchar_t** argv) {
     app = Launch(appExe, L"--autostart");
     PumpUntil([&] { return FindWindowW(L"WindowPilesMain", nullptr) != nullptr; }, 8000);
     PumpFor(500);
+
+    // 9) the pin at the end of the logo row (DIPs: logo row 14..44, its right end 14 + 14 + 10 + 260 from the
+    //    tray's left on the right edge; the pin is 28 wide), then open B (slot 0 now) from the pinned tray
+    tray = OpenTray();
+    if (tray) {
+        DragInTray(tray, {298 - 14, 29}, {298 - 14, 29});  // a click: press and let go on the same spot
+        PumpFor(300);
+        Click(tray, MAKELPARAM(MulDiv(160, GetDpiForWindow(tray), 96), MulDiv(14 + 30 + 14 + 33, GetDpiForWindow(tray), 96)));
+    }
+    bool bOpen = PumpUntil([&] { return IsWindowVisible(w[2]); }, 4000);
+    PumpFor(800);
+    wchar_t pinned[8] = {};
+    GetPrivateProfileStringW(L"organizer", L"pinned", L"", pinned, 8, (DataDir() + L"\\organizer.ini").c_str());
+    Check(bOpen && tray && IsWindowVisible(tray) && pinned[0] == L'1', "9) 핀을 꽂으면 더미를 펼쳐도 트레이가 열린 채로 있음");
+    if (tray) DragInTray(tray, {298 - 14, 29}, {298 - 14, 29});  // unpinned again
+    PumpFor(300);
+    GetPrivateProfileStringW(L"organizer", L"pinned", L"", pinned, 8, (DataDir() + L"\\organizer.ini").c_str());
+    Check(pinned[0] == L'0', "9) 핀을 빼면 저장된 상태도 풀림");
 
     PostMessageW(FindWindowW(L"WindowPilesMain", nullptr), WM_ENDSESSION, TRUE, 0);
     WaitForSingleObject(app, 5000);

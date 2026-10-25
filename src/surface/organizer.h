@@ -57,6 +57,7 @@ public:
         std::wstring monitor;  // device name (\\.\DISPLAY1); empty or unknown → primary monitor
         bool slide = true;     // the tray slides out (240 ms) rather than just appearing
         std::string material = "walnut";  // one of kOrganizerMaterials
+        bool pinned = false;   // the drawer stays out (the pin at the end of its logo row)
     };
 
     Organizer(OrganizerHost& host, const Place& place);
@@ -117,9 +118,10 @@ private:
     void RenderTray(bool present = true);  // present = false: only draw trayCanvas_ (ahead of opening)
     void Prepare();                         // memos read and tray drawn while the pointer rests on the bookmark
     void SlideOut();                        // the opening motion, in step with the screen
+    void SlideIn();                         // ... and the folding one, back into its bookmark
     void RenderFlags();  // the flag tips at the screen edge while the tray is put away
     void ShowTray();
-    void HideTray();
+    void HideTray(bool force = false);  // pinned, it stays out unless forced (숨기기, moving it, pushing it in)
     int ItemAt(POINT client) const;  // a pile card's index, or one of the kItem* codes; -1 for none
     Pile* PileAt(int item);
     void Activate(int item, POINT screenPt);  // a click on an item

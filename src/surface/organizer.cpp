@@ -34,11 +34,13 @@ constexpr int kOut = kHandleW;          // the tray window's room for what stick
 constexpr int kMaxHeightPercent = 60;  // of the work area: the tray never gets taller than this
 constexpr int kMinSlots = 2;
 // Hit codes for what isn't a pile card (pile cards are their index).
-constexpr int kItemMemo = 1000, kItemPlus = 2000, kItemMemoMore = 2001, kItemHandle = 2002;
+constexpr int kItemMemo = 1000, kItemPlus = 2000, kItemMemoMore = 2001, kItemHandle = 2002, kItemPin = 2003;
+constexpr int kPin = 28;  // the pin button at the end of the logo row
 constexpr int kLift = 10;            // a hovered card slides this far out of the tray
 constexpr double kHideAfterMs = 350;  // the pointer left the bookmark and tray this long ago: put it away
 constexpr UINT_PTR kTimerWatch = 1, kTimerOpen = 2, kTimerAnim = 3, kTimerFiles = 4, kTimerPeek = 6;
-constexpr double kSlideMs = 240;  // the brand motion: 240 ms ease-out
+constexpr double kSlideMs = 240;    // the brand motion: 240 ms ease-out
+constexpr double kSlideInMs = 200;  // folding back in, a little quicker
 constexpr UINT kOpenDelayMs = 120;  // resting on the bookmark this long opens the drawer
 constexpr double kPeekMs = 160;   // a memo unfolding from under the tray
 constexpr int kPeekW = 300, kPeekMaxH = 380;
@@ -120,6 +122,7 @@ Organizer::Organizer(OrganizerHost& host, const Place& place) : host_(host), pla
     RenderHandle();
     ShowWindow(handle_, SW_SHOWNOACTIVATE);
     RenderFlags();
+    if (place_.pinned) ShowTray();  // pinned last time: out from the start
 }
 
 Organizer::~Organizer() {
@@ -274,7 +277,7 @@ void Organizer::Raise() {
 
 void Organizer::SetVisible(bool show) {
     visible_ = show;
-    if (!show) HideTray();
+    if (!show) HideTray(true);
     ShowWindow(handle_, show ? SW_SHOWNOACTIVATE : SW_HIDE);
     RenderFlags();
     if (show) Raise();
@@ -487,15 +490,27 @@ void Organizer::RenderTray(bool present) {
         std::wstring label = dropAdd_ ? L"더미 카드 위에 놓으면 그 더미에 들어가요"
                              : full   ? L"자리가 없어요 · " + std::to_wstring(g.slots) + L"칸이 다 찼어요"
                                       : L"빈 칸에 놓으면 그 자리에 꽂혀요";
-        c.Text(label, g.logo, Ink(), S(12), true, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        c.Text(label, {g.logo.left, g.logo.top, g.logo.right - S(kPin + 6), g.logo.bottom}, Ink(), S(12), true,
+               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     } else {
         int lh = S(15), ly = g.logo.top + (g.logo.bottom - g.logo.top - lh) / 2;
         COLORREF base = kMaterials[Mat()].base;
-        // A cut is darker than the surface, its lower edge lit; in near-black stained wood (black ash) the cut
-        // shows the paler wood under the stain instead, its lower edge in shadow.
-        bool deep = 0.2126 * GetRValue(base) + 0.7152 * GetGValue(base) + 0.0722 * GetBValue(base) < 70;
-        DrawWordmark(c, g.logo.left, ly + 1, lh, deep ? Mix(base, RGB(0, 0, 0), 0.6) : Mix(base, RGB(255, 255, 255), 0.35));
-        DrawWordmark(c, g.logo.left, ly, lh, deep ? Mix(base, RGB(255, 255, 255), 0.22) : Mix(base, RGB(0, 0, 0), 0.5));
+        // On light materials a cut is darker than the surface, its lower edge lit. On dark ones the mark is a
+        // warm off-white (the labels' cream with a fifth of the material in it, so it sits in rather than
+        // glares), its lower edge in shadow.
+        bool dark = kMaterials[Mat()].dark;
+        DrawWordmark(c, g.logo.left, ly + 1, lh, dark ? Mix(base, RGB(0, 0, 0), 0.5) : Mix(base, RGB(255, 255, 255), 0.35));
+        DrawWordmark(c, g.logo.left, ly, lh, dark ? Mix(Ink(), base, 0.2) : Mix(base, RGB(0, 0, 0), 0.5));
+    }
+    // The pin, at the end of the logo row: pinned, the drawer stays out; unpinned, it folds away by itself.
+    {
+        int cy = (g.logo.top + g.logo.bottom) / 2;
+        RECT pin{g.logo.right - S(kPin), cy - S(kPin) / 2, g.logo.right, cy + S(kPin) / 2};
+        bool hot = hover_ == kItemPin;
+        if (place_.pinned) c.FillRoundRect(pin, S(kPin) / 2, Ink(), hot ? 70 : 50);
+        else if (hot) c.FillRoundRect(pin, S(kPin) / 2, Ink(), 28);
+        c.Glyph(place_.pinned ? 0xE841 : 0xE718, pin, place_.pinned || hot ? Ink() : Mix(Ink(), kMaterials[Mat()].base, 0.35),
+                S(14));  // PinnedFill / Pin
     }
     if (dropMode_ && !dropAdd_ && !full) {
         RECT o{g.bodyLeft + S(4), S(4), g.bodyRight - S(4), g.h - S(4)};
@@ -637,6 +652,19 @@ void Organizer::SlideOut() {
     }
 }
 
+void Organizer::SlideIn() {
+    HidePeek();
+    int w = trayRect_.right - trayRect_.left, end = w - Scale(kHandleW, dpi_);
+    double t0 = NowMs();
+    for (double t = 0; t < 1;) {
+        if (FAILED(DwmFlush())) Sleep(8);
+        t = std::min(1.0, (NowMs() - t0) / kSlideInMs);
+        int off = (int)std::lround(t * t * t * end);  // ease-in: it gathers speed as it goes back in
+        SetWindowPos(tray_, nullptr, trayRect_.left + (place_.right ? off : -off), trayRect_.top, 0, 0,
+                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+    }
+}
+
 void Organizer::Refresh() {
     prepared_ = false;  // what it holds changed: draw it again when it opens
     RenderHandle();
@@ -670,10 +698,22 @@ void Organizer::ShowTray() {
     SetTimer(tray_, kTimerWatch, 100, nullptr);
 }
 
-void Organizer::HideTray() {
+void Organizer::HideTray(bool force) {
     if (!trayOpen_) return;
+    if (place_.pinned && !force) {  // pinned: it stays out; only what was going on in it ends
+        hover_ = -1;
+        pressed_ = -1;
+        drag_ = {};
+        HidePeek();
+        if (GetCapture() == tray_) ReleaseCapture();
+        memos_ = ListMemos();
+        RenderTray();
+        return;
+    }
     trayOpen_ = false;
     KillTimer(tray_, kTimerWatch);
+    // It folds back into its bookmark the way it came out; put away on purpose (숨기기, moving it), at once.
+    if (place_.slide && !force && trayCanvas_ && IsWindowVisible(tray_)) SlideIn();
     ShowWindow(tray_, SW_HIDE);
     hover_ = -1;
     pressed_ = -1;
@@ -764,6 +804,9 @@ bool Organizer::IsDropTarget(POINT pt) const {
 
 int Organizer::ItemAt(POINT client) const {
     Geometry g = Measure((int)host_.OrganizerPiles().size());
+    int cy = (g.logo.top + g.logo.bottom) / 2;
+    RECT pin{g.logo.right - Scale(kPin, dpi_), cy - Scale(kPin, dpi_) / 2, g.logo.right, cy + Scale(kPin, dpi_) / 2};
+    if (PtInRect(&pin, client)) return kItemPin;
     if (PtInRect(&g.handle, client)) return kItemHandle;
     for (size_t i = 0; i < cardRects_.size(); ++i)
         if (PtInRect(&cardRects_[i], client)) return (int)i;
@@ -784,8 +827,16 @@ Pile* Organizer::PileAt(int item) {
 void Organizer::Activate(int item, POINT screenPt) {
     // A memo opens beside the tray, on the desktop side.
     POINT anchor{place_.right ? trayRect_.left : trayRect_.right, screenPt.y};
-    if (item == kItemHandle) {
-        HideTray();  // pushed back in by its bookmark
+    if (item == kItemPin) {
+        place_.pinned = !place_.pinned;
+        host_.OnOrganizerMoved();  // remembered with its place
+        RenderTray();
+    } else if (item == kItemHandle) {
+        if (place_.pinned) {  // pushed back in by its bookmark: that unpins it
+            place_.pinned = false;
+            host_.OnOrganizerMoved();
+        }
+        HideTray(true);
     } else if (item == kItemPlus) {
         HideTray();
         std::wstring path = NewMemo();
@@ -977,7 +1028,7 @@ LRESULT Organizer::OnHandle(UINT msg, WPARAM wp, LPARAM lp) {
                 if (!handleDragging_ && (abs(c.y - pressAt_.y) > GetSystemMetrics(SM_CYDRAG) ||
                                          abs(c.x - pressAt_.x) > GetSystemMetrics(SM_CXDRAG))) {
                     handleDragging_ = true;
-                    HideTray();
+                    HideTray(true);
                     KillTimer(handle_, kTimerOpen);
                     ShowWindow(flags_, SW_HIDE);
                 }
@@ -1122,7 +1173,7 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
                 RenderPeek();
                 return 0;
             }
-            if (wp != kTimerWatch || dropMode_ || menuOpen_ || drag_.item >= 0 || crumpleStart_) return 0;
+            if (wp != kTimerWatch || place_.pinned || dropMode_ || menuOpen_ || drag_.item >= 0 || crumpleStart_) return 0;
             // Stays open while the pointer is over the bookmark or the tray; goes away shortly after it leaves.
             POINT c;
             GetCursorPos(&c);

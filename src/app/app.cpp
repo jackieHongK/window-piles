@@ -226,6 +226,7 @@ Organizer::Place LoadOrganizerPlace() {
     p.slide = GetPrivateProfileIntW(L"organizer", L"slide", 1, ini.c_str()) != 0;
     GetPrivateProfileStringW(L"organizer", L"material", L"walnut", buf, 64, ini.c_str());
     p.material = Utf8(buf);
+    p.pinned = GetPrivateProfileIntW(L"organizer", L"pinned", 0, ini.c_str()) != 0;
     return p;
 }
 
@@ -236,6 +237,7 @@ void SaveOrganizerPlace(const Organizer::Place& p) {
     WritePrivateProfileStringW(L"organizer", L"monitor", p.monitor.c_str(), ini.c_str());
     WritePrivateProfileStringW(L"organizer", L"slide", p.slide ? L"1" : L"0", ini.c_str());
     WritePrivateProfileStringW(L"organizer", L"material", Widen(p.material).c_str(), ini.c_str());
+    WritePrivateProfileStringW(L"organizer", L"pinned", p.pinned ? L"1" : L"0", ini.c_str());
 }
 
 void SetFlag(const wchar_t* name, bool on) {
