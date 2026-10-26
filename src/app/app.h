@@ -113,7 +113,9 @@ private:
     void TryReclaim(HWND hwnd, bool justShown);
     // Opening a pile reopens its closed apps (once per app); their next window joins the pile.
     void RelaunchMissing(Pile& pile);
-    void LaunchIntoPile(Pile& pile, const std::wstring& exePath);
+    void LaunchIntoPile(Pile& pile, const MissingWindow& w);
+    void RememberLaunch(Member& m);  // how to bring its window back later (app/relaunch.h)
+    void AdoptLaunched();             // started from a card, no new window: take its running one
     // The next window of `exePath` (within a minute) joins the pile: it was opened from the pile.
     void JoinNextWindow(Pile& pile, const std::wstring& exePath);
     // Files kept with the pile: open those not already open in it; open one with the app it belongs to.
@@ -181,7 +183,9 @@ private:
     int reclaimed_ = 0;
     std::map<DWORD, std::wstring> reclaimExe_;  // pid → exe path, while reclaiming
     std::vector<HWND> reclaimPending_;          // matched, waiting to be folded together
-    std::map<std::wstring, int> launchJoin_;    // lower-case exe → pile id: apps reopened from a card
+    std::multimap<std::wstring, int> launchJoin_;  // lower-case exe → pile id, one per start: apps reopened from a card
+    std::vector<std::pair<int, std::wstring>> adoptPending_;  // pile id, app key: started, waiting for a window
+    std::wstring displaysKey_;  // the displays as last seen: the organizer is laid out again when they change
     double launchJoinUntil_ = 0;                // their windows join until then
     std::vector<HWND> untitledShown_;           // appeared without a title yet: their first title still counts as new
     UINT shellHookMsg_ = 0;                        // HSHELL_* notifications from Explorer

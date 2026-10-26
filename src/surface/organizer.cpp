@@ -62,6 +62,8 @@ constexpr wchar_t kTrayClass[] = L"WindowPilesOrganizerTray";
 constexpr wchar_t kFlagsClass[] = L"WindowPilesOrganizerFlags";
 constexpr wchar_t kPeekClass[] = L"WindowPilesOrganizerPeek";
 constexpr wchar_t kFlyClass[] = L"WindowPilesOrganizerFlight";
+constexpr wchar_t kLandingClass[] = L"WindowPilesOrganizerLanding";
+const COLORREF kWalnut = RGB(123, 75, 42);  // the brand walnut: where a moved organizer will land
 const COLORREF kCream = RGB(246, 238, 228);
 const COLORREF kFlagPaper = RGB(252, 250, 244);
 constexpr const MemoColor* kFlagColors = kMemoColors;  // notes/memo_store.h
@@ -115,6 +117,8 @@ Organizer::Organizer(OrganizerHost& host, const Place& place) : host_(host), pla
     tray_ = MakeWindow(kTrayClass, &Organizer::TrayProc, this, L"Neverflow 오거나이저 트레이");
     flags_ = MakeWindow(kFlagsClass, &Organizer::FlagsProc, this, L"Neverflow 메모 플래그");
     peek_ = MakeWindow(kPeekClass, &Organizer::PeekProc, this, L"Neverflow 메모 미리보기");
+    landing_ = MakeWindow(kLandingClass, DefWindowProcW, this, L"Neverflow 오거나이저 놓을 자리");
+    SetWindowLongPtrW(landing_, GWL_EXSTYLE, GetWindowLongPtrW(landing_, GWL_EXSTYLE) | WS_EX_TRANSPARENT);
     SetWindowLongPtrW(peek_, GWL_EXSTYLE, GetWindowLongPtrW(peek_, GWL_EXSTYLE) | WS_EX_TRANSPARENT);  // only to look at
     DragAcceptFiles(tray_, TRUE);  // files dropped on a card in the tray join that pile
     // ponytail: polls the button every 150 ms for Explorer drags; an OLE drop target needs an STA thread
@@ -143,7 +147,7 @@ Organizer::~Organizer() {
     *alive_ = false;
     OnMemoSaved(nullptr);
     for (Flight& f : flights_) DestroyWindow(f.hwnd);
-    for (HWND h : {handle_, tray_, flags_, peek_})
+    for (HWND h : {handle_, tray_, flags_, peek_, landing_})
         if (h) {
             SetWindowLongPtrW(h, GWLP_USERDATA, 0);
             DestroyWindow(h);
@@ -181,8 +185,81 @@ void Organizer::Layout() {
     Geometry g = Measure(0, true);
     int lo = work_.top + Scale(16, dpi_) + SlotsMid(g), hi = work_.bottom - Scale(16, dpi_) - g.h + SlotsMid(g);
     if (lo <= hi) cy = std::clamp(cy, lo, hi);
-    int x = place_.right ? monitor_.right - w : monitor_.left;
+    // Against the edge of the work area: a taskbar on that side of the screen would cover it otherwise.
+    int x = place_.right ? work_.right - w : work_.left;
     handleRect_ = {x, cy - h / 2, x + w, cy + h / 2};
+}
+
+Organizer::Place Organizer::PlaceAt(POINT c) const {
+    Place p = place_;
+    MONITORINFOEXW mi{};
+    mi.cbSize = sizeof(mi);
+    GetMonitorInfoW(MonitorFromPoint(c, MONITOR_DEFAULTTONEAREST), &mi);
+    p.monitor = mi.szDevice;
+    p.right = c.x >= (mi.rcMonitor.left + mi.rcMonitor.right) / 2;
+    int wh = std::max<int>(1, mi.rcWork.bottom - mi.rcWork.top);
+    p.yPermille = std::clamp<int>(MulDiv(c.y - mi.rcWork.top, 1000, wh), 0, 1000);
+    return p;
+}
+
+void Organizer::ShowLanding(POINT c) {
+    Place p = PlaceAt(c);
+    MONITORINFOEXW mi{};
+    mi.cbSize = sizeof(mi);
+    GetMonitorInfoW(MonitorFromPoint(c, MONITOR_DEFAULTTONEAREST), &mi);
+    const RECT& work = mi.rcWork;
+    UINT dpi = DpiForPoint({(mi.rcMonitor.left + mi.rcMonitor.right) / 2, (mi.rcMonitor.top + mi.rcMonitor.bottom) / 2});
+    auto S = [dpi](int v) { return Scale(v, dpi); };
+    int w = S(kHandleHoverW), h = S(kHandleH), workH = work.bottom - work.top;
+    int cy = std::clamp<int>(c.y, work.top + h / 2, work.bottom - h / 2) - work.top;
+    Geometry g = Measure(0, true);  // kept where its tallest drawer fits, as Layout() will
+    int lo = S(16) + SlotsMid(g), hi = workH - S(16) - g.h + SlotsMid(g);
+    if (lo <= hi) cy = std::clamp(cy, lo, hi);
+    std::wstring key = p.monitor + (p.right ? L"|r|" : L"|l|") + std::to_wstring(cy);
+    if (key == landingKey_ && IsWindowVisible(landing_)) return;
+    landingKey_ = key;
+    // A line along that whole edge says which screen and side; a dashed bookmark says where on it.
+    Canvas canvas(w, workH);
+    int line = S(3);
+    canvas.FillRoundRect(p.right ? RECT{w - line, 0, w, workH} : RECT{0, 0, line, workH}, 0, kWalnut, 110);
+    int r = S(7);
+    RECT b = p.right ? RECT{0, cy - h / 2, w + r, cy + h / 2} : RECT{-r, cy - h / 2, w, cy + h / 2};
+    canvas.FillRoundRect(b, r, kWalnut, 120);
+    canvas.DashedRoundRect(b, r, S(2), S(6), S(4), kWalnut, 255);
+    int x = p.right ? work.right - w : work.left;
+    canvas.Present(landing_, {x, work.top});
+    SetWindowPos(landing_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    SetWindowPos(handle_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);  // carried above it
+}
+
+void Organizer::HideLanding() {
+    ShowWindow(landing_, SW_HIDE);
+    landingKey_.clear();
+}
+
+void Organizer::BeginMoveFromTray() {
+    // The drawer goes away at once and its bookmark comes into the hand: from here it is the same move as
+    // grabbing the bookmark on the screen edge (OnHandle), ending where it is let go.
+    if (GetCapture() == tray_) ReleaseCapture();
+    trayPressed_ = false;
+    pressed_ = -1;
+    handlePressed_ = true;
+    handleDragging_ = true;
+    HidePeek();
+    HideTray(true);
+    KillTimer(handle_, kTimerOpen);
+    ShowWindow(flags_, SW_HIDE);
+    handleHover_ = false;
+    int w = Scale(kHandleW, dpi_), h = Scale(kHandleH, dpi_);
+    Canvas c(w, h);
+    DrawBookmark(c, {0, 0, w, h}, true);
+    POINT at;
+    GetCursorPos(&at);
+    c.Present(handle_, {at.x - w / 2, at.y - h / 2});
+    handleRect_ = {at.x - w / 2, at.y - h / 2, at.x - w / 2 + w, at.y - h / 2 + h};
+    ShowWindow(handle_, SW_SHOWNOACTIVATE);
+    SetCapture(handle_);
+    ShowLanding(at);
 }
 
 RECT Organizer::HandleRect() const { return handleRect_; }
@@ -247,7 +324,7 @@ Organizer::Geometry Organizer::Measure(int pileCount, bool tallest) const {
     // are always below it, never over it.
     int cy = (handleRect_.top + handleRect_.bottom) / 2;
     int top = std::clamp<int>(cy - SlotsMid(g), work_.top + S(16), std::max<int>(work_.top + S(16), work_.bottom - S(16) - g.h));
-    int left = place_.right ? monitor_.right - g.w : monitor_.left;
+    int left = place_.right ? work_.right - g.w : work_.left;
     g.screen = {left, top, left + g.w, top + g.h};
     // The bookmark comes out with the tray, on its desktop side, at the height it was on the screen edge.
     int hh = S(kHandleH), hy = std::clamp<int>(cy - top, hh / 2, g.h - hh / 2);
@@ -351,7 +428,7 @@ void Organizer::RenderFlags() {
     }
     auto S = [this](int v) { return Scale(v, dpi_); };
     int w = S(kFlagOut), unit = S(kFlagH + kFlagGap), h = g.flagCount * unit - S(kFlagGap);
-    int x = place_.right ? monitor_.right - w : monitor_.left, y = g.screen.top + g.flagTop;
+    int x = place_.right ? work_.right - w : work_.left, y = g.screen.top + g.flagTop;
     flagsRect_ = {x, y, x + w, y + h};
     Canvas c(w, h);
     flagTipY_.clear();
@@ -1211,8 +1288,8 @@ void Organizer::OpenForAdd() {
 void Organizer::DragOver(POINT pt, bool add) {
     // Near the bookmark (within a card's width of the edge, around its height) the tray opens to catch it.
     int reach = Scale(kCardW, dpi_);
-    bool nearEdge = place_.right ? pt.x >= monitor_.right - reach && pt.x <= monitor_.right
-                                 : pt.x <= monitor_.left + reach && pt.x >= monitor_.left;
+    bool nearEdge = place_.right ? pt.x >= work_.right - reach && pt.x <= monitor_.right
+                                 : pt.x <= work_.left + reach && pt.x >= monitor_.left;
     bool nearHandle = nearEdge && pt.y >= handleRect_.top - reach && pt.y <= handleRect_.bottom + reach;
     if (stickyDrop_ || nearHandle || (trayOpen_ && IsDropTarget(pt))) {
         bool changed = !dropMode_ || dropAdd_ != add;
@@ -1523,6 +1600,7 @@ LRESULT Organizer::OnHandle(UINT msg, WPARAM wp, LPARAM lp) {
                     int hh = handleRect_.bottom - handleRect_.top;
                     SetWindowPos(handle_, nullptr, c.x - (handleRect_.right - handleRect_.left) / 2, c.y - hh / 2, 0, 0,
                                  SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+                    ShowLanding(c);  // which screen and edge it will go to
                 }
             }
             return 0;
@@ -1565,7 +1643,7 @@ LRESULT Organizer::OnHandle(UINT msg, WPARAM wp, LPARAM lp) {
                 POINT c;
                 GetCursorPos(&c);
                 bool atEdge = visible_ && !trayOpen_ && !handleDragging_ && !GetCapture() &&
-                              (place_.right ? c.x == monitor_.right - 1 : c.x == monitor_.left) && c.y >= monitor_.top &&
+                              (place_.right ? c.x == work_.right - 1 : c.x == work_.left) && c.y >= monitor_.top &&
                               c.y < monitor_.bottom && GetAsyncKeyState(VK_LBUTTON) >= 0 && GetAsyncKeyState(VK_RBUTTON) >= 0;
                 if (atEdge) {
                     Geometry g = Measure((int)host_.OrganizerPiles().size());
@@ -1610,22 +1688,29 @@ LRESULT Organizer::OnHandle(UINT msg, WPARAM wp, LPARAM lp) {
                 return 0;
             }
             handleDragging_ = false;
+            HideLanding();
             // Dropped: the edge nearest to the pointer, on the monitor under it, at that height.
             POINT c;
             GetCursorPos(&c);
-            HMONITOR mon = MonitorFromPoint(c, MONITOR_DEFAULTTONEAREST);
-            MONITORINFOEXW mi{};
-            mi.cbSize = sizeof(mi);
-            GetMonitorInfoW(mon, &mi);
-            place_.monitor = mi.szDevice;
-            place_.right = c.x >= (mi.rcMonitor.left + mi.rcMonitor.right) / 2;
-            int wh = std::max<int>(1, mi.rcWork.bottom - mi.rcWork.top);
-            place_.yPermille = std::clamp<int>(MulDiv(c.y - mi.rcWork.top, 1000, wh), 0, 1000);
+            place_ = PlaceAt(c);
+            prepared_ = false;  // the drawer drawn while hovering is for where it was
             RenderHandle();
             RenderFlags();
             host_.OnOrganizerMoved();
+            if (place_.pinned) ShowTray();  // a pinned drawer is out again, at its new place
             return 0;
         }
+        case WM_CAPTURECHANGED:
+            if (handlePressed_ && (HWND)lp != handle_) {  // the move was cut short (another window took the mouse)
+                handlePressed_ = false;
+                if (handleDragging_) {
+                    handleDragging_ = false;
+                    HideLanding();
+                    RenderHandle();  // back where it was
+                    RenderFlags();
+                }
+            }
+            return 0;
         case WM_RBUTTONUP: {
             POINT c;
             GetCursorPos(&c);
@@ -1833,6 +1918,14 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
                 RenderTray();
                 return 0;
             }
+            // Grabbing the drawer itself (its bookmark, or its top row with the logo) moves the organizer. Not the
+            // rest of its body: a press that just misses a card must not carry the whole organizer off.
+            bool onTop = pressed_ < 0 && pressPt_.y < Measure((int)host_.OrganizerPiles().size()).logo.bottom;
+            bool grabsDrawer = trayPressed_ && (wp & MK_LBUTTON) && GetCapture() == tray_ && (pressed_ == kItemHandle || onTop);
+            if (grabsDrawer && (abs(p.x - pressPt_.x) > GetSystemMetrics(SM_CXDRAG) || abs(p.y - pressPt_.y) > GetSystemMetrics(SM_CYDRAG))) {
+                BeginMoveFromTray();
+                return 0;
+            }
             bool movable = pressed_ >= 0 && (pressed_ < kItemPlus || IsMessenger(pressed_) || IsClip(pressed_));
             if (movable && (abs(p.x - pressPt_.x) > GetSystemMetrics(SM_CXDRAG) || abs(p.y - pressPt_.y) > GetSystemMetrics(SM_CYDRAG))) {
                 auto at = [](const std::vector<RECT>& v, int i) { return i >= 0 && i < (int)v.size() ? &v[i] : nullptr; };
@@ -1871,11 +1964,13 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
             if (crumpleStart_) return 0;
             pressPt_ = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
             pressed_ = ItemAt(pressPt_);
+            trayPressed_ = true;
             SetCapture(tray_);
             return 0;
         }
         case WM_LBUTTONUP: {
             POINT p{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            trayPressed_ = false;
             if (drag_.item >= 0) {
                 EndDrag(p);
                 return 0;

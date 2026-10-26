@@ -125,6 +125,13 @@ private:
     LRESULT OnTray(UINT msg, WPARAM wp, LPARAM lp);
     LRESULT OnFlags(UINT msg, WPARAM wp, LPARAM lp);
     void Layout();  // monitor, dpi, bookmark rect from place_
+    // Moving it (grabbing the bookmark, or the open drawer by its bookmark or body): where it would go if
+    // let go at `pt` — the nearest edge of the monitor under the pointer, at that height — shown meanwhile
+    // as a dashed bookmark and a line along that edge.
+    Place PlaceAt(POINT pt) const;
+    void ShowLanding(POINT pt);
+    void HideLanding();
+    void BeginMoveFromTray();  // the drawer was grabbed: fold it and carry its bookmark
     void RenderHandle();
     void RenderTray(bool present = true);  // present = false: only draw trayCanvas_ (ahead of opening)
     void Prepare();                         // memos read and tray drawn while the pointer rests on the bookmark
@@ -168,6 +175,9 @@ private:
     OrganizerHost& host_;
     Place place_;
     HWND handle_ = nullptr, tray_ = nullptr, flags_ = nullptr, peek_ = nullptr;
+    HWND landing_ = nullptr;     // where a moved organizer will go (only while moving it)
+    std::wstring landingKey_;    // what it shows now, so it's redrawn only when that changes
+    bool trayPressed_ = false;   // the button went down on the open drawer (a drag there moves it)
     // Set to false when this is destroyed: a menu shown from inside it may rebuild or remove the organizer.
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
     std::unique_ptr<Canvas> trayCanvas_;  // the tray as last drawn

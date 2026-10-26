@@ -17,7 +17,8 @@ std::string Num(long long v) { return std::to_string(v); }
 
 std::string WriteMissing(const MissingWindow& m) {
     return "{\"exe\":" + json::Quote(m.exePath) + ",\"app\":" + json::Quote(m.appName) +
-           ",\"title\":" + json::Quote(m.title) + "}";
+           ",\"title\":" + json::Quote(m.title) + ",\"launch\":" + json::Quote(m.launch) +
+           ",\"aumid\":" + json::Quote(m.aumid) + "}";
 }
 
 MissingWindow ReadMissing(const json::Value& v) {
@@ -25,6 +26,8 @@ MissingWindow ReadMissing(const json::Value& v) {
     if (auto* x = v.Get("exe")) m.exePath = x->WStr();
     if (auto* x = v.Get("app")) m.appName = x->WStr();
     if (auto* x = v.Get("title")) m.title = x->WStr();
+    if (auto* x = v.Get("launch")) m.launch = x->WStr();  // absent before v0.3.1
+    if (auto* x = v.Get("aumid")) m.aumid = x->WStr();
     return m;
 }
 
@@ -83,7 +86,7 @@ bool SavePileState(const std::vector<SavedPile>& piles, bool background) {
             s += "{\"hwnd\":\"" + Num(m.hwnd) + "\",\"pid\":" + Num((uint64_t)m.pid) + ",\"createTime\":\"" +
                  Num(m.createTime) + "\",\"class\":" + json::Quote(m.className) + ",\"exe\":" + json::Quote(m.exePath) +
                  ",\"title\":" + json::Quote(m.title) + ",\"hidden\":" + (m.hidden ? "true" : "false") +
-                 ",\"z\":" + Num(m.stamp) +
+                 ",\"z\":" + Num(m.stamp) + ",\"launch\":" + json::Quote(m.launch) + ",\"aumid\":" + json::Quote(m.aumid) +
                  ",\"showCmd\":" + Num((uint64_t)m.wp.showCmd) + ",\"flags\":" + Num((uint64_t)m.wp.flags) +
                  ",\"normal\":[" + Num((long long)r.left) + "," + Num((long long)r.top) + "," + Num((long long)r.right) +
                  "," + Num((long long)r.bottom) + "],\"maxPos\":[" + Num((long long)m.wp.ptMaxPosition.x) + "," +
@@ -163,6 +166,8 @@ bool LoadPileState(std::vector<SavedPile>& piles) {
                 if (auto* x = mv.Get("title")) m.title = x->WStr();
                 if (auto* x = mv.Get("hidden")) m.hidden = x->Bool();
                 if (auto* x = mv.Get("z")) m.stamp = x->U64();  // absent in files from v0.2.0 and earlier
+                if (auto* x = mv.Get("launch")) m.launch = x->WStr();  // absent before v0.3.1
+                if (auto* x = mv.Get("aumid")) m.aumid = x->WStr();
                 if (auto* x = mv.Get("showCmd")) m.wp.showCmd = (UINT)x->U64();
                 if (auto* x = mv.Get("flags")) m.wp.flags = (UINT)x->U64();
                 if (auto* x = mv.Get("normal"); x && x->arr.size() == 4)

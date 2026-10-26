@@ -18,6 +18,7 @@ struct SavedMember {
     WINDOWPLACEMENT wp{sizeof(WINDOWPLACEMENT)};
     bool hidden = false;
     uint64_t stamp = 0;  // stacking order when put away (Member::stamp)
+    std::wstring launch, aumid;  // how to bring the window back (Member::launch / aumid)
 };
 
 struct SavedPile {

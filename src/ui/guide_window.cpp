@@ -20,6 +20,7 @@ namespace {
 
 constexpr int kWidth = 520, kPad = 28, kBadge = 26, kGapStep = 18, kMark = 40;
 constexpr int kTabsH = 36, kRowH = 52, kToggleW = 40, kToggleH = 22, kSideW = 64, kSwatchH = 34, kSwatchGap = 8;
+constexpr int kDisplayW = 40;
 constexpr int kSwatchesPerRow = 7;
 const wchar_t kCaption[] = L"Stack Neverflow 설정 · 사용법";  // taskbar / Alt+Tab
 const wchar_t kSlogan[] = L"Tasks stack up, but never overflow.";
@@ -44,6 +45,8 @@ enum Hit {
     kHitSlide,
     kHitSide = 30,  // + 0 left, 1 right
     kHitFolder = 40,
+    kHitIdentify = 49,
+    kHitDisplay = 50,  // + display index (left to right)
     kHitMaterial = 100,  // + index into kOrganizerMaterials
 };
 
@@ -75,6 +78,8 @@ void GuideWindow::Show(Tab tab) {
     tab_ = tab;
     s_ = get_();
     if (hwnd_) {
+        Layout();  // displays may have come or gone since
+        SetWindowPos(hwnd_, nullptr, 0, 0, size_.cx, size_.cy, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         InvalidateRect(hwnd_, nullptr, FALSE);
         SetForegroundWindow(hwnd_);
         return;
@@ -92,7 +97,8 @@ void GuideWindow::Show(Tab tab) {
          L"접혀요."},
         {L"오거나이저와 메모",
          L"더미 카드를 화면 끝 손잡이로 끌어다 빈 칸에 놓으면 오거나이저에 꽂혀요. 손잡이나 그 높이의 화면 끝에 "
-         L"마우스를 대면 서랍이 열리고, 포스트잇 디스펜서의 PUSH를 누르면 새 메모가 날아와 열려요."},
+         L"마우스를 대면 서랍이 열리고, 포스트잇 디스펜서의 PUSH를 누르면 새 메모가 날아와 열려요. 손잡이나 열린 "
+         L"서랍의 맨 윗줄을 잡고 끌면 다른 모니터의 원하는 끝으로 옮겨져요."},
         {L"이름·색 바꾸기", L"더미를 오른쪽 버튼으로 누르고 '이름·색 바꾸기'를 고르세요."},
     };
     POINT center;
@@ -146,7 +152,22 @@ void GuideWindow::Layout() {
     y += S(14);
     section(1);
     row(kHitOrganizer, L"오거나이저 사용", L"화면 끝 막대에 더미를 꽂아 두는 서랍", S(kToggleW), false);
-    row(kHitSide, L"놓을 위치", L"막대는 끌어서 위아래·다른 모니터로도 옮겨요", 2 * S(kSideW) + S(6), true);
+    // Which display, then which edge of it. Grabbing the bookmark or the open drawer and dropping it on
+    // another screen does the same.
+    displays_ = ListDisplays();
+    int idW = MeasureUiText(L"식별", S(13), true).cx + S(20), n = std::max<int>(1, (int)displays_.size());
+    std::wstring primaryNote = L"막대나 서랍 맨 윗줄을 끌어 옮겨도 돼요";
+    for (size_t i = 0; i < displays_.size(); ++i)
+        if (displays_[i].primary && displays_.size() > 1) primaryNote += L" · " + std::to_wstring(i + 1) + L"번이 주 화면";
+    row(kHitDisplay, L"디스플레이", primaryNote, n * S(kDisplayW) + (n - 1) * S(6) + S(10) + idW, true);
+    displayRects_.clear();
+    for (int i = 0; i < (int)displays_.size(); ++i) {
+        int x = rows_.back().control.left + i * (S(kDisplayW) + S(6));
+        displayRects_.push_back({x, rows_.back().control.top - S(4), x + S(kDisplayW), rows_.back().control.bottom + S(4)});
+    }
+    identifyRect_ = {rows_.back().control.right - idW, rows_.back().control.top - S(4), rows_.back().control.right,
+                     rows_.back().control.bottom + S(4)};
+    row(kHitSide, L"놓을 위치", L"그 화면의 왼쪽 또는 오른쪽 끝", 2 * S(kSideW) + S(6), true);
     sideRects_[0] = {rows_.back().control.left, rows_.back().control.top - S(4), rows_.back().control.left + S(kSideW),
                      rows_.back().control.bottom + S(4)};
     sideRects_[1] = {sideRects_[0].right + S(6), sideRects_[0].top, sideRects_[0].right + S(6) + S(kSideW), sideRects_[0].bottom};
@@ -260,6 +281,17 @@ void GuideWindow::Paint(HDC dc) {
                     c.Text(i ? L"오른쪽" : L"왼쪽", sideRects_[i], on ? kPrimaryFg : kForeground, S(13), true,
                            DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                 }
+            } else if (r.hit == kHitDisplay) {
+                for (int i = 0; i < (int)displayRects_.size(); ++i) {
+                    bool on = s_.monitor == displays_[i].device;
+                    c.FillRoundRect(displayRects_[i], S(kRadiusSm), on ? kPrimary : hover_ == kHitDisplay + i ? kMuted : kBackground);
+                    if (!on) c.StrokeRoundRect(displayRects_[i], S(kRadiusSm), 1, kBorder);
+                    c.Text(std::to_wstring(i + 1), displayRects_[i], on ? kPrimaryFg : kForeground, S(13), true,
+                           DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                }
+                c.FillRoundRect(identifyRect_, S(kRadiusSm), hover_ == kHitIdentify ? kMuted : kBackground);
+                c.StrokeRoundRect(identifyRect_, S(kRadiusSm), 1, kBorder);
+                c.Text(L"식별", identifyRect_, kForeground, S(13), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             } else if (r.hit == kHitFolder) {
                 c.Text(s_.memoDir, folderRect_, kMutedFg, S(12), false, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_PATH_ELLIPSIS);
                 c.FillRoundRect(folderButton_, S(kRadiusSm), hover_ == kHitFolder ? kMuted : kBackground);
@@ -319,6 +351,10 @@ int GuideWindow::HitAt(POINT p) const {
         if (r.hit == kHitSide) {
             for (int i = 0; i < 2; ++i)
                 if (PtInRect(&sideRects_[i], p)) return kHitSide + i;
+        } else if (r.hit == kHitDisplay) {
+            for (int i = 0; i < (int)displayRects_.size(); ++i)
+                if (PtInRect(&displayRects_[i], p)) return kHitDisplay + i;
+            if (PtInRect(&identifyRect_, p)) return kHitIdentify;
         } else if (r.hit == kHitFolder) {
             if (PtInRect(&folderButton_, p)) return kHitFolder;
         } else if (r.hit != kHitMaterial && PtInRect(&r.rect, p)) {
@@ -341,6 +377,9 @@ void GuideWindow::Click(int hit) {
     } else if (hit == kHitFolder) {
         ShellExecuteW(nullptr, L"open", s_.memoDir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         return;
+    } else if (hit == kHitIdentify) {
+        IdentifyDisplays();
+        return;
     } else if (hit) {
         AppSettings next = s_;
         if (hit == kHitAutostart) next.autostart = !next.autostart;
@@ -348,6 +387,7 @@ void GuideWindow::Click(int hit) {
         else if (hit == kHitOrganizer) next.organizer = !next.organizer;
         else if (hit == kHitSlide) next.slide = !next.slide;
         else if (hit == kHitSide || hit == kHitSide + 1) next.right = hit == kHitSide + 1;
+        else if (hit >= kHitDisplay && hit < kHitDisplay + (int)displays_.size()) next.monitor = displays_[hit - kHitDisplay].device;
         else if (hit >= kHitMaterial) next.material = kOrganizerMaterials[hit - kHitMaterial].id;
         set_(next);
         s_ = get_();  // as it really is now

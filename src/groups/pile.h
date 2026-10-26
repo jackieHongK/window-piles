@@ -23,6 +23,9 @@ struct Member {
     std::wstring className;
     std::wstring exePath;  // to tell the user which app to reopen if the window is gone later
     std::wstring title;
+    // How to bring this very window back if its app goes away (app/relaunch.h): its command line (with the
+    // document, folder or browser profile) and, for Store apps, their app id. Refreshed when put away.
+    std::wstring launch, aumid;
     WINDOWPLACEMENT placement{sizeof(WINDOWPLACEMENT)};  // where to bring it back
     RECT lastRect{};  // screen rect when last visible (for the gather animation)
     bool hidden = false;
@@ -43,6 +46,7 @@ struct MissingWindow {
     std::wstring exePath;
     std::wstring appName;
     std::wstring title;
+    std::wstring launch, aumid;  // as remembered from the window (Member::launch / aumid)
     bool launched = false;  // reopened from the card this session (not saved): don't launch it again
 };
 

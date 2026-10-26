@@ -23,8 +23,10 @@ add_executable(WindowPiles WIN32
     src/app/app.cpp
     src/app/app_icon.cpp
     src/app/arrival.cpp
+    src/app/relaunch.cpp
     src/common/win_util.cpp
     src/common/canvas.cpp
+    src/common/displays.cpp
     src/common/json.cpp
     src/recovery/journal.cpp
     src/groups/pile_store.cpp
@@ -51,7 +53,7 @@ add_executable(WindowPiles WIN32
     src/ui/wordmark.cpp
     src/ui/material.cpp)
 target_include_directories(WindowPiles PRIVATE src)
-target_link_libraries(WindowPiles PRIVATE user32 gdi32 dwmapi shell32 shlwapi shcore advapi32 comdlg32 wtsapi32 kernel32 d3d11 dxgi windowsapp ole32 version windowscodecs)
+target_link_libraries(WindowPiles PRIVATE user32 gdi32 dwmapi shell32 shlwapi shcore advapi32 comdlg32 wtsapi32 kernel32 d3d11 dxgi windowsapp ole32 oleaut32 version windowscodecs)
 
 # The exe's icon (Explorer, shortcuts, pinned items) is generated at build time from the same drawing
 # code the app uses at runtime (DrawMark), so there is no binary .ico in the repo to keep in sync.
@@ -101,6 +103,15 @@ target_link_libraries(e2e_perf PRIVATE poc_common)
 # Unit test: unread counts in window titles.
 add_executable(unread_test tests/unit/unread_test.cpp src/groups/unread.cpp)
 target_include_directories(unread_test PRIVATE src)
+
+# A window gone after a reboot is started again with its remembered command line and rejoins (no mouse input).
+add_executable(e2e_relaunch tests/e2e/e2e_relaunch.cpp)
+target_link_libraries(e2e_relaunch PRIVATE poc_common)
+
+# Tool: checks how windows would be started again (browser profiles, Explorer folders, Store app ids).
+add_executable(relaunch_check tests/tools/relaunch_check.cpp src/app/relaunch.cpp src/common/win_util.cpp)
+target_include_directories(relaunch_check PRIVATE src)
+target_link_libraries(relaunch_check PRIVATE user32 shell32 shlwapi shcore advapi32 ole32 oleaut32)
 
 # Tool: renders the app mark and tray icons into one image for review (icon_preview out.bmp).
 add_executable(icon_preview tests/tools/icon_preview.cpp src/app/app_icon.cpp src/common/canvas.cpp src/ui/wordmark.cpp)

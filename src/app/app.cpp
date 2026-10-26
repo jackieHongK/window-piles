@@ -9,8 +9,10 @@
 #include <map>
 
 #include "activity/activity_log.h"
+#include "app/relaunch.h"
 #include "app/app_icon.h"
 #include "app/arrival.h"
+#include "common/displays.h"
 #include "common/win_util.h"
 #include "groups/pile_store.h"
 #include "recovery/journal.h"
@@ -38,6 +40,7 @@ constexpr UINT_PTR kTimerReclaimNote = 6;
 constexpr UINT_PTR kTimerReclaimFold = 7;
 constexpr UINT_PTR kTimerRevalidate = 8;
 constexpr UINT_PTR kTimerActivity = 9;
+constexpr UINT_PTR kTimerAdopt = 10;  // an app started from a card showed no new window: take its window in
 constexpr UINT WM_APP_RECLAIM = WM_APP + 4;
 constexpr UINT WM_APP_TITLE = WM_APP + 5;
 constexpr UINT WM_APP_FLUSH = WM_APP + 6;  // deferred redraws and journal write (one per burst)
@@ -241,6 +244,23 @@ void SaveOrganizerPlace(const Organizer::Place& p) {
     WritePrivateProfileStringW(L"organizer", L"pinned", p.pinned ? L"1" : L"0", ini.c_str());
 }
 
+// The display the organizer is on: the remembered one while it is connected, the primary otherwise
+// (as the organizer itself falls back).
+std::wstring OrganizerDisplay(const Organizer::Place& p) {
+    for (const DisplayInfo& d : ListDisplays())
+        if (d.device == p.monitor) return d.device;
+    return PrimaryDisplay();
+}
+
+// Which displays there are and where: changes when one is plugged in, unplugged or rearranged.
+std::wstring DisplaysKey() {
+    std::wstring key;
+    for (const DisplayInfo& d : ListDisplays())
+        key += d.device + L"|" + std::to_wstring(d.monitor.left) + L"," + std::to_wstring(d.monitor.top) + L"," +
+               std::to_wstring(d.monitor.right) + L"," + std::to_wstring(d.monitor.bottom) + L";";
+    return key;
+}
+
 void SetFlag(const wchar_t* name, bool on) {
     if (on) {
         HANDLE f = CreateFileW(FlagPath(name).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
@@ -301,6 +321,7 @@ int App::Run() {
             s.organizer = organizer_ != nullptr;
             Organizer::Place p = organizer_ ? organizer_->place() : LoadOrganizerPlace();
             s.right = p.right;
+            s.monitor = OrganizerDisplay(p);
             s.slide = p.slide;
             s.material = p.material;
             s.memoDir = MemoDir();
@@ -317,9 +338,10 @@ int App::Run() {
                 SetFlag(L"organizer.off", !s.organizer);
             }
             Organizer::Place place = organizer_ ? organizer_->place() : LoadOrganizerPlace();
-            bool moved = place.right != s.right;
+            bool moved = place.right != s.right || OrganizerDisplay(place) != s.monitor;
             if (!moved && place.slide == s.slide && place.material == s.material) return;
             place.right = s.right;
+            place.monitor = s.monitor;
             place.slide = s.slide;
             place.material = s.material;
             SaveOrganizerPlace(place);
@@ -409,7 +431,7 @@ int App::RestoreSavedPiles() {
             e.className = sm.className;
             if (!ValidateIdentity(e).empty()) {
                 // The window is gone (app closed, or the PC restarted): remember it in the list.
-                p->missing.push_back({sm.exePath, FriendlyAppName(FileName(sm.exePath)), sm.title});
+                p->missing.push_back({sm.exePath, FriendlyAppName(FileName(sm.exePath)), sm.title, sm.launch, sm.aumid});
                 continue;
             }
             Member m;
@@ -418,6 +440,8 @@ int App::RestoreSavedPiles() {
             m.createTime = sm.createTime;
             m.className = sm.className;
             m.exePath = sm.exePath;
+            m.launch = sm.launch;
+            m.aumid = sm.aumid;
             m.title = WindowTitle(m.hwnd);
             m.placement = sm.wp;
             m.placement.length = sizeof(WINDOWPLACEMENT);
@@ -508,6 +532,8 @@ void App::PersistNow(bool background) {
             sm.createTime = m.createTime;
             sm.className = m.className;
             sm.exePath = m.exePath;
+            sm.launch = m.launch;
+            sm.aumid = m.aumid;
             sm.title = IsWindow(m.hwnd) ? WindowTitle(m.hwnd) : m.title;
             sm.wp = m.placement;
             sm.hidden = m.hidden;
@@ -520,15 +546,15 @@ void App::PersistNow(bool background) {
 }
 
 void App::AddMissing(Pile& pile, const Member& m) {
-    pile.missing.push_back({m.exePath, FriendlyAppName(FileName(m.exePath)), m.title});
+    pile.missing.push_back({m.exePath, FriendlyAppName(FileName(m.exePath)), m.title, m.launch, m.aumid});
     TrimMissing(pile);
 }
 
 void App::ClaimMissing(Pile& pile, const Member& m) {
     // The same app's window came back into this pile: drop one matching "reopen" entry,
     // preferring the one with the same title.
-    std::wstring exe = Lower(m.exePath);
-    auto sameExe = [&](const MissingWindow& w) { return !exe.empty() && Lower(w.exePath) == exe; };
+    std::wstring exe = m.exePath.empty() ? std::wstring() : AppKey(m.exePath);  // a Store app stays itself across updates
+    auto sameExe = [&](const MissingWindow& w) { return !exe.empty() && AppKey(w.exePath) == exe; };
     auto it = std::find_if(pile.missing.begin(), pile.missing.end(),
                            [&](const MissingWindow& w) { return sameExe(w) && w.title == m.title; });
     if (it == pile.missing.end()) it = std::find_if(pile.missing.begin(), pile.missing.end(), sameExe);
@@ -656,6 +682,7 @@ void App::OnDragDrop(HWND hwnd, const WINDOWPLACEMENT& before, POINT cursor, Dro
     m.className = WindowClass(hwnd);
     m.exePath = ProcessExePath(m.pid);
     m.title = WindowTitle(hwnd);
+    RememberLaunch(m);
     m.placement = before;  // come back to where it was before the drag, not to the drop spot
     ClaimMissing(*target, m);
     target->members.push_back(std::move(m));
@@ -741,9 +768,10 @@ void App::ShowCard(Pile& pile) {
 
 void App::OnMissingClick(Pile& pile, int index) {
     if (index < 0 || index >= (int)pile.missing.size()) return;
-    const MissingWindow& w = pile.missing[index];
+    MissingWindow& w = pile.missing[index];
     if (w.exePath.empty() || Lower(FileName(w.exePath)) == L"applicationframehost.exe") return;
-    LaunchIntoPile(pile, w.exePath);
+    w.launched = true;
+    LaunchIntoPile(pile, w);
 }
 
 void App::RelaunchMissing(Pile& pile) {
@@ -753,21 +781,88 @@ void App::RelaunchMissing(Pile& pile) {
         // Store apps run inside ApplicationFrameHost: launching that opens nothing.
         if (w.launched || exe.empty() || Lower(FileName(exe)) == L"applicationframehost.exe") continue;
         w.launched = true;
-        if (std::find(launched.begin(), launched.end(), exe) != launched.end()) continue;  // once per app
-        launched.push_back(exe);
-        LaunchIntoPile(pile, w.exePath);
+        // Each browser window is its own start (a new window each); other apps once per command, since
+        // starting most apps twice just brings the same window forward.
+        std::wstring key = Lower(w.aumid + L"|" + (w.launch.empty() ? exe : w.launch));
+        if (!IsBrowser(exe) && std::find(launched.begin(), launched.end(), key) != launched.end()) continue;
+        launched.push_back(key);
+        LaunchIntoPile(pile, w);
     }
 }
 
-void App::LaunchIntoPile(Pile& pile, const std::wstring& exePath) {
-    // Opens the app without arguments (we don't know which document it had open). Its next window
-    // joins this pile and takes the entry off the list (TryReclaim).
-    ShellExecuteW(nullptr, L"open", exePath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-    JoinNextWindow(pile, exePath);
+void App::LaunchIntoPile(Pile& pile, const MissingWindow& w) {
+    // Starts that window again the way it was remembered (its document, folder, browser profile; a Store
+    // app by its id). Its next window joins this pile and takes the entry off the list (TryReclaim).
+    if (!LaunchWindow(w.exePath, {w.launch, w.aumid})) {
+        Notify(L"앱을 열지 못했어요", w.appName + L"을(를) 다시 시작할 수 없었어요. 직접 열어서 더미에 넣어 주세요.");
+        return;
+    }
+    JoinNextWindow(pile, w.exePath);
+    // An app with a single window that is already running (new Outlook) only brings that window forward:
+    // if no new window joins shortly, its window that is in no pile goes into this one (AdoptLaunched).
+    if (!IsBrowser(w.exePath)) {  // a browser always opens a new window: never take the one being used
+        adoptPending_.push_back({pile.id, AppKey(w.exePath)});
+        SetTimer(main_, kTimerAdopt, 2500, nullptr);
+    }
+}
+
+void App::AdoptLaunched() {
+    KillTimer(main_, kTimerAdopt);
+    std::vector<std::pair<int, std::wstring>> pending;
+    pending.swap(adoptPending_);
+    for (const auto& [pileId, key] : pending) {
+        // Already taken care of: a new window of that app joined (its launch entry is used up).
+        auto entry = std::find_if(launchJoin_.begin(), launchJoin_.end(),
+                                  [&](const auto& e) { return e.first == key && e.second == pileId; });
+        Pile* pile = FindPile(pileId);
+        if (entry == launchJoin_.end() || !pile) continue;
+        struct Ctx {
+            App* app;
+            const std::wstring* key;
+            HWND found = nullptr;
+            DWORD pid = 0;
+            std::wstring exe;
+        } ctx{this, &key};
+        EnumWindows([](HWND h, LPARAM lp) -> BOOL {
+            auto* c = (Ctx*)lp;
+            if (!IsWindowVisible(h) || c->app->PileOf(h) || WindowTitle(h).empty()) return TRUE;
+            DWORD pid = 0;
+            GetWindowThreadProcessId(h, &pid);
+            std::wstring exe = ProcessExePath(pid);
+            if (exe.empty() || AppKey(exe) != *c->key || !c->app->CanPile(h)) return TRUE;
+            c->found = h, c->pid = pid, c->exe = exe;
+            return FALSE;  // the front-most such window
+        }, (LPARAM)&ctx);
+        if (!ctx.found) continue;
+        launchJoin_.erase(entry);
+        Member m;
+        m.hwnd = ctx.found;
+        m.pid = ctx.pid;
+        m.createTime = ProcessCreateTime(ctx.pid);
+        m.className = WindowClass(ctx.found);
+        m.exePath = ctx.exe;
+        m.title = WindowTitle(ctx.found);
+        RememberLaunch(m);
+        GetWindowPlacement(ctx.found, &m.placement);
+        ClaimMissing(*pile, m);
+        pile->members.push_back(std::move(m));
+        Log("relaunch: took the running window of an app started from pile %d", pileId);
+        if (pile->folded) HideMembers(*pile, {ctx.found}, false, false);
+        else {
+            Refresh(*pile);
+            SaveJournal();
+        }
+    }
+}
+
+void App::RememberLaunch(Member& m) {
+    LaunchInfo info = CaptureLaunch(m.hwnd, m.pid, m.exePath);
+    if (!info.command.empty()) m.launch = info.command;  // keep what was known if this read gets nothing
+    if (!info.aumid.empty()) m.aumid = info.aumid;
 }
 
 void App::JoinNextWindow(Pile& pile, const std::wstring& exePath) {
-    launchJoin_[Lower(exePath)] = pile.id;
+    launchJoin_.emplace(AppKey(exePath), pile.id);  // one entry per start: two windows started, two join
     launchJoinUntil_ = NowMs() + 60 * 1000;  // ponytail: fixed wait, slow apps starting later aren't joined
     UpdateReclaim();
 }
@@ -1073,6 +1168,7 @@ void App::HideMembers(Pile& pile, const std::vector<HWND>& hwnds, bool readPlace
         for (HWND h : visible) {
             Member* m = pile.Find(h);
             m->title = WindowTitle(h);
+            RememberLaunch(*m);  // the document, folder or profile it shows now, should its app go away
             if (IsWindowVisible(h) && !IsIconic(h)) {
                 GetWindowRect(h, &m->lastRect);
                 if (pile.ShowsPreview(*m)) from.push_back(m->lastRect);  // a few ghosts say it all
@@ -1498,6 +1594,7 @@ void App::SetOrganizer(bool on) {
     if (on == (organizer_ != nullptr)) return;
     if (on) {
         organizer_ = std::make_unique<Organizer>(*this, LoadOrganizerPlace());
+        displaysKey_ = DisplaysKey();
         if (uiHidden_) organizer_->SetVisible(false);
         for (auto& p : piles_)
             if (p->docked) p->view->SetVisible(false);
@@ -1642,6 +1739,16 @@ void App::Revalidate() {
     for (HWND h : dead) OnMemberGone(h);
     for (auto& p : piles_) p->view->Render();
     if (frame_) UpdateFrame();
+    // A display plugged in, unplugged or rearranged: the organizer goes back to its own display when that
+    // one is there, else to the primary (it keeps remembering its own).
+    std::wstring key = DisplaysKey();
+    bool changed = key != displaysKey_;
+    displaysKey_ = key;
+    if (changed && organizer_) {
+        organizer_ = std::make_unique<Organizer>(*this, organizer_->place());
+        if (uiHidden_) organizer_->SetVisible(false);
+        organizer_->Refresh();
+    }
 }
 
 void App::UpdateReclaim() {
@@ -1683,14 +1790,14 @@ void App::TryReclaim(HWND hwnd, bool justShown) {
     GetWindowThreadProcessId(hwnd, &pid);
     auto cached = reclaimExe_.find(pid);
     if (cached == reclaimExe_.end()) cached = reclaimExe_.emplace(pid, ProcessExePath(pid)).first;
-    const std::wstring exe = Lower(cached->second);
+    const std::wstring exe = cached->second.empty() ? std::wstring() : AppKey(cached->second);
     if (exe.empty()) return;
     // Same app, same window title as before the reboot: it belongs in that pile.
     Pile* target = nullptr;
     if (afterBoot_ && NowMs() - startedMs_ < kReclaimWindowMs)
         for (auto& p : piles_)
             if (std::any_of(p->missing.begin(), p->missing.end(),
-                            [&](const MissingWindow& w) { return w.title == title && Lower(w.exePath) == exe; })) {
+                            [&](const MissingWindow& w) { return w.title == title && AppKey(w.exePath) == exe; })) {
                 target = p.get();
                 break;
             }
@@ -1711,6 +1818,7 @@ void App::TryReclaim(HWND hwnd, bool justShown) {
     m.className = WindowClass(hwnd);
     m.exePath = cached->second;
     m.title = title;
+    RememberLaunch(m);
     GetWindowPlacement(hwnd, &m.placement);
     ClaimMissing(*target, m);  // the same-title entry if there is one, else one of the same app
     target->members.push_back(std::move(m));
@@ -1894,6 +2002,7 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
                     Notify(L"더미를 다시 묶었어요", L"다시 열린 창 " + std::to_wstring(reclaimed_) + L"개를 원래 더미로 돌려놨어요.");
                 reclaimed_ = 0;
             } else if (wp == kTimerReclaimFold) FoldReclaimed();
+            else if (wp == kTimerAdopt) AdoptLaunched();
             else if (wp == kTimerRevalidate) {
                 KillTimer(main_, kTimerRevalidate);
                 Revalidate();

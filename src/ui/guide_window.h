@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "common/displays.h"
+
 namespace wp {
 
 struct AppSettings {
@@ -16,6 +18,7 @@ struct AppSettings {
     bool shown = true;       // cards, organizer and frame on screen ("항상 위로"), or put away ("숨기기")
     bool organizer = true;   // the edge organizer is on
     bool right = true;       // ... on the right edge
+    std::wstring monitor;    // ... of this display (device name, common/displays.h)
     bool slide = true;       // ... its drawer slides out
     std::string material = "walnut";
     std::wstring memoDir;
@@ -62,6 +65,9 @@ private:
     std::vector<std::pair<int, RECT>> sections_;  // index into kSections, title rect
     std::vector<RECT> swatches_;
     RECT tabsRect_{}, tabRects_[2]{}, sideRects_[2]{}, materialNameRect_{}, folderRect_{}, folderButton_{};
+    std::vector<DisplayInfo> displays_;  // as connected when the window was laid out
+    std::vector<RECT> displayRects_;     // one button per display
+    RECT identifyRect_{};                // "식별": each display shows its number
     RECT closeRect_{}, buttonRect_{}, tipRect_{}, tipTitleRect_{}, tipTextRect_{};
     int headerH_ = 0, contentTop_ = 0;
     int hover_ = 0;
