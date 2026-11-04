@@ -46,6 +46,9 @@ public:
     // Showing again goes right under `insertAfter` (the card above it), so cards keep their stacking order.
     void SetVisible(bool visible, HWND insertAfter = HWND_TOPMOST);
     bool visible() const { return visible_; }
+    // Carried over the open organizer, the card is shown there at slot size instead (Organizer::DragOver):
+    // this window stays, holding the drag, but is not seen.
+    void SetStandIn(bool on);
     RECT ScreenRect() const;  // whole window (incl. shadow margin)
     RECT CardRect() const;    // the card itself, screen px
     RECT RenameRect() const;  // where the quick-rename input goes (title area), screen px
@@ -70,6 +73,7 @@ private:
     bool hot_ = false;
     bool hover_ = false;
     bool visible_ = true;
+    bool standIn_ = false;  // SetStandIn: drawn see-through
 
     std::vector<RECT> missingRects_;  // client coords of the missing-window rows
     std::vector<RECT> fileRects_;     // client coords of the file rows

@@ -42,7 +42,7 @@ public:
     // OrganizerHost
     std::vector<Pile*> OrganizerPiles() override;
     void OnOrganizerOpen(Pile& pile) override;
-    void OnOrganizerCarryOut(Pile& pile, POINT screenPt) override;
+    void OnOrganizerCarryOut(Pile& pile, double fx, double fy) override;
     void OnOrganizerMenu(Pile* pile, POINT screenPt) override;
     void OnOrganizerMoved() override;
     void OnOrganizerReorder(const std::vector<int>& pileIds) override;

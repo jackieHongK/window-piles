@@ -42,8 +42,9 @@ public:
     virtual ~OrganizerHost() = default;
     virtual std::vector<Pile*> OrganizerPiles() = 0;                  // piles kept in the tray (any order)
     virtual void OnOrganizerOpen(Pile& pile) = 0;                      // a card in the tray was clicked
-    // A card in the tray started being dragged: take it out and let its desktop card follow the pointer.
-    virtual void OnOrganizerCarryOut(Pile& pile, POINT screenPt) = 0;
+    // A card in the tray was dragged out of it: take it out and let its desktop card follow the pointer, held
+    // at the same spot (fx, fy: 0..1 across and down the card) it was grabbed by in the tray.
+    virtual void OnOrganizerCarryOut(Pile& pile, double fx, double fy) = 0;
     virtual void OnOrganizerMenu(Pile* pile, POINT screenPt) = 0;     // right click on a card, or the bookmark
     virtual void OnOrganizerMoved() = 0;                               // the bookmark moved: remember where
     // Piles moved between slots: pileIds[slot] (-1 = empty; ids past the slots don't fit on this screen).
@@ -71,7 +72,10 @@ public:
     void Refresh();  // the piles in it changed: redraw the bookmark and, if open, the tray
     // Something is being carried at `pt`: near the bookmark the tray opens as a drop target. `add`: a window
     // or files, which go into the pile whose card they are dropped on (otherwise a desktop card, which docks).
-    void DragOver(POINT pt, bool add = false);
+    // `carried`: that desktop card. Over the open tray it is shown there as it would sit in a slot, settled
+    // into the empty one under the pointer, which is where it goes if let go; true while it is (the desktop
+    // card should not be seen meanwhile).
+    bool DragOver(POINT pt, bool add = false, Pile* carried = nullptr);
     void DragEnd();
     // A window is being dragged while a pile is open: the tray comes out and stays out until the drag ends.
     void OpenForAdd();
@@ -81,12 +85,14 @@ public:
     void SetSlide(bool on) { place_.slide = on; }
     void SetMaterial(const std::string& id);
     bool IsDropTarget(POINT pt) const;  // dropping a card here keeps it in the tray
-    // How many piles it holds: like a real tray it has a fixed number of slots, as many as fit in 60% of
-    // the screen's height (at least 2). A card dropped on a full tray stays on the desktop.
+    // Like a real tray it has a fixed number of slots on a page, as many as fit on the screen (at most five,
+    // at least 2), and pages of them side by side, flipped through below the slots. A new page opens when
+    // every slot is taken and another card comes. Capacity: all the slots of all the pages it may have.
+    int SlotsPerPage() const;
     int Capacity() const;
     bool Full() const;
-    // The slot a pile put in now goes to: the empty one under `at` (screen) if the tray is open there,
-    // else the first empty one.
+    // The slot a pile put in now goes to (counted across the pages: page * SlotsPerPage() + slot): the empty
+    // one under `at` (screen) on the page shown, if the tray is open there, else the first empty one.
     int FreeSlot(const POINT* at);
     void Raise();                // back on top of other always-on-top windows (an open pile's frame)
     void SetVisible(bool show);  // "숨기기" in the tray icon menu
@@ -104,7 +110,8 @@ private:
         int bodyLeft = 0, bodyRight = 0;  // the walnut, without what sticks out toward the desktop
         int cardX = 0, slide = 0;
         RECT logo{};
-        int slotTop = 0, slots = 0, more = 0;  // more: piles that don't fit on this screen
+        int slotTop = 0, slots = 0;  // slots: on one page
+        int pages = 1, pagerTop = 0; // the pages, and the row that flips through them (only with two or more)
         int memoLabelY = 0, flagTop = 0, flagCount = 0;
         int clipLabelY = 0, clipTop = 0;  // the clipboard shelf
         int dockLabelY = 0, dockTop = 0;  // the messenger dock
@@ -116,7 +123,13 @@ private:
     RECT SlotRect(const Geometry& g, int slot) const;
     RECT FlagRect(const Geometry& g, int i) const;
     // Piles by slot: each in its own slot if it's free and fits, the rest in the first free ones.
-    std::vector<Pile*> BySlot(int slots, std::vector<Pile*>* overflow);
+    std::vector<Pile*> BySlot(int slots, std::vector<Pile*>* overflow) const;
+    int PageCount() const;     // pages that hold a pile (at least one), and the new one opened for a drop
+    bool ShowPage(int page);   // flips to it (clamped); false if it was showing already
+    // Something carried (a card, or a window or files for one) held over the pager's arrows flips the page
+    // after a moment, and again while it stays there.
+    void HoverPager(POINT client);
+    Pile* PileById(int id) const;
 
     static LRESULT CALLBACK HandleProc(HWND, UINT, WPARAM, LPARAM);
     static LRESULT CALLBACK TrayProc(HWND, UINT, WPARAM, LPARAM);
@@ -131,6 +144,8 @@ private:
     Place PlaceAt(POINT pt) const;
     void ShowLanding(POINT pt);
     void HideLanding();
+    void ShowStandIn(Pile& p, POINT pt);  // the carried card at slot size (DragOver)
+    void HideStandIn();
     void BeginMoveFromTray();  // the drawer was grabbed: fold it and carry its bookmark
     void RenderHandle();
     void RenderTray(bool present = true);  // present = false: only draw trayCanvas_ (ahead of opening)
@@ -139,7 +154,9 @@ private:
     void SlideIn();                         // ... and the folding one, back into its bookmark
     void RenderFlags();  // the flag tips at the screen edge while the tray is put away
     void ShowTray();
-    void HideTray(bool force = false);  // pinned, it stays out unless forced (숨기기, moving it, pushing it in)
+    // Pinned, it stays out unless forced (숨기기, moving it, pushing it in). animate = false: gone at once, without
+    // sliding in (the slide holds up everything else meanwhile).
+    void HideTray(bool force = false, bool animate = true);
     int ItemAt(POINT client) const;  // a pile card's index, or one of the kItem* codes; -1 for none
     Pile* PileAt(int item);
     void Activate(int item, POINT screenPt);  // a click on an item
@@ -148,6 +165,7 @@ private:
     void AddClip(ClipItem item);            // the newest first; one already there moves to the front
     void ShowNotice(int row, const std::wstring& text);  // over a row of tiles for a moment: 0 dock, 1 clips
     void DrawDock(Canvas& c, const Geometry& g);
+    void DrawPager(Canvas& c, const Geometry& g);  // the pages: arrows and dots below the slots
     void DrawClips(Canvas& c, const Geometry& g);
     void DrawDispenser(Canvas& c, const Geometry& g, bool hot);
     void DrawNotice(Canvas& c, const Geometry& g, int row);
@@ -160,6 +178,7 @@ private:
     double NextSheet(double now) const;  // the next sheet coming up out of the slot: 0 .. 1
     void DrawBookmark(Canvas& c, const RECT& r, bool hot, bool body = true);  // body = false: grips and count only
     void DrawPileCard(Canvas& c, const RECT& card, Pile& p, bool hot);
+    int CarriedCardLeft(const Geometry& g) const;  // a pile card being dragged in the tray: its left, tray client
     void DrawFlag(Canvas& c, const RECT& flag, const MemoInfo& m, bool hot);
     void DrawTrash(Canvas& c, const RECT& area, double now);
     void EndDrag(POINT client);
@@ -177,6 +196,9 @@ private:
     HWND handle_ = nullptr, tray_ = nullptr, flags_ = nullptr, peek_ = nullptr;
     HWND landing_ = nullptr;     // where a moved organizer will go (only while moving it)
     std::wstring landingKey_;    // what it shows now, so it's redrawn only when that changes
+    HWND standIn_ = nullptr;     // a carried desktop card, at slot size over the open tray
+    std::unique_ptr<Canvas> standInCanvas_;
+    int standInPile_ = -1;       // the pile it was drawn for (-1: hidden)
     bool trayPressed_ = false;   // the button went down on the open drawer (a drag there moves it)
     // Set to false when this is destroyed: a menu shown from inside it may rebuild or remove the organizer.
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
@@ -201,7 +223,15 @@ private:
     bool trayOpen_ = false;
     bool dropMode_ = false;   // a card is being carried over it
     bool dropAdd_ = false;    // ... or a window or files, to put into one of its piles
-    int dropSlot_ = -1;       // the empty slot a carried card is over
+    int dropSlot_ = -1;       // the empty slot a carried card is over (on the page shown)
+    int page_ = 0;            // the page of pile slots shown
+    bool extraPage_ = false;  // a new, empty page opened for a card being brought in (every slot was taken)
+    int flipDir_ = 0;         // -1 / +1: something carried rests on the pager's arrow that way
+    int wheelAcc_ = 0;        // wheel or touchpad swipe over the slots, toward the next flip
+    double wheelAt_ = 0, flippedAt_ = 0;
+    RECT pagePrev_{}, pageNext_{};  // the pager's arrows, tray client (empty with one page)
+    std::vector<RECT> pageDots_;
+    bool carriedOut_ = false; // a card just taken out: not a drop target for it until the pointer has left
     // Explorer's file drags send no mouse messages: a held button resting on the bookmark opens the tray.
     bool filesDrag_ = false;
     double fileHoverSince_ = 0;
@@ -216,6 +246,7 @@ private:
     POINT pressPt_{};  // tray client
     struct Drag {
         int item = -1;          // pile index, or kItemMemo / kItemMessenger / kItemClip + index, while moving
+        int pileId = -1, from = -1;  // a pile card: which, and the slot (across pages) it was taken from
         int grabDx = 0, grabDy = 0;  // pointer to card top-left
         int x = 0, y = 0;            // pointer, tray client
         int slot = -1;          // where it would land (slot, or index among the flags or messengers)

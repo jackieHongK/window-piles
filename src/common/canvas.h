@@ -60,7 +60,7 @@ public:
     SIZE MeasureText(const std::wstring& text, int sizePx, bool bold, int wrapWidth = 0) const;
 
     // Pushes the canvas to a layered window at screen position `pt`.
-    void Present(HWND hwnd, POINT pt) const;
+    void Present(HWND hwnd, POINT pt, BYTE alpha = 255) const;
     // Copies the canvas into a normal (non-layered) window's DC; the canvas must be opaque.
     void Blit(HDC dst) const { BitBlt(dst, 0, 0, w_, h_, dc_, 0, 0, SRCCOPY); }
 

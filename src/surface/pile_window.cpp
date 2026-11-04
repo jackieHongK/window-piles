@@ -399,7 +399,14 @@ void PileWindow::Render() {
         c.FillRoundRect(b, h / 2, kBadge);
         if (!txt.empty()) c.Text(txt, b, RGB(255, 255, 255), S(14), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
-    c.Present(hwnd_, pile_.pos);
+    c.Present(hwnd_, pile_.pos, standIn_ ? 0 : 255);
+}
+
+void PileWindow::SetStandIn(bool on) {
+    if (on == standIn_) return;
+    standIn_ = on;
+    BLENDFUNCTION bf{AC_SRC_OVER, 0, (BYTE)(on ? 0 : 255), AC_SRC_ALPHA};
+    UpdateLayeredWindow(hwnd_, nullptr, nullptr, nullptr, nullptr, nullptr, 0, &bf, ULW_ALPHA);
 }
 
 LRESULT CALLBACK PileWindow::WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {

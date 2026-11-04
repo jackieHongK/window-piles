@@ -1,14 +1,19 @@
 // The memo's few formatting rules, kept as plain text so the .txt files read fine anywhere:
 //   "# ", "## ", "### "  headings 1-3      "- " or "* "  bullet list      "1. "  numbered list
-// Everything else is body text.
+//   "☐ ", "☑ "           a to-do and a done one (typed as "[] " or "[x] ", or by the memo's checklist button)
+// Everything else is body text. Web addresses in any line are links.
 #pragma once
 
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace wp {
 
-enum class MemoLine { Body, H1, H2, H3, Bullet, Number };
+enum class MemoLine { Body, H1, H2, H3, Bullet, Number, Task, Done };
+
+inline constexpr wchar_t kMemoTodo = 0x2610, kMemoDone = 0x2611;  // ☐ ☑
 
 struct MemoLineInfo {
     MemoLine kind = MemoLine::Body;
@@ -25,6 +30,14 @@ struct MemoEnter {
     std::wstring nextPrefix;  // to type after the line break ("- ", "4. "); empty for plain lines
 };
 MemoEnter MemoOnEnter(std::wstring_view line);
+
+// A line that starts with "[] ", "[ ] ", "[x] " (or "- [ ] ", "- [x] "): how much of it is that shortcut, and
+// the to-do marker it stands for ("☐ " or "☑ "); 0 if it doesn't start with one.
+size_t MemoTaskShortcut(std::wstring_view line, std::wstring* marker);
+
+// The web addresses in a line ("https://…", "http://…", "www.…"), as [start, end) in it: up to a space or
+// bracket, without the punctuation a sentence puts right after one.
+std::vector<std::pair<size_t, size_t>> FindMemoLinks(std::wstring_view line);
 
 // The memo's name in lists: its first non-empty line without markers (max 40 chars), and the next one.
 std::wstring MemoTitle(std::wstring_view text);

@@ -427,10 +427,10 @@ Image Canvas::ToImage() const {
     return img;
 }
 
-void Canvas::Present(HWND hwnd, POINT pt) const {
+void Canvas::Present(HWND hwnd, POINT pt, BYTE alpha) const {
     POINT src{0, 0};
     SIZE size{w_, h_};
-    BLENDFUNCTION bf{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+    BLENDFUNCTION bf{AC_SRC_OVER, 0, alpha, AC_SRC_ALPHA};
     UpdateLayeredWindow(hwnd, nullptr, &pt, &size, dc_, &src, 0, &bf, ULW_ALPHA);
 }
 

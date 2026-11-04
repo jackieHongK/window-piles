@@ -28,14 +28,17 @@ constexpr int kHandleW = 14, kHandleHoverW = 18, kHandleH = 128;
 constexpr int kTrayPad = 14, kLogoH = 30, kSectionGap = 14;
 constexpr int kCardW = 260, kCardHeader = 26, kCardStrip = 40, kCardGap = 12;
 constexpr int kCardH = kCardHeader + kCardStrip;
-constexpr int kMemoLabelH = 22, kFlagH = 26, kFlagGap = 6, kFlagMax = 5, kPlusH = 36, kMoreH = 22;
+constexpr int kMemoLabelH = 22, kFlagH = 26, kFlagGap = 6, kFlagMax = 5, kPlusH = 36, kPagerH = 24;
 // A memo flag: its colored tip sticks out this far past the tray's edge (and out of the screen edge while
 // the tray is put away); the tip is this wide in all.
 constexpr int kFlagOut = 12, kFlagTip = 24;
 constexpr int kOut = kHandleW;          // the tray window's room for what sticks out toward the desktop
 constexpr int kSlots = 5, kMinSlots = 2;  // five pile slots, fewer only on a screen too short for them
+constexpr int kMaxPages = 20;              // pages of them
+constexpr int kFlipDelayMs = 450, kFlipRepeatMs = 700, kWheelGapMs = 220;
 // Hit codes for what isn't a pile card (pile cards are their index).
 constexpr int kItemMemo = 1000, kItemPlus = 2000, kItemMemoMore = 2001, kItemHandle = 2002, kItemPin = 2003, kItemClipMore = 2004;
+constexpr int kItemPagePrev = 2005, kItemPageNext = 2006, kItemPageDot = 2100;  // the pager; + page index
 constexpr int kItemDock = 2999, kItemMessenger = 3000;  // the dock's row; + index: one of its apps
 constexpr int kItemClip = 4000;                         // + index: an item on the clipboard shelf
 constexpr int kTile = 44;                               // a messenger's (and a clip's) tile
@@ -48,7 +51,7 @@ bool IsClip(int item) { return item >= kItemClip; }
 constexpr int kPin = 28;  // the pin button at the end of the logo row
 constexpr int kLift = 10;            // a hovered card slides this far out of the tray
 constexpr double kHideAfterMs = 350;  // the pointer left the bookmark and tray this long ago: put it away
-constexpr UINT_PTR kTimerWatch = 1, kTimerOpen = 2, kTimerAnim = 3, kTimerFiles = 4, kTimerPeek = 6, kTimerNotice = 7, kTimerSheet = 8, kTimerFly = 9, kTimerEdge = 10;
+constexpr UINT_PTR kTimerWatch = 1, kTimerOpen = 2, kTimerAnim = 3, kTimerFiles = 4, kTimerPeek = 6, kTimerNotice = 7, kTimerSheet = 8, kTimerFly = 9, kTimerEdge = 10, kTimerFlip = 11;
 constexpr double kSlideMs = 240;    // the brand motion: 240 ms ease-out
 constexpr double kSlideInMs = 200;  // folding back in, a little quicker
 constexpr UINT kOpenDelayMs = 120;  // resting on the bookmark this long opens the drawer
@@ -63,6 +66,7 @@ constexpr wchar_t kFlagsClass[] = L"WindowPilesOrganizerFlags";
 constexpr wchar_t kPeekClass[] = L"WindowPilesOrganizerPeek";
 constexpr wchar_t kFlyClass[] = L"WindowPilesOrganizerFlight";
 constexpr wchar_t kLandingClass[] = L"WindowPilesOrganizerLanding";
+constexpr wchar_t kStandInClass[] = L"WindowPilesOrganizerStandIn";
 const COLORREF kWalnut = RGB(123, 75, 42);  // the brand walnut: where a moved organizer will land
 const COLORREF kCream = RGB(246, 238, 228);
 const COLORREF kFlagPaper = RGB(252, 250, 244);
@@ -119,6 +123,8 @@ Organizer::Organizer(OrganizerHost& host, const Place& place) : host_(host), pla
     peek_ = MakeWindow(kPeekClass, &Organizer::PeekProc, this, L"Neverflow 메모 미리보기");
     landing_ = MakeWindow(kLandingClass, DefWindowProcW, this, L"Neverflow 오거나이저 놓을 자리");
     SetWindowLongPtrW(landing_, GWL_EXSTYLE, GetWindowLongPtrW(landing_, GWL_EXSTYLE) | WS_EX_TRANSPARENT);
+    standIn_ = MakeWindow(kStandInClass, DefWindowProcW, this, L"");
+    SetWindowLongPtrW(standIn_, GWL_EXSTYLE, GetWindowLongPtrW(standIn_, GWL_EXSTYLE) | WS_EX_TRANSPARENT);
     SetWindowLongPtrW(peek_, GWL_EXSTYLE, GetWindowLongPtrW(peek_, GWL_EXSTYLE) | WS_EX_TRANSPARENT);  // only to look at
     DragAcceptFiles(tray_, TRUE);  // files dropped on a card in the tray join that pile
     // ponytail: polls the button every 150 ms for Explorer drags; an OLE drop target needs an STA thread
@@ -147,7 +153,7 @@ Organizer::~Organizer() {
     *alive_ = false;
     OnMemoSaved(nullptr);
     for (Flight& f : flights_) DestroyWindow(f.hwnd);
-    for (HWND h : {handle_, tray_, flags_, peek_, landing_})
+    for (HWND h : {handle_, tray_, flags_, peek_, landing_, standIn_})
         if (h) {
             SetWindowLongPtrW(h, GWLP_USERDATA, 0);
             DestroyWindow(h);
@@ -273,22 +279,69 @@ void Organizer::SetMaterial(const std::string& id) {
     Refresh();
 }
 
-int Organizer::Capacity() const {
+int Organizer::SlotsPerPage() const {
     auto S = [this](int v) { return Scale(v, dpi_); };
-    // Counted with the memo flags at their most, so the number of slots doesn't move as memos come and go.
+    // Counted with the memo flags at their most and the pager there, so the number of slots doesn't move as
+    // memos come and go or a second page opens.
     int maxH = work_.bottom - work_.top - S(32);
-    int fixed = S(kTrayPad + kLogoH + kSectionGap + kSectionGap + kMemoLabelH + 6 + kFlagMax * (kFlagH + kFlagGap) +
+    int fixed = S(kTrayPad + kLogoH + kSectionGap + kPagerH + kSectionGap + kMemoLabelH + 6 + kFlagMax * (kFlagH + kFlagGap) +
                   kPlusH + kSectionGap + 2 * (kMemoLabelH + 6 + kTile) + kSectionGap + kTrayPad);
     return std::clamp((maxH - fixed + S(kCardGap)) / S(kCardH + kCardGap), kMinSlots, kSlots);
 }
 
+int Organizer::Capacity() const { return SlotsPerPage() * kMaxPages; }
+
 bool Organizer::Full() const { return (int)host_.OrganizerPiles().size() >= Capacity(); }
+
+int Organizer::PageCount() const {
+    int per = SlotsPerPage();
+    std::vector<Pile*> by = BySlot(per * kMaxPages, nullptr);
+    int last = -1;
+    for (int i = 0; i < (int)by.size(); ++i)
+        if (by[i]) last = i;
+    return std::min(kMaxPages, (last < 0 ? 1 : last / per + 1) + (extraPage_ ? 1 : 0));
+}
+
+bool Organizer::ShowPage(int page) {
+    int pages = PageCount();
+    page = ((page % pages) + pages) % pages;  // round and round: past the last page is the first
+    if (page == page_) return false;
+    page_ = page;
+    hover_ = -1;
+    dropSlot_ = -1;  // found again under the pointer on this page
+    flippedAt_ = NowMs();
+    RenderTray();
+    return true;
+}
+
+void Organizer::HoverPager(POINT client) {
+    int dir = 0;
+    if (!IsRectEmpty(&pagePrev_)) {
+        RECT a = pagePrev_, b = pageNext_;
+        InflateRect(&a, Scale(8, dpi_), Scale(8, dpi_));
+        InflateRect(&b, Scale(8, dpi_), Scale(8, dpi_));
+        if (PtInRect(&a, client)) dir = -1;
+        else if (PtInRect(&b, client)) dir = 1;
+    }
+    if (dir == flipDir_) return;
+    flipDir_ = dir;
+    if (dir) SetTimer(tray_, kTimerFlip, kFlipDelayMs, nullptr);
+    else KillTimer(tray_, kTimerFlip);
+    RenderTray();  // the arrow lights up while it is about to flip
+}
+
+Pile* Organizer::PileById(int id) const {
+    for (Pile* p : host_.OrganizerPiles())
+        if (p->id == id) return p;
+    return nullptr;
+}
 
 Organizer::Geometry Organizer::Measure(int pileCount, bool tallest) const {
     auto S = [this](int v) { return Scale(v, dpi_); };
     Geometry g;
-    g.slots = Capacity();
-    g.more = std::max(0, pileCount - g.slots);
+    (void)pileCount;
+    g.slots = SlotsPerPage();
+    g.pages = PageCount();
     g.flagCount = tallest ? kFlagMax : std::min<int>((int)memos_.size(), kFlagMax);
     g.w = S(kOut) + S(kTrayPad * 2 + kCardW + kLift);
     g.bodyLeft = place_.right ? S(kOut) : 0;
@@ -301,7 +354,10 @@ Organizer::Geometry Organizer::Measure(int pileCount, bool tallest) const {
     y += S(kLogoH + kSectionGap);
     g.slotTop = y;
     y += g.slots * S(kCardH + kCardGap) - S(kCardGap);
-    if (g.more) y += S(kMoreH);
+    if (g.pages > 1) {
+        g.pagerTop = y + S(4);
+        y += S(kPagerH);
+    }
     y += S(kSectionGap);
     // Memos: their flags, and the dispenser a new one is pulled from (the trash while something is carried).
     g.memoLabelY = y;
@@ -333,6 +389,11 @@ Organizer::Geometry Organizer::Measure(int pileCount, bool tallest) const {
     return g;
 }
 
+int Organizer::CarriedCardLeft(const Geometry& g) const {
+    // Held where it was grabbed (grabDx is from its row's left, where a hovered card is drawn out to).
+    return drag_.x - drag_.grabDx + g.cardX + g.slide - g.bodyLeft - Scale(kTrayPad, dpi_);
+}
+
 int Organizer::SlotsMid(const Geometry& g) const {
     return g.slotTop + (g.slots * Scale(kCardH + kCardGap, dpi_) - Scale(kCardGap, dpi_)) / 2;
 }
@@ -350,7 +411,7 @@ RECT Organizer::FlagRect(const Geometry& g, int i) const {
                         : RECT{g.cardX, y, g.bodyRight + S(kFlagOut), y + S(kFlagH)};
 }
 
-std::vector<Pile*> Organizer::BySlot(int slots, std::vector<Pile*>* overflow) {
+std::vector<Pile*> Organizer::BySlot(int slots, std::vector<Pile*>* overflow) const {
     std::vector<Pile*> piles = host_.OrganizerPiles(), out(slots, nullptr), rest;
     std::stable_sort(piles.begin(), piles.end(), [](Pile* a, Pile* b) { return a->dockOrder < b->dockOrder; });
     for (Pile* p : piles)
@@ -366,17 +427,18 @@ std::vector<Pile*> Organizer::BySlot(int slots, std::vector<Pile*>* overflow) {
 
 int Organizer::FreeSlot(const POINT* at) {
     Geometry g = Measure((int)host_.OrganizerPiles().size());
-    std::vector<Pile*> by = BySlot(g.slots, nullptr);
+    std::vector<Pile*> by = BySlot(g.slots * kMaxPages, nullptr);
+    int first = std::clamp(page_, 0, g.pages - 1) * g.slots;
     if (at && trayOpen_) {
         POINT c{at->x - trayRect_.left, at->y - trayRect_.top};
         for (int s = 0; s < g.slots; ++s) {
             RECT r = SlotRect(g, s);
             InflateRect(&r, 0, Scale(kCardGap / 2, dpi_));
-            if (!by[s] && PtInRect(&r, c)) return s;
+            if (!by[first + s] && PtInRect(&r, c)) return first + s;
         }
     }
     auto free = std::find(by.begin(), by.end(), nullptr);
-    return free == by.end() ? g.slots : (int)(free - by.begin());
+    return free == by.end() ? (int)by.size() : (int)(free - by.begin());
 }
 
 void Organizer::Raise() {
@@ -569,10 +631,12 @@ void Organizer::RenderTray(bool present) {
     if (!trayOpen_ && present) return;
     using namespace theme;
     auto S = [this](int v) { return Scale(v, dpi_); };
-    std::vector<Pile*> overflow;
     int pileCount = (int)host_.OrganizerPiles().size();
     Geometry g = Measure(pileCount);
-    std::vector<Pile*> by = BySlot(g.slots, &overflow);
+    std::vector<Pile*> all = BySlot(g.slots * kMaxPages, nullptr);
+    page_ = std::clamp(page_, 0, g.pages - 1);
+    // The page shown: its slots, by[s] for s < g.slots.
+    std::vector<Pile*> by(all.begin() + page_ * g.slots, all.begin() + (page_ + 1) * g.slots);
     trayRect_ = g.screen;
 
     trayCanvas_ = std::make_unique<Canvas>(g.w, g.h);
@@ -601,10 +665,10 @@ void Organizer::RenderTray(bool present) {
     DrawBookmark(c, g.handle, false, false);
 
     // The wordmark carved into the wood; while something is carried over it, what a drop would do.
-    bool full = pileCount >= g.slots;
+    bool full = pileCount >= Capacity();
     if (dropMode_) {
         std::wstring label = dropAdd_ ? L"더미 카드 위에 놓으면 그 더미에 들어가요"
-                             : full   ? L"자리가 없어요 · " + std::to_wstring(g.slots) + L"칸이 다 찼어요"
+                             : full   ? L"자리가 없어요 · " + std::to_wstring(Capacity()) + L"칸이 다 찼어요"
                                       : L"빈 칸에 놓으면 그 자리에 꽂혀요";
         c.Text(label, {g.logo.left, g.logo.top, g.logo.right - S(kPin + 6), g.logo.bottom}, Ink(), S(12), true,
                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
@@ -636,7 +700,8 @@ void Organizer::RenderTray(bool present) {
 
     // Slots: every one drawn, filled or not. A pile sits in the one it was put in.
     int unit = S(kCardH + kCardGap);
-    int draggedPile = drag_.item >= 0 && drag_.item < kItemMemo ? drag_.item : -1;
+    // A card being moved, maybe from another page: it follows the pointer, its own slot shows empty.
+    Pile* carriedPile = drag_.item >= 0 && drag_.item < kItemMemo ? PileById(drag_.pileId) : nullptr;
     cardIds_.clear();
     cardSlots_.clear();
     cardRects_.clear();
@@ -647,13 +712,11 @@ void Organizer::RenderTray(bool present) {
             cardSlots_.push_back(s);
             cardRects_.push_back({g.bodyLeft + S(kTrayPad), sr.top, g.bodyRight - S(kTrayPad), sr.bottom});
         }
-    if (draggedPile >= (int)cardIds_.size()) draggedPile = -1;
-    if (draggedPile >= 0)
-        drag_.slot = std::clamp((drag_.y - drag_.grabDy - g.slotTop + unit / 2) / unit, 0, g.slots - 1);
+    if (carriedPile) drag_.slot = std::clamp((drag_.y - drag_.grabDy - g.slotTop + unit / 2) / unit, 0, g.slots - 1);
     for (int s = 0; s < g.slots; ++s) {
         RECT sr = SlotRect(g, s);
-        bool target = (draggedPile >= 0 && s == drag_.slot) || (dropMode_ && !dropAdd_ && s == dropSlot_);
-        if (!by[s] || (draggedPile >= 0 && cardSlots_[draggedPile] == s)) {
+        bool target = (carriedPile && s == drag_.slot) || (dropMode_ && !dropAdd_ && s == dropSlot_);
+        if (!by[s] || by[s] == carriedPile) {
             // An empty slot is cut into the wood: a recess a card would sit right in. Shade under its top
             // and left lips, light on the far edges.
             c.FillRoundRect(sr, S(2), RGB(0, 0, 0), 55);
@@ -668,7 +731,7 @@ void Organizer::RenderTray(bool present) {
         }
     }
     for (size_t i = 0; i < cardIds_.size(); ++i) {
-        if ((int)i == draggedPile) continue;
+        if (carriedPile && cardIds_[i] == carriedPile->id) continue;
         RECT sr = SlotRect(g, cardSlots_[i]);
         bool hot = (int)i == hover_ && drag_.item < 0;
         // The pile being worked on sits a little out of its slot toward the desktop (still in the tray), so it
@@ -685,10 +748,7 @@ void Organizer::RenderTray(bool present) {
             c.Glyph(0xE890, eye, RGB(40, 32, 26), S(16));  // View
         }
     }
-    int y = g.slotTop + g.slots * unit - S(kCardGap);
-    if (g.more)
-        c.Text(L"이 화면에 다 못 놓은 더미 " + std::to_wstring(g.more) + L"개", {g.cardX, y, g.cardX + S(kCardW), y + S(kMoreH)},
-               Ink(), S(12), false, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawPager(c, g);
 
     // Memos: Post-it flags, in the order they were arranged; the carried one leaves a gap where it would go.
     int draggedMemo = drag_.item >= kItemMemo && drag_.item - kItemMemo < g.flagCount ? drag_.item - kItemMemo : -1;
@@ -724,11 +784,12 @@ void Organizer::RenderTray(bool present) {
     if (!carried && !crumpleStart_) DrawDispenser(c, g, hover_ == kItemPlus);  // grown, it lies over the sections below
 
     // The carried card or flag, on top of everything, following the pointer.
-    if (draggedPile >= 0) {
+    if (carriedPile) {  // sideways too, so that it slides out of the tray with the pointer
         int ty = std::clamp(drag_.y - drag_.grabDy, S(4), g.h - S(kCardH) - S(4));
-        RECT card{g.cardX + g.slide, ty, g.cardX + g.slide + S(kCardW), ty + S(kCardH)};
+        int tx = CarriedCardLeft(g);
+        RECT card{tx, ty, tx + S(kCardW), ty + S(kCardH)};
         drag_.card = card;
-        DrawPileCard(c, card, *by[cardSlots_[draggedPile]], true);
+        DrawPileCard(c, card, *carriedPile, true);
     } else if (draggedMemo >= 0) {
         RECT f = FlagRect(g, 0);
         int ty = std::clamp(drag_.y - drag_.grabDy, S(4), g.h - S(kFlagH) - S(4));
@@ -1070,6 +1131,43 @@ void Organizer::AddClip(ClipItem item) {
 }
 
 // The messenger dock: chat and mail apps kept at hand whatever the pile, each with what it says is unread.
+// Below the pile slots, with two or more pages: ‹ dots › (the page's number when there are too many for
+// dots). The pages go round, so the arrows always lead somewhere; one that something carried rests on lights
+// up, about to flip.
+void Organizer::DrawPager(Canvas& c, const Geometry& g) {
+    auto S = [this](int v) { return Scale(v, dpi_); };
+    pagePrev_ = pageNext_ = {};
+    pageDots_.clear();
+    if (g.pages <= 1) return;
+    RECT row{g.cardX, g.pagerTop, g.cardX + S(kCardW), g.pagerTop + S(kPagerH)};
+    int aw = S(40), round = S(kPagerH) / 2;
+    pagePrev_ = {row.left, row.top, row.left + aw, row.bottom};
+    pageNext_ = {row.right - aw, row.top, row.right, row.bottom};
+    COLORREF ink = Ink();
+    auto arrow = [&](const RECT& r, wchar_t glyph, bool hot, bool armed) {
+        if (armed) c.FillRoundRect(r, round, ink, 80);
+        else if (hot) c.FillRoundRect(r, round, ink, 30);
+        c.Glyph(glyph, r, ink, S(12));
+    };
+    arrow(pagePrev_, 0xE76B, hover_ == kItemPagePrev, flipDir_ < 0);  // ChevronLeft
+    arrow(pageNext_, 0xE76C, hover_ == kItemPageNext, flipDir_ > 0);  // ChevronRight
+    int pitch = S(14), dot = S(7), cy = (row.top + row.bottom) / 2;
+    if (g.pages * pitch > pageNext_.left - pagePrev_.right - S(8)) {
+        c.Text(std::to_wstring(page_ + 1) + L" / " + std::to_wstring(g.pages), {pagePrev_.right, row.top, pageNext_.left, row.bottom},
+               ink, S(12), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        return;
+    }
+    int x0 = (row.left + row.right) / 2 - (g.pages - 1) * pitch / 2;
+    for (int i = 0; i < g.pages; ++i) {
+        int x = x0 + i * pitch;
+        pageDots_.push_back({x - pitch / 2, row.top, x + pitch / 2, row.bottom});
+        RECT d{x - dot / 2, cy - dot / 2, x - dot / 2 + dot, cy - dot / 2 + dot};
+        if (i == page_) c.FillRoundRect(d, dot / 2, ink);
+        else if (extraPage_ && i == g.pages - 1) c.StrokeRoundRect(d, dot / 2, std::max(1, S(1)), ink);  // opened for this card
+        else c.FillRoundRect(d, dot / 2, ink, hover_ == kItemPageDot + i ? 160 : 80);
+    }
+}
+
 void Organizer::DrawDock(Canvas& c, const Geometry& g) {
     using namespace theme;
     auto S = [this](int v) { return Scale(v, dpi_); };
@@ -1199,6 +1297,19 @@ void Organizer::SlideIn() {
 }
 
 void Organizer::Refresh() {
+    // Each pile keeps the slot it shows in as its own. One that came with a slot already taken (or none) is shown
+    // in the first empty one: made its own, so it doesn't wander off (to another page, even) as others come and go.
+    std::vector<Pile*> overflow;
+    std::vector<Pile*> by = BySlot(Capacity(), &overflow);
+    bool moved = false;
+    for (int i = 0; i < (int)by.size(); ++i) moved |= by[i] && by[i]->dockOrder != i;
+    if (moved && drag_.item < 0) {
+        std::vector<int> ids;
+        for (Pile* p : by) ids.push_back(p ? p->id : -1);
+        for (Pile* p : overflow) ids.push_back(p->id);
+        host_.OnOrganizerReorder(ids);  // saved, and here again with nothing left to settle
+        return;
+    }
     prepared_ = false;  // what it holds changed: draw it again when it opens
     RenderHandle();
     RenderTray();
@@ -1231,8 +1342,11 @@ void Organizer::ShowTray() {
     SetTimer(tray_, kTimerWatch, 100, nullptr);
 }
 
-void Organizer::HideTray(bool force) {
+void Organizer::HideTray(bool force, bool animate) {
     if (!trayOpen_) return;
+    flipDir_ = 0;
+    KillTimer(tray_, kTimerFlip);
+    if (!dropMode_) extraPage_ = false;
     if (place_.pinned && !force) {  // pinned: it stays out; only what was going on in it ends
         hover_ = -1;
         pressed_ = -1;
@@ -1246,7 +1360,7 @@ void Organizer::HideTray(bool force) {
     trayOpen_ = false;
     KillTimer(tray_, kTimerWatch);
     // It folds back into its bookmark the way it came out; put away on purpose (숨기기, moving it), at once.
-    if (place_.slide && !force && trayCanvas_ && IsWindowVisible(tray_)) SlideIn();
+    if (animate && place_.slide && !force && trayCanvas_ && IsWindowVisible(tray_)) SlideIn();
     ShowWindow(tray_, SW_HIDE);
     hover_ = -1;
     pressed_ = -1;
@@ -1285,18 +1399,35 @@ void Organizer::OpenForAdd() {
     RenderTray();
 }
 
-void Organizer::DragOver(POINT pt, bool add) {
+bool Organizer::DragOver(POINT pt, bool add, Pile* carried) {
     // Near the bookmark (within a card's width of the edge, around its height) the tray opens to catch it.
     int reach = Scale(kCardW, dpi_);
     bool nearEdge = place_.right ? pt.x >= work_.right - reach && pt.x <= monitor_.right
                                  : pt.x <= work_.left + reach && pt.x >= monitor_.left;
     bool nearHandle = nearEdge && pt.y >= handleRect_.top - reach && pt.y <= handleRect_.bottom + reach;
-    if (stickyDrop_ || nearHandle || (trayOpen_ && IsDropTarget(pt))) {
+    bool over = nearHandle || (trayOpen_ && IsDropTarget(pt));
+    if (carriedOut_) {  // just taken out of it, and still beside it: it isn't coming back (yet)
+        if (over && !add) return false;
+        carriedOut_ = false;
+    }
+    if (stickyDrop_ || over) {
         bool changed = !dropMode_ || dropAdd_ != add;
         dropAdd_ = add;
         if (!dropMode_) {
             dropMode_ = true;
             prepared_ = false;  // drawn for a drop, not as prepared on hover
+            if (!add) {  // a card: shown the page with an empty slot (this one, the first that has one, or a new one)
+                int per = SlotsPerPage();
+                page_ = std::clamp(page_, 0, PageCount() - 1);
+                std::vector<Pile*> all = BySlot(per * kMaxPages, nullptr);
+                auto onPage = all.begin() + page_ * per;
+                auto free = std::find(all.begin(), all.end(), nullptr);
+                if (std::find(onPage, onPage + per, nullptr) == onPage + per && free != all.end()) {
+                    int f = (int)(free - all.begin());
+                    extraPage_ = f / per >= PageCount();
+                    page_ = f / per;
+                }
+            }
             ShowTray();
             seenInside_ = true;
         }
@@ -1308,9 +1439,9 @@ void Organizer::DragOver(POINT pt, bool add) {
             changed |= item != hover_;
             hover_ = item;
         } else {  // the empty slot it would land in lights up
-            int slot = FreeSlot(&pt);
             Geometry g = Measure((int)host_.OrganizerPiles().size());
-            RECT sr = slot < g.slots ? SlotRect(g, slot) : RECT{};
+            int slot = FreeSlot(&pt) - page_ * g.slots;  // on the page shown
+            RECT sr = slot >= 0 && slot < g.slots ? SlotRect(g, slot) : RECT{};
             POINT c{pt.x - trayRect_.left, pt.y - trayRect_.top};
             InflateRect(&sr, 0, Scale(kCardGap / 2, dpi_));
             if (!PtInRect(&sr, c)) slot = -1;
@@ -1318,12 +1449,52 @@ void Organizer::DragOver(POINT pt, bool add) {
             dropSlot_ = slot;
         }
         if (changed) RenderTray();
+        if (trayOpen_) HoverPager({pt.x - trayRect_.left, pt.y - trayRect_.top});
+        // Over the tray the carried card turns into one the size of a slot, as the cards kept in it are: it
+        // fits, put it in. (A full tray keeps it as it is: there is nowhere to put it.)
+        if (!add && carried && trayOpen_ && PtInRect(&trayRect_, pt) && !Full()) {
+            ShowStandIn(*carried, pt);
+            return true;
+        }
+        HideStandIn();
     } else if (dropMode_) {
         DragEnd();
     }
+    return false;
+}
+
+void Organizer::ShowStandIn(Pile& p, POINT pt) {
+    auto S = [this](int v) { return Scale(v, dpi_); };
+    int m = S(14), w = S(kCardW), h = S(kCardH);  // m: room for its shadow
+    if (standInPile_ != p.id || !standInCanvas_) {
+        standInCanvas_ = std::make_unique<Canvas>(w + 2 * m, h + 2 * m);
+        DrawPileCard(*standInCanvas_, {m, m, m + w, m + h}, p, true);
+        standInPile_ = p.id;
+    }
+    // In the tray's card column, out toward the desktop as a hovered card is; settled into the empty slot under
+    // the pointer, else centered on it.
+    Geometry g = Measure((int)host_.OrganizerPiles().size());
+    int x = trayRect_.left + g.cardX + g.slide - m;
+    int y = dropSlot_ >= 0 ? trayRect_.top + SlotRect(g, dropSlot_).top - m : pt.y - h / 2 - m;
+    // On the pager it waits just above it, so the arrows and dots it flips with stay in sight.
+    if (dropSlot_ < 0 && g.pages > 1 && pt.y >= trayRect_.top + g.pagerTop - S(8)) y = std::min<int>(y, trayRect_.top + g.pagerTop - S(6) - h - m);
+    standInCanvas_->Present(standIn_, {x, y});
+    SetWindowPos(standIn_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+void Organizer::HideStandIn() {
+    if (standInPile_ < 0) return;
+    ShowWindow(standIn_, SW_HIDE);
+    standInPile_ = -1;
+    standInCanvas_.reset();
 }
 
 void Organizer::DragEnd() {
+    HideStandIn();
+    carriedOut_ = false;
+    extraPage_ = false;
+    flipDir_ = 0;
+    KillTimer(tray_, kTimerFlip);
     if (!dropMode_) return;
     dropMode_ = false;
     dropAdd_ = false;
@@ -1346,6 +1517,10 @@ int Organizer::ItemAt(POINT client) const {
     if (PtInRect(&pin, client)) return kItemPin;
     if (PtInRect(&g.handle, client)) return kItemHandle;
     if (hover_ == kItemPlus && drag_.item < 0 && PtInRect(&growRect_, client)) return kItemPlus;  // the grown dispenser
+    if (PtInRect(&pagePrev_, client)) return kItemPagePrev;
+    if (PtInRect(&pageNext_, client)) return kItemPageNext;
+    for (size_t i = 0; i < pageDots_.size(); ++i)
+        if (PtInRect(&pageDots_[i], client)) return kItemPageDot + (int)i;
     for (size_t i = 0; i < cardRects_.size(); ++i)
         if (PtInRect(&cardRects_[i], client)) return (int)i;
     for (size_t i = 0; i < memoRects_.size(); ++i)
@@ -1371,7 +1546,11 @@ Pile* Organizer::PileAt(int item) {
 void Organizer::Activate(int item, POINT screenPt) {
     // A memo opens beside the tray, on the desktop side.
     POINT anchor{place_.right ? trayRect_.left : trayRect_.right, screenPt.y};
-    if (item == kItemPin) {
+    if (item == kItemPagePrev || item == kItemPageNext) {
+        ShowPage(page_ + (item == kItemPageNext ? 1 : -1));
+    } else if (item >= kItemPageDot && item < kItemPageDot + kMaxPages) {
+        ShowPage(item - kItemPageDot);
+    } else if (item == kItemPin) {
         place_.pinned = !place_.pinned;
         host_.OnOrganizerMoved();  // remembered with its place
         RenderTray();
@@ -1725,13 +1904,16 @@ void Organizer::EndDrag(POINT) {
     Drag d = drag_;
     drag_ = {};
     if (GetCapture() == tray_) ReleaseCapture();
+    extraPage_ = false;
+    flipDir_ = 0;
+    KillTimer(tray_, kTimerFlip);
     if (d.item < kItemMemo) {
-        // Into the slot it was let go over: an empty one, or swapping with the pile that was there.
+        // Into the slot it was let go over, on the page shown: an empty one, or swapping with the pile there.
         std::vector<Pile*> overflow;
         std::vector<Pile*> by = BySlot(Capacity(), &overflow);
-        if (d.item < (int)cardSlots_.size() && d.slot >= 0 && d.slot < (int)by.size() && d.slot != cardSlots_[d.item]) {
-            int from = cardSlots_[d.item];
-            std::swap(by[from], by[d.slot]);
+        int to = page_ * SlotsPerPage() + d.slot;
+        if (d.pileId >= 0 && d.from >= 0 && d.from < (int)by.size() && d.slot >= 0 && to < (int)by.size() && to != d.from) {
+            std::swap(by[d.from], by[to]);
             std::vector<int> ids;
             for (Pile* p : by) ids.push_back(p ? p->id : -1);
             for (Pile* p : overflow) ids.push_back(p->id);
@@ -1829,6 +2011,16 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
                 if (!flying) KillTimer(tray_, kTimerFly);
                 return 0;
             }
+            if (wp == kTimerFlip) {  // something carried still rests on a pager arrow: the next page, and again
+                if (flipDir_ && ShowPage(page_ + flipDir_)) {
+                    SetTimer(tray_, kTimerFlip, kFlipRepeatMs, nullptr);
+                } else {
+                    KillTimer(tray_, kTimerFlip);
+                    flipDir_ = 0;
+                    RenderTray();
+                }
+                return 0;
+            }
             if (wp == kTimerNotice) {
                 KillTimer(tray_, kTimerNotice);
                 noticeRow_ = -1;
@@ -1878,6 +2070,7 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
             if (drag_.item >= 0) {
                 drag_.x = p.x;
                 drag_.y = p.y;
+                if (drag_.pileId >= 0) HoverPager(p);
                 bool memo = drag_.item >= kItemMemo && drag_.item < kItemPlus;
                 bool tile = IsMessenger(drag_.item) || IsClip(drag_.item);
                 RECT cr;
@@ -1898,15 +2091,24 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
                     RenderTray();  // pinned, it's still out
                     return 0;
                 }
-                // Off the tray toward the desktop: a pile card goes back there, a memo becomes its window.
-                if (!tile && (place_.right ? p.x < -S(24) : p.x > cr.right + S(24))) {
+                // Off the tray toward the desktop: a pile card goes back there, a memo becomes its window. A pile
+                // card goes as soon as it reaches the tray's edge (it follows the pointer sideways), and the tray
+                // is put away at once: sliding in would hold the card still while the pointer moves on.
+                Geometry g = Measure((int)host_.OrganizerPiles().size());
+                int cardLeft = CarriedCardLeft(g), cw = S(kCardW);
+                bool pileOut = !memo && !tile && (place_.right ? cardLeft < -S(8) : cardLeft + cw > cr.right + S(8));
+                bool memoOut = memo && (place_.right ? p.x < -S(24) : p.x > cr.right + S(24));
+                if (pileOut || memoOut) {
                     POINT c = p;
                     ClientToScreen(tray_, &c);
                     int item = drag_.item;
-                    Pile* pile = memo ? nullptr : PileAt(item);
+                    Pile* pile = memo ? nullptr : PileById(drag_.pileId);
                     std::wstring path = memo && item - kItemMemo < (int)memos_.size() ? memos_[item - kItemMemo].path : L"";
-                    HideTray();
-                    if (pile) host_.OnOrganizerCarryOut(*pile, c);  // may change the tray: nothing may touch it after
+                    extraPage_ = false;
+                    double fx = (double)(p.x - cardLeft) / cw, fy = (double)drag_.grabDy / S(kCardH);
+                    HideTray(false, !pile);
+                    carriedOut_ = pile != nullptr;
+                    if (pile) host_.OnOrganizerCarryOut(*pile, fx, fy);  // may change the tray: nothing may touch it after
                     if (!path.empty()) TearOffMemo(path, c, dpi_);
                     return 0;
                 }
@@ -1942,6 +2144,14 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
                     drag_.x = p.x;
                     drag_.y = p.y;
                     hover_ = -1;
+                    if (pressed_ < kItemMemo && pressed_ < (int)cardIds_.size()) {
+                        int per = SlotsPerPage(), pages = PageCount();
+                        drag_.pileId = cardIds_[pressed_];
+                        drag_.from = page_ * per + cardSlots_[pressed_];
+                        // Every slot taken: a new page opens to move it to.
+                        std::vector<Pile*> all = BySlot(per * kMaxPages, nullptr);
+                        extraPage_ = pages < kMaxPages && std::find(all.begin(), all.begin() + pages * per, nullptr) == all.begin() + pages * per;
+                    }
                 }
                 pressed_ = -1;
                 RenderTray();
@@ -1957,6 +2167,28 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
                 RenderTray();
                 if (hc >= kItemMemo && hc < kItemPlus) ShowPeek(hc - kItemMemo);
                 else HidePeek();
+            }
+            return 0;
+        }
+        case WM_MOUSEWHEEL:
+        case WM_MOUSEHWHEEL: {
+            // Over the pile slots or the pager: the wheel (down) or a touchpad swipe (left) flips to the next
+            // page. One flip per notch or swipe, however many small steps a touchpad sends for it.
+            Geometry g = Measure((int)host_.OrganizerPiles().size());
+            if (g.pages <= 1 || drag_.item >= 0) return 0;
+            POINT p{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            ScreenToClient(tray_, &p);
+            int bottom = g.pagerTop + S(kPagerH);
+            if (p.y < g.slotTop - S(6) || p.y > bottom + S(6)) return 0;
+            double now = NowMs();
+            if (now - wheelAt_ > 400) wheelAcc_ = 0;  // a new gesture
+            wheelAt_ = now;
+            int delta = GET_WHEEL_DELTA_WPARAM(wp);
+            wheelAcc_ += msg == WM_MOUSEWHEEL ? -delta : delta;
+            if (std::abs(wheelAcc_) >= WHEEL_DELTA && now - flippedAt_ >= kWheelGapMs) {
+                ShowPage(page_ + (wheelAcc_ > 0 ? 1 : -1));
+                wheelAcc_ = 0;
+                flippedAt_ = now;
             }
             return 0;
         }

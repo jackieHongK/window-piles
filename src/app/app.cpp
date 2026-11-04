@@ -722,7 +722,8 @@ void App::OnPileDragging(Pile& pile) {
     POINT c;
     GetCursorPos(&c);
     if (!organizer_) return;
-    organizer_->DragOver(c);
+    // Over the open tray the organizer shows it at slot size; this card is not seen meanwhile.
+    pile.view->SetStandIn(organizer_->DragOver(c, false, &pile));
     // The tray opening as a drop target must not cover the card being carried.
     SetWindowPos(pile.view->hwnd(), HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
@@ -733,11 +734,12 @@ void App::OnPileMoved(Pile& pile) {
         POINT c;
         GetCursorPos(&c);
         bool dock = organizer_->IsDropTarget(c) && !organizer_->Full();  // a full tray: it stays where it was let go
+        // Docked while the tray is still out, so it goes into the slot under the pointer (the one it was shown
+        // settled into), not the first empty one.
+        if (dock) Dock(pile, true, &c);
         organizer_->DragEnd();
-        if (dock) {
-            Dock(pile, true, &c);
-            return;
-        }
+        pile.view->SetStandIn(false);
+        if (dock) return;
     }
     // The card the user just put down is the top one now (piles_ is the stacking order, bottom first).
     auto it = std::find_if(piles_.begin(), piles_.end(), [&](const auto& p) { return p.get() == &pile; });
@@ -1613,12 +1615,14 @@ void App::SetOrganizer(bool on) {
 
 void App::Dock(Pile& pile, bool on, const POINT* at) {
     if (!organizer_ || pile.docked == on || (on && organizer_->Full())) return;
-    pile.docked = on;
     if (on) {
-        // Into the empty slot it was let go over, or the first empty one, as you'd put it on a real tray.
+        // Into the empty slot it was let go over, or the first empty one, as you'd put it on a real tray. Found
+        // before it counts as kept there: it still holds the slot it was taken from, which would look taken.
         pile.dockOrder = organizer_->FreeSlot(at);
+        pile.docked = true;
         pile.view->SetVisible(false);
     } else {
+        pile.docked = false;
         // Out of the tray: the card lands where it was let go, or just inside the bookmark.
         RECT h = organizer_->HandleRect();
         UINT dpi = DpiForPoint({h.left, h.top});
@@ -1652,9 +1656,17 @@ void App::OnOrganizerReorder(const std::vector<int>& pileIds) {
 
 void App::OnOrganizerOpen(Pile& pile) { OnPileClick(pile); }
 
-void App::OnOrganizerCarryOut(Pile& pile, POINT screenPt) {
-    Dock(pile, false, &screenPt);  // the card appears under the pointer…
-    if (pile.view->visible()) pile.view->BeginCarry();  // …and follows it until it's let go
+void App::OnOrganizerCarryOut(Pile& pile, double fx, double fy) {
+    POINT c;
+    GetCursorPos(&c);
+    Dock(pile, false, &c);  // the card appears under the pointer…
+    if (!pile.view->visible()) return;
+    // … held where it was grabbed in the tray, so it neither jumps nor trails behind the pointer …
+    RECT cr = pile.view->CardRect();
+    pile.pos.x += c.x - (cr.left + (int)(fx * (cr.right - cr.left)));
+    pile.pos.y += c.y - (cr.top + (int)(fy * (cr.bottom - cr.top)));
+    SetWindowPos(pile.view->hwnd(), nullptr, pile.pos.x, pile.pos.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    pile.view->BeginCarry();  // … and follows it until it's let go
 }
 
 void App::OnOrganizerMoved() {

@@ -14,6 +14,11 @@ MemoLineInfo ClassifyMemoLine(std::wstring_view line) {
         info.markerLen = (int)hashes + 1;
         return info;
     }
+    if (line.size() >= 2 && (line[0] == kMemoTodo || line[0] == kMemoDone) && line[1] == L' ') {
+        info.kind = line[0] == kMemoTodo ? MemoLine::Task : MemoLine::Done;
+        info.markerLen = 2;
+        return info;
+    }
     if (line.size() >= 2 && (line[0] == L'-' || line[0] == L'*') && line[1] == L' ') {
         info.kind = MemoLine::Bullet;
         info.markerLen = 2;
@@ -32,14 +37,56 @@ MemoLineInfo ClassifyMemoLine(std::wstring_view line) {
 MemoEnter MemoOnEnter(std::wstring_view line) {
     MemoEnter e;
     MemoLineInfo info = ClassifyMemoLine(line);
-    if (info.kind != MemoLine::Bullet && info.kind != MemoLine::Number) return e;
+    bool task = info.kind == MemoLine::Task || info.kind == MemoLine::Done;
+    if (info.kind != MemoLine::Bullet && info.kind != MemoLine::Number && !task) return e;
     bool onlyMarker = line.find_first_not_of(L' ', info.markerLen) == std::wstring_view::npos;
     if (onlyMarker) {
         e.endList = true;
         return e;
     }
-    e.nextPrefix = info.kind == MemoLine::Bullet ? std::wstring(line.substr(0, 2)) : std::to_wstring(info.number + 1) + L". ";
+    e.nextPrefix = task                           ? std::wstring{kMemoTodo, L' '}  // the next one is still to do
+                   : info.kind == MemoLine::Bullet ? std::wstring(line.substr(0, 2))
+                                                   : std::to_wstring(info.number + 1) + L". ";
     return e;
+}
+
+size_t MemoTaskShortcut(std::wstring_view line, std::wstring* marker) {
+    struct Form {
+        std::wstring_view text;
+        bool done;
+    };
+    static constexpr Form kForms[] = {{L"[] ", false},   {L"[ ] ", false},   {L"[x] ", true},   {L"[X] ", true},
+                                      {L"- [ ] ", false}, {L"- [x] ", true}, {L"- [X] ", true}};
+    for (const Form& f : kForms)
+        if (line.substr(0, f.text.size()) == f.text) {
+            if (marker) *marker = std::wstring{f.done ? kMemoDone : kMemoTodo, L' '};
+            return f.text.size();
+        }
+    return 0;
+}
+
+std::vector<std::pair<size_t, size_t>> FindMemoLinks(std::wstring_view line) {
+    std::vector<std::pair<size_t, size_t>> out;
+    auto starts = [&](size_t i, std::wstring_view p) {
+        if (line.size() - i < p.size()) return false;
+        for (size_t k = 0; k < p.size(); ++k)
+            if (towlower(line[i + k]) != p[k]) return false;
+        return true;
+    };
+    for (size_t i = 0; i < line.size();) {
+        bool boundary = i == 0 || iswspace(line[i - 1]) || std::wstring_view(L"([<\"'").find(line[i - 1]) != std::wstring_view::npos;
+        size_t head = !boundary ? 0 : starts(i, L"https://") ? 8 : starts(i, L"http://") ? 7 : starts(i, L"www.") ? 4 : 0;
+        if (!head) {
+            ++i;
+            continue;
+        }
+        size_t end = i;
+        while (end < line.size() && !iswspace(line[end]) && std::wstring_view(L"<>\"").find(line[end]) == std::wstring_view::npos) ++end;
+        while (end > i + head && std::wstring_view(L".,;:!?)]}'").find(line[end - 1]) != std::wstring_view::npos) --end;
+        if (end > i + head) out.push_back({i, end});
+        i = std::max(end, i + 1);
+    }
+    return out;
 }
 
 namespace {
