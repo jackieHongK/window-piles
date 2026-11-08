@@ -1,6 +1,7 @@
 // Watches other apps' window drags (EVENT_SYSTEM_MOVESIZESTART/END, out-of-context, no injection)
-// and, only while a window is being moved, shows drop zones near the top of *every* monitor, side by
-// side and the same size, centered (below the open pile's "add here" target, if a pile is open):
+// and, only while a window is being moved, shows drop zones hanging from the top edge of *every* monitor,
+// side by side and the same size, centered (right under the open pile's "add here" target, if a pile is
+// open). The top strip (kSnapLane) is left to Windows: letting go there still snaps or maximizes.
 //   [＋ 새 더미]                      always
 //   [－ '이름'에서 빼기]              only when the dragged window already belongs to a pile (reddish)
 // Validated in PoC-05: zero idle cost, Esc/resize/tiny-drag are told apart.
@@ -48,8 +49,9 @@ private:
     struct Bar {
         DropZone zone = DropZone::NewPile;
         HWND hwnd = nullptr;
-        RECT card{};  // hit area (screen px), excludes the shadow margin
+        RECT card{};  // hit area (screen px), excludes the shadow margin and, hanging, the strip above it
         POINT pos{};  // window top-left
+        int lane = 0; // hanging from the top edge: px of it above the hit area, left to Windows
         UINT dpi = 96;
         BarState state = BarState::Idle;
         bool shown = false;

@@ -13,10 +13,11 @@ constexpr int kTickMs = 33;        // ~30 Hz, only while a drag is in progress
 constexpr int kShowDelayMs = 250;  // short clicks/drags never flash the bar
 constexpr int kBarW = 250, kBarH = 64, kGap = 16;  // two bars side by side: as wide as the "add here" target
 constexpr int kMargin = 14;  // room for the shadow around a bar
-// Distance from the top of each monitor's work area. Kept well clear of the top edge, where dragging a
-// window brings up Windows' Snap Layouts: first row 72 (the open pile's "add here" target, else the
-// bars), second row below the 64-high target.
-constexpr int kBarTop = 72, kBarTopBelowAdd = 72 + 64 + 16;
+// The bars hang from the top edge of each monitor's work area, but its top strip is Windows': dragging a
+// window up to there brings up Snap Layouts (and maximizes at the very edge), so the bars only take a
+// drop below it. With a pile open, its "add here" target hangs there instead (ui/work_frame.cpp) and the
+// bars come right under it.
+constexpr int kSnapLane = 24, kBarTopBelowAdd = kSnapLane + 64 + 8;
 constexpr COLORREF kDestructive = RGB(220, 38, 38);  // shadcn destructive (red-600)
 
 }  // namespace
@@ -178,7 +179,9 @@ void DragWatcher::ShowBars() {
         POINT probe{(work.left + work.right) / 2, work.top + 1};
         UINT dpi = DpiForPoint(probe);
         int h = Scale(kBarH, dpi), m = Scale(kMargin, dpi);
-        int y = work.top + Scale(host_.HasOpenPile() ? kBarTopBelowAdd : kBarTop, dpi);
+        bool hang = !host_.HasOpenPile();
+        int lane = hang ? Scale(kSnapLane, dpi) : 0;
+        int y = work.top + (hang ? lane : Scale(kBarTopBelowAdd, dpi));
         int barW = Scale(kBarW, dpi), gap = Scale(kGap, dpi);
         // The bars as a pair (or "새 더미" alone), centered: balanced under the "add here" target.
         int total = withRemove ? 2 * barW + gap : barW;
@@ -188,7 +191,8 @@ void DragWatcher::ShowBars() {
             b.zone = zone;
             b.dpi = dpi;
             b.card = {x, y, x + w, y + h};
-            b.pos = {x - m, y - m};
+            b.lane = lane;
+            b.pos = {x - m, hang ? work.top : y - m};
             b.state = (zone == DropZone::NewPile && !eligible_) ? BarState::Blocked : BarState::Idle;
             b.shown = true;
             RenderBar(b);
@@ -215,9 +219,13 @@ void DragWatcher::RenderBar(Bar& b) {
     using namespace theme;
     auto S = [&](int v) { return Scale(v, b.dpi); };
     int w = b.card.right - b.card.left, h = b.card.bottom - b.card.top, m = S(kMargin);
-    Canvas c(w + 2 * m, h + 2 * m);
-    RECT card{m, m, m + w, m + h};
+    // Hanging from the top edge: the card reaches up off the screen (only its bottom corners round), its
+    // label in the part below Windows' strip. Otherwise a card of its own with its shadow all round.
+    bool hang = b.lane > 0;
+    Canvas c(w + 2 * m, hang ? b.lane + h + m : h + 2 * m);
     int radius = S(kRadiusLg);
+    RECT card = hang ? RECT{m, -radius, m + w, b.lane + h} : RECT{m, m, m + w, m + h};
+    RECT label = hang ? RECT{m, b.lane, m + w, b.lane + h} : card;  // where the text goes
     bool remove = b.zone == DropZone::RemoveFromPile;
 
     std::wstring title, sub;
@@ -237,20 +245,20 @@ void DragWatcher::RenderBar(Bar& b) {
         title = remove ? L"－  이 더미에서 빼기" : L"＋  새 더미";
         sub = remove ? L"'" + pileName_ + L"'에서 꺼내요" : L"창을 여기에 놓으면 새 더미가 생겨요";
     }
-    c.Shadow(card, radius, S(12), S(4), b.state == BarState::Hot ? 90 : 60);
+    c.Shadow(hang ? RECT{card.left, 0, card.right, card.bottom} : card, radius, S(12), S(4), b.state == BarState::Hot ? 90 : 60);
     c.FillRoundRect(card, radius, bg);
     if (b.state == BarState::Idle) {
         // Dashed outline reads as "drop here" and keeps the white bar visible on white windows.
-        RECT inset{card.left + S(5), card.top + S(5), card.right - S(5), card.bottom - S(5)};
+        RECT inset{label.left + S(5), label.top + S(5), label.right - S(5), label.bottom - S(5)};
         c.StrokeRoundRect(card, radius, 1, kBorder);
         c.DashedRoundRect(inset, S(kRadius), std::max(1, S(1) + S(1) / 2), S(6), S(4),
                           remove ? RGB(252, 165, 165) : kBorderStrong);
     } else if (b.state == BarState::Blocked) {
         c.StrokeRoundRect(card, radius, 1, kBorder);
     }
-    RECT tr{card.left + S(12), card.top + S(13), card.right - S(12), card.top + S(13) + S(22)};
+    RECT tr{label.left + S(12), label.top + S(13), label.right - S(12), label.top + S(13) + S(22)};
     c.Text(title, tr, fg, S(15), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-    RECT sr{card.left + S(12), tr.bottom + S(1), card.right - S(12), tr.bottom + S(1) + S(18)};
+    RECT sr{label.left + S(12), tr.bottom + S(1), label.right - S(12), tr.bottom + S(1) + S(18)};
     c.Text(sub, sr, subFg, S(12), false, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     c.Present(b.hwnd, b.pos);
 }

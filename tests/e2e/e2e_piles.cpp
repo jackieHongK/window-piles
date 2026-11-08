@@ -265,8 +265,9 @@ int wmain(int argc, wchar_t** argv) {
     RECT work;
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
 
-    // 1) onto the drop bar at the top center of the primary work area
-    POINT bar{(work.left + work.right) / 2, work.top + S(48 + 34)};
+    // 1) onto the drop bar hanging from the top center of the primary work area (it takes a drop below the
+    //    24 DIP strip left to Windows' Snap Layouts; 64 high)
+    POINT bar{(work.left + work.right) / 2, work.top + S(24 + 32)};
     Drag(w1, bar, [&] {
         auto bars = VisibleOfClass(L"WindowPilesDropBar");
         char buf[96];
@@ -323,8 +324,9 @@ int wmain(int argc, wchar_t** argv) {
         SaveShot(L"3_frame_corner", {mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.left + S(200), mi.rcMonitor.top + S(120)});
 
         // 3b) drag a member of the open pile: "빼기" zone next to "새 더미", tab grows into a target
-        POINT newBar{(work.left + work.right) / 2, work.top + S(48 + 34)};
-        POINT removeBar{newBar.x + S(160) + S(12) + S(130), newBar.y};
+        //     (with a pile open the bars are a pair, 250 wide and 16 apart, right under the tab's 24 + 64 + 8)
+        POINT newBar{(work.left + work.right) / 2 - S(133), work.top + S(24 + 64 + 8 + 32)};
+        POINT removeBar{(work.left + work.right) / 2 + S(133), newBar.y};
         Drag(w2, removeBar, [&] {
             auto bars = VisibleOfClass(L"WindowPilesDropBar");
             char b2[96];
@@ -343,7 +345,7 @@ int wmain(int argc, wchar_t** argv) {
         Check(!FileHas(L"piles.json", "\"hwnd\":\"" + std::to_string((uint64_t)(uintptr_t)w2) + "\""),
               "3b) 더미에서 빠짐 (piles.json)");
         // ...and back in by dropping it on the enlarged tab
-        Drag(w2, {(tr.left + tr.right) / 2, tr.top + S(20)});
+        Drag(w2, {(tr.left + tr.right) / 2, tr.top + S(24 + 32)});
         PumpFor(800);
         Check(FileHas(L"piles.json", "\"hwnd\":\"" + std::to_string((uint64_t)(uintptr_t)w2) + "\""),
               "3b) 커진 이름표에 놓으면 다시 더미에 들어감");
