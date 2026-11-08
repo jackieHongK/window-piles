@@ -31,6 +31,7 @@ constexpr int kTabW = 24, kTabH = 26;  // the color tab, as big as the memo's fl
 // Text sizes in twips (1/20 pt), by MemoLine: body, h1, h2, h3, bullet, number, to-do, done.
 constexpr LONG kTwips[] = {220, 340, 280, 240, 220, 220, 220, 220};
 constexpr LONG kBoxTwips = 260;  // a to-do's box, a little bigger than the text so it is easy to hit
+constexpr LONG kIndentTwips = 320;  // one level of a nested list (a tab), about two characters
 const COLORREF kPaper = RGB(255, 252, 240);  // a note's warm paper
 const COLORREF kBand = RGB(246, 238, 228);    // cream, as on the organizer
 const COLORREF kLink = RGB(51, 126, 169);     // the blue of the pile colors
@@ -55,6 +56,7 @@ struct Memo {
 std::vector<Memo*> g_memos;
 WNDPROC g_richProc = nullptr;
 std::function<void()> g_onSaved;
+bool g_roundBullets = true;  // "- " shown as "• " (the file keeps "- ")
 
 // The memo's flag color tab, sticking out of the window's left side beside its title bar (an owned window,
 // so it goes along when the memo is minimized, hidden or closed).
@@ -145,9 +147,13 @@ void StyleLine(Memo& m, LONG a, LONG b, std::wstring_view line) {
     Format(m, a, b + 1, cf);  // with the paragraph mark, so an empty heading line is already big
     PARAFORMAT2 pf{};
     pf.cbSize = sizeof(pf);
-    pf.dwMask = PFM_SPACEBEFORE | PFM_SPACEAFTER;
+    pf.dwMask = PFM_SPACEBEFORE | PFM_SPACEAFTER | PFM_TABSTOPS | PFM_OFFSET;
     pf.dySpaceBefore = heading && a > 0 ? 160 : 0;
     pf.dySpaceAfter = heading ? 60 : 0;
+    // A nested item's tabs step in one level each; when it wraps, the next lines stay at its level.
+    pf.cTabCount = kMemoMaxIndent + 1;
+    for (int i = 0; i < pf.cTabCount; ++i) pf.rgxTabs[i] = (i + 1) * kIndentTwips;
+    pf.dxOffset = info.indent * kIndentTwips;
     SendMessageW(m.edit, EM_SETPARAFORMAT, 0, (LPARAM)&pf);
     if (task) {  // the box: a symbol a little bigger than the text, walnut once checked
         CHARFORMAT2W box{};
@@ -156,7 +162,7 @@ void StyleLine(Memo& m, LONG a, LONG b, std::wstring_view line) {
         box.yHeight = kBoxTwips;
         box.crTextColor = done ? kBrand : kSubtleFg;
         wcscpy_s(box.szFaceName, kSymbolFont);
-        Format(m, a, a + 1, box);
+        Format(m, a + info.indent, a + info.indent + 1, box);
     } else if (info.markerLen) {  // the marker stays in the text (it is the file format), drawn quieter
         cf.dwMask = CFM_COLOR;
         cf.crTextColor = heading ? kBorderStrong : kMutedFg;
@@ -240,6 +246,7 @@ bool TaskShortcut(Memo& m, const std::wstring& text) {
     if (sel.cpMin != sel.cpMax) return false;
     size_t start, end;
     LineAt(text, (size_t)sel.cpMin, start, end);
+    while (start < end && text[start] == L'\t') ++start;  // a nested one keeps its level
     std::wstring marker;
     size_t n = MemoTaskShortcut(std::wstring_view(text).substr(start, end - start), &marker);
     if (!n || (size_t)sel.cpMin < start + n) return false;  // only once its space is typed
@@ -253,7 +260,53 @@ bool TaskShortcut(Memo& m, const std::wstring& text) {
 std::wstring Text(Memo& m) {
     std::wstring t = GetText(m.edit);
     std::replace(t.begin(), t.end(), L'\v', L'\r');  // Shift+Enter's soft break is a plain line in the file
-    return t;
+    return MemoBulletsShown(std::move(t), false);    // round bullets are "- " in the file
+}
+
+// Characters swapped one for one (a bullet shown round), kept out of the undo history (undoing the typing
+// still takes the whole marker away) and without a change notice of their own; the selection stays.
+void SwapChars(Memo& m, const std::vector<std::pair<LONG, wchar_t>>& swaps) {
+    if (swaps.empty()) return;
+    bool styling = m.styling;
+    m.styling = true;
+    if (m.doc) m.doc->Undo(tomSuspend, nullptr);
+    CHARRANGE sel;
+    SendMessageW(m.edit, EM_EXGETSEL, 0, (LPARAM)&sel);
+    for (auto [at, c] : swaps) Replace(m, at, at + 1, std::wstring(1, c));
+    SendMessageW(m.edit, EM_EXSETSEL, 0, (LPARAM)&sel);
+    if (m.doc) m.doc->Undo(tomResume, nullptr);
+    m.styling = styling;
+}
+
+// The bullets in text[from, to)'s lines as they are to be shown ("- " typed or pasted becomes "• "). True if
+// any changed.
+bool ShowBullets(Memo& m, const std::wstring& text, size_t from, size_t to, bool round) {
+    size_t a, e, z, ze;
+    LineAt(text, from, a, e);
+    LineAt(text, std::max(from, to), z, ze);
+    std::wstring part = text.substr(a, ze - a), shown = MemoBulletsShown(part, round);
+    std::vector<std::pair<LONG, wchar_t>> swaps;
+    for (size_t i = 0; i < part.size(); ++i)
+        if (part[i] != shown[i]) swaps.push_back({(LONG)(a + i), shown[i]});
+    SwapChars(m, swaps);
+    return !swaps.empty();
+}
+
+// Typing that turns into a symbol: "->" → "→", "..." → "…" and the like, once its last character is typed.
+// A change of its own, so Ctrl+Z gives the typed characters back.
+void Prettify(Memo& m, wchar_t typed) {
+    if (!wcschr(L">.=-", typed)) return;  // the last characters of what turns into something
+    CHARRANGE sel;
+    SendMessageW(m.edit, EM_EXGETSEL, 0, (LPARAM)&sel);
+    if (sel.cpMin != sel.cpMax || sel.cpMin < 2) return;
+    wchar_t buf[4] = {};
+    TEXTRANGEW tr{{std::max<LONG>(0, sel.cpMin - 3), sel.cpMin}, buf};
+    LONG got = (LONG)SendMessageW(m.edit, EM_GETTEXTRANGE, 0, (LPARAM)&tr);
+    std::wstring_view before(buf, (size_t)std::max<LONG>(0, got));
+    if (size_t br = before.find_last_of(L"\r\v"); br != std::wstring_view::npos) before.remove_prefix(br + 1);
+    std::wstring with;
+    size_t n = MemoPrettify(before, &with);
+    if (n) Replace(m, sel.cpMin - (LONG)n, sel.cpMin, with);
 }
 
 void UpdateTitle(Memo& m, std::wstring text) {
@@ -272,6 +325,11 @@ void OnChange(Memo& m) {
     std::wstring text = GetText(m.edit);
     if (!m.composing) {
         if (TaskShortcut(m, text)) text = GetText(m.edit);
+        if (g_roundBullets && text != m.shown) {
+            size_t from, to;
+            ChangedRange(m.shown, text, from, to);
+            if (ShowBullets(m, text, from, to, true)) text = GetText(m.edit);
+        }
         if (text != m.shown) {
             size_t from, to;
             ChangedRange(m.shown, text, from, to);
@@ -283,7 +341,66 @@ void OnChange(Memo& m) {
     SetTimer(m.hwnd, kTimerSave, kSaveDelayMs, nullptr);
 }
 
-// Enter in a list: the next line gets the next marker; on a line with only its marker, the list ends.
+MemoLineInfo InfoAt(const std::wstring& text, size_t start) {
+    size_t end = std::min(text.find(L'\r', start), text.size());
+    return ClassifyMemoLine(std::wstring_view(text).substr(start, end - start));
+}
+
+// The number a numbered item at `indent` gets on the line at `start`: one more than the numbered item before
+// it on that level, or 1 where it begins one (after a line at a level out, or anything that isn't a list).
+int NumberFor(const std::wstring& text, size_t start, int indent) {
+    while (start > 0) {
+        size_t s, e;
+        LineAt(text, start - 1, s, e);
+        MemoLineInfo info = InfoAt(text, s);
+        if (!IsMemoList(info.kind) || info.indent < indent) return 1;
+        if (info.indent == indent) return info.kind == MemoLine::Number ? info.number + 1 : 1;
+        start = s;  // a deeper item under one before: look further up
+    }
+    return 1;
+}
+
+// Tab (Shift+Tab) on list lines: the lines the selection touches go one level in (out). A numbered one is
+// numbered again for the level it lands on. False if none of them is a list line (Tab types a tab then).
+bool Indent(Memo& m, bool out) {
+    std::wstring text = GetText(m.edit);
+    CHARRANGE sel;
+    SendMessageW(m.edit, EM_EXGETSEL, 0, (LPARAM)&sel);
+    size_t start, end;
+    LineAt(text, (size_t)sel.cpMin, start, end);
+    std::vector<size_t> starts;
+    bool any = false;
+    for (;;) {
+        starts.push_back(start);
+        any = any || IsMemoList(InfoAt(text, start).kind);
+        if (end >= (size_t)sel.cpMax || end >= text.size()) break;
+        start = end + 1;
+        end = std::min(text.find(L'\r', start), text.size());
+    }
+    if (!any) return false;
+    LONG first = 0, total = 0;  // how far the selection's start (on the first line) and end move
+    for (size_t i = 0; i < starts.size(); ++i) {
+        size_t s = (size_t)((LONG)starts[i] + total);  // the lines above moved it
+        MemoLineInfo info = InfoAt(text, s);
+        int to = info.indent + (out ? -1 : 1);
+        if (!IsMemoList(info.kind) || to < 0 || to > kMemoMaxIndent) continue;
+        std::wstring with(to, L'\t');
+        with += info.kind == MemoLine::Number ? std::to_wstring(NumberFor(text, s, to)) + L". "
+                                              : text.substr(s + info.indent, (size_t)(info.markerLen - info.indent));
+        Replace(m, (LONG)s, (LONG)s + info.markerLen, with);
+        text = GetText(m.edit);
+        LONG d = (LONG)with.size() - info.markerLen;
+        if (i == 0) first = d;
+        total += d;
+    }
+    LONG caret = std::max<LONG>((LONG)starts[0], sel.cpMin + first);
+    CHARRANGE back{caret, sel.cpMin == sel.cpMax ? caret : sel.cpMax + total};
+    SendMessageW(m.edit, EM_EXSETSEL, 0, (LPARAM)&back);
+    return true;
+}
+
+// Enter in a list: the next line gets the next marker; on a line with only its marker, the list ends (a nested
+// one goes a level out).
 bool OnEnter(Memo& m) {
     CHARRANGE sel;
     SendMessageW(m.edit, EM_EXGETSEL, 0, (LPARAM)&sel);
@@ -294,6 +411,7 @@ bool OnEnter(Memo& m) {
     std::wstring_view line = std::wstring_view(text).substr(start, end - start);
     if (caret < start + ClassifyMemoLine(line).markerLen) return false;  // before the marker: a plain break
     MemoEnter e = MemoOnEnter(line);
+    if (e.outdent) return Indent(m, true);
     if (e.endList) {
         Replace(m, (LONG)start, (LONG)end, L"");
         return true;
@@ -339,7 +457,8 @@ void MakeTasks(Memo& m) {
         MemoLineInfo info = kindAt(starts[i]);
         bool task = info.kind == MemoLine::Task || info.kind == MemoLine::Done;
         bool list = info.kind == MemoLine::Bullet || info.kind == MemoLine::Number;
-        LONG a = (LONG)starts[i], b = a + ((undo && task) || (!undo && list) ? info.markerLen : 0);
+        // After a nested item's tabs: it keeps its level.
+        LONG a = (LONG)starts[i] + info.indent, b = a + ((undo && task) || (!undo && list) ? info.markerLen - info.indent : 0);
         if (undo && !task) continue;
         if (!undo && task) continue;
         std::wstring with = undo ? L"" : box;
@@ -362,7 +481,7 @@ LONG BoxAt(HWND edit, POINT p, wchar_t* box) {
     LONG got = (LONG)SendMessageW(edit, EM_GETTEXTRANGE, 0, (LPARAM)&tr);
     // The character there, and the one before it, which must be a line break (or nothing): a box starts its line.
     wchar_t at = cp == 0 ? two[0] : got >= 2 ? two[1] : 0, before = cp == 0 ? L'\r' : two[0];
-    if ((at != kMemoTodo && at != kMemoDone) || (before != L'\r' && before != L'\v')) return -1;
+    if ((at != kMemoTodo && at != kMemoDone) || (before != L'\r' && before != L'\v' && before != L'\t')) return -1;
     // Only on the box itself, not anywhere a click lands nearest to it.
     POINTL o{};
     SendMessageW(edit, EM_POSFROMCHAR, (WPARAM)&o, cp);
@@ -383,14 +502,19 @@ LRESULT CALLBACK EditProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                     SendMessageW(h, EM_EXGETSEL, 0, (LPARAM)&sel);
                     size_t start, end;
                     LineAt(text, (size_t)sel.cpMin, start, end);
-                    MemoLine kind = ClassifyMemoLine(std::wstring_view(text).substr(start, end - start)).kind;
-                    if (kind == MemoLine::Task || kind == MemoLine::Done) ToggleTask(*m, (LONG)start, text[start]);
+                    MemoLineInfo info = ClassifyMemoLine(std::wstring_view(text).substr(start, end - start));
+                    size_t box = start + (size_t)info.indent;
+                    if (info.kind == MemoLine::Task || info.kind == MemoLine::Done) ToggleTask(*m, (LONG)box, text[box]);
                     else MakeTasks(*m);
                     m->swallow = L'\n';
                     return 0;
                 }
                 if (wp == VK_RETURN && !shift && !ctrl && OnEnter(*m)) {
                     m->swallow = L'\r';  // the WM_CHAR that TranslateMessage already queued for this Enter
+                    return 0;
+                }
+                if (wp == VK_TAB && !ctrl && !m->composing && Indent(*m, shift)) {  // a list item one level in / out
+                    m->swallow = L'\t';
                     return 0;
                 }
                 if ((wp == 'V' && ctrl && !shift) || (wp == VK_INSERT && shift && !ctrl)) {
@@ -403,6 +527,11 @@ LRESULT CALLBACK EditProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                 if (m->swallow && (wchar_t)wp == m->swallow) {
                     m->swallow = 0;
                     return 0;
+                }
+                if (wp >= 0x20 && !m->composing) {  // typed in, then "->" and the like become their symbol
+                    LRESULT r = CallWindowProcW(g_richProc, h, msg, wp, lp);
+                    if (From(GetParent(h)) == m) Prettify(*m, (wchar_t)wp);
+                    return r;
                 }
                 break;
             case WM_PASTE:
@@ -686,7 +815,7 @@ HWND OpenMemoWindow(const std::wstring& path, POINT anchor, const RECT* at) {
     g_memos.push_back(m);
     m->tab = MakeTab(m->hwnd);
 
-    SetText(m->edit, ReadMemo(path));
+    SetText(m->edit, MemoBulletsShown(ReadMemo(path), g_roundBullets));
     m->saved = Text(*m);  // the file as the editor holds it, so opening alone never rewrites it
     m->shown = GetText(m->edit);
     Restyle(*m, m->shown, 0, m->shown.size());
@@ -709,6 +838,19 @@ SIZE MemoWindowSize(UINT dpi) { return {Scale(kW, dpi), Scale(kH, dpi)}; }
 int OpenMemoCount() { return (int)g_memos.size(); }
 
 void OnMemoSaved(std::function<void()> handler) { g_onSaved = std::move(handler); }
+
+void SetMemoRoundBullets(bool round) {
+    if (round == g_roundBullets) return;
+    g_roundBullets = round;
+    for (Memo* m : g_memos) {  // the open memos follow
+        std::wstring text = GetText(m->edit);
+        if (!ShowBullets(*m, text, 0, text.size(), round)) continue;
+        m->shown = GetText(m->edit);
+        Restyle(*m, m->shown, 0, m->shown.size());
+    }
+}
+
+bool MemoRoundBullets() { return g_roundBullets; }
 
 void RefreshMemoTabs() {
     for (Memo* m : g_memos) {

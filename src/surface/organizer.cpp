@@ -11,6 +11,7 @@
 #include "common/win_util.h"
 #include "notes/memo_format.h"
 #include "notes/memo_list_window.h"
+#include "notes/memo_peek.h"
 #include "ui/list_popup.h"
 #include "notes/memo_store.h"
 #include "notes/memo_window.h"
@@ -39,6 +40,8 @@ constexpr int kFlipDelayMs = 450, kFlipRepeatMs = 700, kWheelGapMs = 220;
 // Hit codes for what isn't a pile card (pile cards are their index).
 constexpr int kItemMemo = 1000, kItemPlus = 2000, kItemMemoMore = 2001, kItemHandle = 2002, kItemPin = 2003, kItemClipMore = 2004;
 constexpr int kItemPagePrev = 2005, kItemPageNext = 2006, kItemPageDot = 2100;  // the pager; + page index
+constexpr int kItemMemoPrev = 2007, kItemMemoNext = 2008, kItemMemoDot = 2200;  // the memos' pager; + page index
+constexpr int kMaxMemoDots = 40;  // more memo pages than this show "n / m" (and their dots aren't hit codes)
 constexpr int kItemDock = 2999, kItemMessenger = 3000;  // the dock's row; + index: one of its apps
 constexpr int kItemClip = 4000;                         // + index: an item on the clipboard shelf
 constexpr int kTile = 44;                               // a messenger's (and a clip's) tile
@@ -56,7 +59,6 @@ constexpr double kSlideMs = 240;    // the brand motion: 240 ms ease-out
 constexpr double kSlideInMs = 200;  // folding back in, a little quicker
 constexpr UINT kOpenDelayMs = 120;  // resting on the bookmark this long opens the drawer
 constexpr double kPeekMs = 160;   // a memo unfolding from under the tray
-constexpr int kPeekW = 300, kPeekMaxH = 380;
 // Crumpling a memo into the trash: it is slowly crushed into a ball until kBallAt, falls in until kLandAt
 // (the lid starts shutting at kShutAt), then the can settles.
 constexpr double kCrumpleMs = 1050, kBallAt = 0.62, kShutAt = 0.79, kLandAt = 0.82;
@@ -284,7 +286,7 @@ int Organizer::SlotsPerPage() const {
     // Counted with the memo flags at their most and the pager there, so the number of slots doesn't move as
     // memos come and go or a second page opens.
     int maxH = work_.bottom - work_.top - S(32);
-    int fixed = S(kTrayPad + kLogoH + kSectionGap + kPagerH + kSectionGap + kMemoLabelH + 6 + kFlagMax * (kFlagH + kFlagGap) +
+    int fixed = S(kTrayPad + kLogoH + kSectionGap + kPagerH + kSectionGap + kMemoLabelH + 6 + kFlagMax * (kFlagH + kFlagGap) + kPagerH + 4 +
                   kPlusH + kSectionGap + 2 * (kMemoLabelH + 6 + kTile) + kSectionGap + kTrayPad);
     return std::clamp((maxH - fixed + S(kCardGap)) / S(kCardH + kCardGap), kMinSlots, kSlots);
 }
@@ -336,6 +338,23 @@ Pile* Organizer::PileById(int id) const {
     return nullptr;
 }
 
+int Organizer::MemoPages() const { return std::max(1, ((int)memos_.size() + kFlagMax - 1) / kFlagMax); }
+
+int Organizer::MemoFirst() const { return std::clamp(memoPage_, 0, MemoPages() - 1) * kFlagMax; }
+
+int Organizer::MemoShown() const { return std::clamp((int)memos_.size() - MemoFirst(), 0, kFlagMax); }
+
+bool Organizer::ShowMemoPage(int page) {
+    int pages = MemoPages();
+    page = ((page % pages) + pages) % pages;  // round and round, like the piles' pages
+    if (page == std::clamp(memoPage_, 0, pages - 1)) return false;
+    memoPage_ = page;
+    HidePeek();
+    RenderTray();
+    RenderFlags();  // the tips at the screen edge are this page's
+    return true;
+}
+
 Organizer::Geometry Organizer::Measure(int pileCount, bool tallest) const {
     auto S = [this](int v) { return Scale(v, dpi_); };
     Geometry g;
@@ -364,6 +383,11 @@ Organizer::Geometry Organizer::Measure(int pileCount, bool tallest) const {
     y += S(kMemoLabelH + 6);
     g.flagTop = y;
     y += g.flagCount * S(kFlagH + kFlagGap);
+    g.memoPages = MemoPages();
+    if (g.memoPages > 1) {
+        g.memoPagerTop = y - S(2);
+        y += S(kPagerH + 4);
+    }
     g.plus = {g.cardX, y, g.cardX + S(kCardW), y + S(kPlusH)};
     y += S(kPlusH + kSectionGap);
     // The clipboard shelf, then the messenger dock at the very bottom: a label and one row of tiles each
@@ -484,21 +508,22 @@ void Organizer::RenderHandle() {
 // they are on the open tray.
 void Organizer::RenderFlags() {
     Geometry g = Measure((int)host_.OrganizerPiles().size());
-    if (!visible_ || trayOpen_ || handleDragging_ || !g.flagCount) {
+    int first = MemoFirst(), shown = MemoShown();  // the page of flags last shown in the tray
+    if (!visible_ || trayOpen_ || handleDragging_ || !shown) {
         ShowWindow(flags_, SW_HIDE);
         return;
     }
     auto S = [this](int v) { return Scale(v, dpi_); };
-    int w = S(kFlagOut), unit = S(kFlagH + kFlagGap), h = g.flagCount * unit - S(kFlagGap);
+    int w = S(kFlagOut), unit = S(kFlagH + kFlagGap), h = shown * unit - S(kFlagGap);
     int x = place_.right ? work_.right - w : work_.left, y = g.screen.top + g.flagTop;
     flagsRect_ = {x, y, x + w, y + h};
     Canvas c(w, h);
     flagTipY_.clear();
-    for (int i = 0; i < g.flagCount; ++i) {
+    for (int i = 0; i < shown; ++i) {
         int ty = i * unit;
         flagTipY_.push_back(ty);
         RECT tip = place_.right ? RECT{0, ty, w + S(3), ty + S(kFlagH)} : RECT{-S(3), ty, w, ty + S(kFlagH)};
-        c.FillRoundRect(tip, S(2), FlagColorOf(memos_[i]));
+        c.FillRoundRect(tip, S(2), FlagColorOf(memos_[first + i]));
     }
     c.Present(flags_, {x, y});
     SetWindowPos(flags_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
@@ -751,14 +776,16 @@ void Organizer::RenderTray(bool present) {
     DrawPager(c, g);
 
     // Memos: Post-it flags, in the order they were arranged; the carried one leaves a gap where it would go.
-    int draggedMemo = drag_.item >= kItemMemo && drag_.item - kItemMemo < g.flagCount ? drag_.item - kItemMemo : -1;
+    // Only the page shown: draggedMemo and the slots are places on it, memos_[first + place].
+    int first = MemoFirst(), shown = MemoShown();
+    int draggedMemo = drag_.item >= kItemMemo + first && drag_.item < kItemMemo + first + shown ? drag_.item - kItemMemo - first : -1;
     int flagUnit = S(kFlagH + kFlagGap);
-    if (draggedMemo >= 0) drag_.slot = std::clamp((drag_.y - drag_.grabDy - g.flagTop + flagUnit / 2) / flagUnit, 0, g.flagCount - 1);
+    if (draggedMemo >= 0) drag_.slot = std::clamp((drag_.y - drag_.grabDy - g.flagTop + flagUnit / 2) / flagUnit, 0, shown - 1);
     memoRects_.clear();
     c.Text(memos_.empty() ? L"메모" : L"메모 · " + std::to_wstring(memos_.size()) + L"개",
            {g.cardX, g.memoLabelY, g.cardX + S(kCardW), g.memoLabelY + S(kMemoLabelH)}, Ink(), S(12), true,
            DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    for (int i = 0; i < g.flagCount; ++i) {
+    for (int i = 0; i < shown; ++i) {
         int k = i;
         if (draggedMemo >= 0) {
             if (i == draggedMemo) k = drag_.slot;
@@ -770,9 +797,16 @@ void Organizer::RenderTray(bool present) {
         RECT f = FlagRect(g, k);
         memoRects_.push_back({g.bodyLeft + S(kTrayPad), f.top, g.bodyRight - S(kTrayPad), f.bottom});
         if (i == draggedMemo) continue;
-        bool hot = hover_ == kItemMemo + i && drag_.item < 0;
+        bool hot = hover_ == kItemMemo + first + i && drag_.item < 0;
         if (hot) OffsetRect(&f, g.slide / 2, 0);
-        DrawFlag(c, f, memos_[i], hot);
+        DrawFlag(c, f, memos_[first + i], hot);
+    }
+    memoPrev_ = memoNext_ = {};
+    memoDots_.clear();
+    if (g.memoPages > 1) {
+        const int codes[3] = {kItemMemoPrev, kItemMemoNext, kItemMemoDot};
+        DrawPagerRow(c, {g.cardX, g.memoPagerTop, g.cardX + S(kCardW), g.memoPagerTop + S(kPagerH)}, g.memoPages, first / kFlagMax,
+                     codes, 0, -1, memoPrev_, memoNext_, memoDots_);
     }
     memoMoreRect_ = memos_.empty() ? RECT{} : LabelLink(c, g.memoLabelY, L"전체 보기", hover_ == kItemMemoMore);
     // The dispenser, as wide as a card; the trash can while a memo, messenger or clip is carried or going in.
@@ -796,7 +830,7 @@ void Organizer::RenderTray(bool present) {
         OffsetRect(&f, g.slide / 2, ty - f.top);
         if (drag_.overTrash) InflateRect(&f, -S(12), -S(2));  // about to go in: it shrinks a little
         drag_.card = f;
-        DrawFlag(c, f, memos_[draggedMemo], true);
+        DrawFlag(c, f, memos_[first + draggedMemo], true);
     }
     if (present) PresentTray();
 }
@@ -829,15 +863,11 @@ void Organizer::DrawDispenser(Canvas& c, const Geometry& g, bool hot) {
     const RECT& r = g.plus;
     int dir = place_.right ? -1 : 1;  // toward the desktop
     double now = NowMs();
-    // Hovered, the dispenser grows to about four times its size over the sections below (dimmed a little).
-    // k: 0 resting .. 1 grown.
+    // Hovered, the dispenser grows to about four times its size over the sections below (no dimming under it:
+    // its own shadow sets it apart). k: 0 resting .. 1 grown.
     double k = !hot ? 0 : std::min(1.0, (now - upAt_) / kGrowMs);
     k = 1 - (1 - k) * (1 - k) * (1 - k);  // ease out
     auto L = [&](int a, int b) { return a + (int)((b - a) * k); };
-    if (k > 0) {
-        RECT below{g.bodyLeft + S(2), r.top - S(8), g.bodyRight - S(2), g.h - S(2)};
-        c.FillRoundRect(below, S(12), RGB(16, 10, 6), (BYTE)(80 * k));
-    }
     int side = L(S(28), S(100));
     int top = L(r.top + (r.bottom - r.top - S(28)) / 2, r.top - S(6));
     RECT box = place_.right ? RECT{r.right - S(6) - side, top, r.right - S(6), top + side}
@@ -1135,36 +1165,42 @@ void Organizer::AddClip(ClipItem item) {
 // dots). The pages go round, so the arrows always lead somewhere; one that something carried rests on lights
 // up, about to flip.
 void Organizer::DrawPager(Canvas& c, const Geometry& g) {
-    auto S = [this](int v) { return Scale(v, dpi_); };
     pagePrev_ = pageNext_ = {};
     pageDots_.clear();
     if (g.pages <= 1) return;
-    RECT row{g.cardX, g.pagerTop, g.cardX + S(kCardW), g.pagerTop + S(kPagerH)};
-    int aw = S(40), round = S(kPagerH) / 2;
-    pagePrev_ = {row.left, row.top, row.left + aw, row.bottom};
-    pageNext_ = {row.right - aw, row.top, row.right, row.bottom};
+    const int codes[3] = {kItemPagePrev, kItemPageNext, kItemPageDot};
+    DrawPagerRow(c, {g.cardX, g.pagerTop, g.cardX + Scale(kCardW, dpi_), g.pagerTop + Scale(kPagerH, dpi_)}, g.pages, page_, codes,
+                 flipDir_, extraPage_ ? g.pages - 1 : -1, pagePrev_, pageNext_, pageDots_);
+}
+
+void Organizer::DrawPagerRow(Canvas& c, const RECT& row, int pages, int current, const int codes[3], int armed, int fresh,
+                             RECT& prev, RECT& next, std::vector<RECT>& dots) {
+    auto S = [this](int v) { return Scale(v, dpi_); };
+    int aw = S(40), round = (row.bottom - row.top) / 2;
+    prev = {row.left, row.top, row.left + aw, row.bottom};
+    next = {row.right - aw, row.top, row.right, row.bottom};
     COLORREF ink = Ink();
-    auto arrow = [&](const RECT& r, wchar_t glyph, bool hot, bool armed) {
-        if (armed) c.FillRoundRect(r, round, ink, 80);
+    auto arrow = [&](const RECT& r, wchar_t glyph, bool hot, bool on) {
+        if (on) c.FillRoundRect(r, round, ink, 80);
         else if (hot) c.FillRoundRect(r, round, ink, 30);
         c.Glyph(glyph, r, ink, S(12));
     };
-    arrow(pagePrev_, 0xE76B, hover_ == kItemPagePrev, flipDir_ < 0);  // ChevronLeft
-    arrow(pageNext_, 0xE76C, hover_ == kItemPageNext, flipDir_ > 0);  // ChevronRight
+    arrow(prev, 0xE76B, hover_ == codes[0], armed < 0);  // ChevronLeft
+    arrow(next, 0xE76C, hover_ == codes[1], armed > 0);  // ChevronRight
     int pitch = S(14), dot = S(7), cy = (row.top + row.bottom) / 2;
-    if (g.pages * pitch > pageNext_.left - pagePrev_.right - S(8)) {
-        c.Text(std::to_wstring(page_ + 1) + L" / " + std::to_wstring(g.pages), {pagePrev_.right, row.top, pageNext_.left, row.bottom},
-               ink, S(12), true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    if (pages * pitch > next.left - prev.right - S(8) || pages > kMaxMemoDots) {
+        c.Text(std::to_wstring(current + 1) + L" / " + std::to_wstring(pages), {prev.right, row.top, next.left, row.bottom}, ink, S(12),
+               true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         return;
     }
-    int x0 = (row.left + row.right) / 2 - (g.pages - 1) * pitch / 2;
-    for (int i = 0; i < g.pages; ++i) {
+    int x0 = (row.left + row.right) / 2 - (pages - 1) * pitch / 2;
+    for (int i = 0; i < pages; ++i) {
         int x = x0 + i * pitch;
-        pageDots_.push_back({x - pitch / 2, row.top, x + pitch / 2, row.bottom});
+        dots.push_back({x - pitch / 2, row.top, x + pitch / 2, row.bottom});
         RECT d{x - dot / 2, cy - dot / 2, x - dot / 2 + dot, cy - dot / 2 + dot};
-        if (i == page_) c.FillRoundRect(d, dot / 2, ink);
-        else if (extraPage_ && i == g.pages - 1) c.StrokeRoundRect(d, dot / 2, std::max(1, S(1)), ink);  // opened for this card
-        else c.FillRoundRect(d, dot / 2, ink, hover_ == kItemPageDot + i ? 160 : 80);
+        if (i == current) c.FillRoundRect(d, dot / 2, ink);
+        else if (i == fresh) c.StrokeRoundRect(d, dot / 2, std::max(1, S(1)), ink);  // opened for this card
+        else c.FillRoundRect(d, dot / 2, ink, hover_ == codes[2] + i ? 160 : 80);
     }
 }
 
@@ -1521,10 +1557,14 @@ int Organizer::ItemAt(POINT client) const {
     if (PtInRect(&pageNext_, client)) return kItemPageNext;
     for (size_t i = 0; i < pageDots_.size(); ++i)
         if (PtInRect(&pageDots_[i], client)) return kItemPageDot + (int)i;
+    if (PtInRect(&memoPrev_, client)) return kItemMemoPrev;
+    if (PtInRect(&memoNext_, client)) return kItemMemoNext;
+    for (size_t i = 0; i < memoDots_.size(); ++i)
+        if (PtInRect(&memoDots_[i], client)) return kItemMemoDot + (int)i;
     for (size_t i = 0; i < cardRects_.size(); ++i)
         if (PtInRect(&cardRects_[i], client)) return (int)i;
     for (size_t i = 0; i < memoRects_.size(); ++i)
-        if (PtInRect(&memoRects_[i], client)) return kItemMemo + (int)i;
+        if (PtInRect(&memoRects_[i], client)) return kItemMemo + MemoFirst() + (int)i;
     for (size_t i = 0; i < messengerRects_.size(); ++i)
         if (PtInRect(&messengerRects_[i], client)) return kItemMessenger + (int)i;
     for (size_t i = 0; i < clipRects_.size(); ++i)
@@ -1550,6 +1590,10 @@ void Organizer::Activate(int item, POINT screenPt) {
         ShowPage(page_ + (item == kItemPageNext ? 1 : -1));
     } else if (item >= kItemPageDot && item < kItemPageDot + kMaxPages) {
         ShowPage(item - kItemPageDot);
+    } else if (item == kItemMemoPrev || item == kItemMemoNext) {
+        ShowMemoPage(MemoFirst() / kFlagMax + (item == kItemMemoNext ? 1 : -1));
+    } else if (item >= kItemMemoDot && item < kItemMemoDot + kMaxMemoDots) {
+        ShowMemoPage(item - kItemMemoDot);
     } else if (item == kItemPin) {
         place_.pinned = !place_.pinned;
         host_.OnOrganizerMoved();  // remembered with its place
@@ -1626,56 +1670,11 @@ void Organizer::ShowPeek(int memo) {
     using namespace theme;
     auto S = [this](int v) { return Scale(v, dpi_); };
     peekMemo_ = memo;
-    // The memo as it reads in its window: headings bigger, list markers as bullets, then body text.
-    const MemoInfo& m = memos_[memo];
-    std::wstring text = ReadMemo(m.path);
-    struct Line {
-        std::wstring s;
-        int size;
-        bool bold;
-    };
-    std::vector<Line> lines;
-    int h = S(10) + S(12), maxH = S(kPeekMaxH);
-    bool clipped = false;
-    for (size_t pos = 0; pos <= text.size();) {
-        size_t end = std::min(text.find(L'\n', pos), text.size());
-        std::wstring s = text.substr(pos, end - pos);
-        if (!s.empty() && s.back() == L'\r') s.pop_back();
-        pos = end + 1;
-        if (s.empty() && lines.empty()) continue;
-        MemoLineInfo info = ClassifyMemoLine(s);
-        int size = info.kind == MemoLine::H1 ? 17 : info.kind == MemoLine::H2 ? 15 : info.kind == MemoLine::H3 ? 13 : 12;
-        bool bold = info.kind == MemoLine::H1 || info.kind == MemoLine::H2 || info.kind == MemoLine::H3;
-        if (info.kind == MemoLine::Bullet) s = L"•  " + s.substr(info.markerLen);
-        else if (bold) s = s.substr(info.markerLen);
-        int lh = S(size) + S(bold ? 10 : 7);
-        if (h + lh > maxH - S(24)) {
-            clipped = true;
-            break;
-        }
-        lines.push_back({s, size, bold});
-        h += lh;
-        if (end >= text.size()) break;
-    }
-    if (lines.empty()) lines.push_back({L"빈 메모", 12, false});
-    h = std::max(h, S(60)) + (clipped ? S(20) : 0) + S(12);
-    int w = S(kPeekW);
-    peekCanvas_ = std::make_unique<Canvas>(w, h);
-    Canvas& c = *peekCanvas_;
-    c.FillRoundRect({0, 0, w, h}, S(3), kFlagPaper);
-    c.FillRoundRect({0, 0, w, S(6)}, 0, FlagColorOf(m));  // its flag's color along the top
-    c.StrokeRoundRect({0, 0, w, h}, S(3), 1, RGB(214, 204, 186));
-    int y = S(6) + S(12);
-    for (const Line& l : lines) {
-        int lh = S(l.size) + S(l.bold ? 10 : 7);
-        c.Text(l.s, {S(16), y, w - S(16), y + lh}, l.bold || &l == &lines.front() ? kForeground : kSubtleFg, S(l.size),
-               l.bold, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        y += lh;
-    }
-    if (clipped) c.Text(L"…  눌러서 열기", {S(16), y, w - S(16), y + S(18)}, kMutedFg, S(11), false, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    peekCanvas_ = RenderMemoPeek(memos_[memo].path, FlagColorOf(memos_[memo]), dpi_);
+    int w = peekCanvas_->width(), h = peekCanvas_->height();
     // It comes out from under the tray's edge, level with its flag, toward the desktop.
     Geometry g = Measure((int)host_.OrganizerPiles().size());
-    RECT f = FlagRect(g, memo);
+    RECT f = FlagRect(g, memo - MemoFirst());
     int edge = trayRect_.left + (place_.right ? g.bodyLeft : g.bodyRight);
     int top = std::clamp<int>(trayRect_.top + f.top - S(8), work_.top + S(8), std::max<int>(work_.top + S(8), work_.bottom - S(8) - h));
     peekRect_ = place_.right ? RECT{edge - w, top, edge, top + h} : RECT{edge, top, edge + w, top + h};
@@ -1732,11 +1731,11 @@ LRESULT Organizer::OnFlags(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_LBUTTONUP: {
             KillTimer(flags_, kTimerOpen);
             int y = GET_Y_LPARAM(lp);
-            for (size_t i = 0; i < flagTipY_.size() && i < memos_.size(); ++i)
+            for (size_t i = 0; i < flagTipY_.size() && MemoFirst() + i < memos_.size(); ++i)
                 if (y >= flagTipY_[i] && y < flagTipY_[i] + Scale(kFlagH, dpi_)) {
                     POINT c;
                     GetCursorPos(&c);
-                    OpenMemoWindow(memos_[i].path, {place_.right ? c.x - Scale(16, dpi_) : c.x + Scale(16, dpi_), c.y});
+                    OpenMemoWindow(memos_[MemoFirst() + i].path, {place_.right ? c.x - Scale(16, dpi_) : c.x + Scale(16, dpi_), c.y});
                     break;
                 }
             return 0;
@@ -1952,10 +1951,10 @@ void Organizer::EndDrag(POINT) {
             OffsetRect(&crumpleFrom_, -g.plus.left, -g.plus.top);
             crumpleStart_ = NowMs();
             SetTimer(tray_, kTimerAnim, 15, nullptr);
-        } else if (d.slot >= 0 && d.slot != i) {
+        } else if (int to = MemoFirst() + d.slot; d.slot >= 0 && to != i) {  // a place on the page shown
             MemoInfo m = memos_[i];
             memos_.erase(memos_.begin() + i);
-            memos_.insert(memos_.begin() + std::min<int>(d.slot, (int)memos_.size()), m);
+            memos_.insert(memos_.begin() + std::min<int>(to, (int)memos_.size()), m);
             SaveMemoOrder(memos_);
         }
     }
@@ -2132,7 +2131,7 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
             if (movable && (abs(p.x - pressPt_.x) > GetSystemMetrics(SM_CXDRAG) || abs(p.y - pressPt_.y) > GetSystemMetrics(SM_CYDRAG))) {
                 auto at = [](const std::vector<RECT>& v, int i) { return i >= 0 && i < (int)v.size() ? &v[i] : nullptr; };
                 const RECT* from = pressed_ < kItemMemo   ? at(cardRects_, pressed_)
-                                   : pressed_ < kItemPlus ? at(memoRects_, pressed_ - kItemMemo)
+                                   : pressed_ < kItemPlus ? at(memoRects_, pressed_ - kItemMemo - MemoFirst())
                                    : IsClip(pressed_)     ? at(clipRects_, pressed_ - kItemClip)
                                                           : at(messengerRects_, pressed_ - kItemMessenger);
                 if (from) {
@@ -2174,19 +2173,23 @@ LRESULT Organizer::OnTray(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_MOUSEHWHEEL: {
             // Over the pile slots or the pager: the wheel (down) or a touchpad swipe (left) flips to the next
             // page. One flip per notch or swipe, however many small steps a touchpad sends for it.
+            // Over the memo flags or their pager, the same flips the memos' pages.
             Geometry g = Measure((int)host_.OrganizerPiles().size());
-            if (g.pages <= 1 || drag_.item >= 0) return 0;
+            if (drag_.item >= 0) return 0;
             POINT p{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
             ScreenToClient(tray_, &p);
             int bottom = g.pagerTop + S(kPagerH);
-            if (p.y < g.slotTop - S(6) || p.y > bottom + S(6)) return 0;
+            bool slots = g.pages > 1 && p.y >= g.slotTop - S(6) && p.y <= bottom + S(6);
+            bool memos = g.memoPages > 1 && p.y >= g.memoLabelY && p.y <= g.memoPagerTop + S(kPagerH + 4);
+            if (!slots && !memos) return 0;
             double now = NowMs();
             if (now - wheelAt_ > 400) wheelAcc_ = 0;  // a new gesture
             wheelAt_ = now;
             int delta = GET_WHEEL_DELTA_WPARAM(wp);
             wheelAcc_ += msg == WM_MOUSEWHEEL ? -delta : delta;
             if (std::abs(wheelAcc_) >= WHEEL_DELTA && now - flippedAt_ >= kWheelGapMs) {
-                ShowPage(page_ + (wheelAcc_ > 0 ? 1 : -1));
+                if (slots) ShowPage(page_ + (wheelAcc_ > 0 ? 1 : -1));
+                else ShowMemoPage(MemoFirst() / kFlagMax + (wheelAcc_ > 0 ? 1 : -1));
                 wheelAcc_ = 0;
                 flippedAt_ = now;
             }

@@ -1,5 +1,7 @@
 // A calm list window (the memo list, the clipboard history): a header with its count, one button and close,
 // and rows to pick from (a color bar or a thumbnail, a title, a line under it, a date or time on the right).
+// More rows than fit scroll under the header: the wheel or a touchpad, the scroll bar on the right (dragged, or
+// clicked above or below its thumb for a page), the arrow keys, Page Up / Down, Home and End.
 // One window per kind; showing it again brings it forward with its rows read afresh.
 #pragma once
 
@@ -29,6 +31,9 @@ struct ListPopupSpec {
     std::function<std::vector<ListRow>()> rows;  // read whenever it is shown or brought forward
     std::function<void(int row, HWND popup)> open;  // a row clicked
     std::function<void(HWND popup)> press;          // the header button
+    // The pointer came onto a row (its rect on the screen), or off the rows (-1; also when the list closes or
+    // its rows are read again). Optional.
+    std::function<void(int row, RECT rowScreen, HWND popup)> hover;
 };
 
 void ShowListPopup(const ListPopupSpec& spec, POINT anchor);  // near `anchor` (screen)

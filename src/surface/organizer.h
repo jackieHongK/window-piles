@@ -112,7 +112,8 @@ private:
         RECT logo{};
         int slotTop = 0, slots = 0;  // slots: on one page
         int pages = 1, pagerTop = 0; // the pages, and the row that flips through them (only with two or more)
-        int memoLabelY = 0, flagTop = 0, flagCount = 0;
+        int memoLabelY = 0, flagTop = 0, flagCount = 0;  // flagCount: rows of flags (a page's worth at most)
+        int memoPages = 1, memoPagerTop = 0;  // pages of flags, and the row that flips through them (two or more)
         int clipLabelY = 0, clipTop = 0;  // the clipboard shelf
         int dockLabelY = 0, dockTop = 0;  // the messenger dock
         RECT plus{};                      // the memo dispenser
@@ -130,6 +131,11 @@ private:
     // after a moment, and again while it stays there.
     void HoverPager(POINT client);
     Pile* PileById(int id) const;
+    // Memos are flipped through like the pile slots: a page of flags (kFlagMax) at a time, the pages going round.
+    int MemoPages() const;
+    int MemoFirst() const;  // memos_ index of the first flag on the page shown
+    int MemoShown() const;  // flags on the page shown
+    bool ShowMemoPage(int page);
 
     static LRESULT CALLBACK HandleProc(HWND, UINT, WPARAM, LPARAM);
     static LRESULT CALLBACK TrayProc(HWND, UINT, WPARAM, LPARAM);
@@ -166,6 +172,10 @@ private:
     void ShowNotice(int row, const std::wstring& text);  // over a row of tiles for a moment: 0 dock, 1 clips
     void DrawDock(Canvas& c, const Geometry& g);
     void DrawPager(Canvas& c, const Geometry& g);  // the pages: arrows and dots below the slots
+    // A pager row: arrows and dots (or "n / m" when there are too many for dots). codes: prev, next, dot + page.
+    // armed: -1 / +1 lights that arrow (about to flip); fresh: a page drawn as an outline, -1 for none.
+    void DrawPagerRow(Canvas& c, const RECT& row, int pages, int current, const int codes[3], int armed, int fresh, RECT& prev,
+                      RECT& next, std::vector<RECT>& dots);
     void DrawClips(Canvas& c, const Geometry& g);
     void DrawDispenser(Canvas& c, const Geometry& g, bool hot);
     void DrawNotice(Canvas& c, const Geometry& g, int row);
@@ -231,6 +241,9 @@ private:
     double wheelAt_ = 0, flippedAt_ = 0;
     RECT pagePrev_{}, pageNext_{};  // the pager's arrows, tray client (empty with one page)
     std::vector<RECT> pageDots_;
+    int memoPage_ = 0;  // the page of memo flags shown
+    RECT memoPrev_{}, memoNext_{};
+    std::vector<RECT> memoDots_;
     bool carriedOut_ = false; // a card just taken out: not a drop target for it until the pointer has left
     // Explorer's file drags send no mouse messages: a held button resting on the bookmark opens the tray.
     bool filesDrag_ = false;

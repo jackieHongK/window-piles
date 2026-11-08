@@ -43,6 +43,8 @@ enum Hit {
     kHitShown,
     kHitOrganizer,
     kHitSlide,
+    kHitMarks,
+    kHitBullets,
     kHitSide = 30,  // + 0 left, 1 right
     kHitFolder = 40,
     kHitIdentify = 49,
@@ -149,6 +151,7 @@ void GuideWindow::Layout() {
     section(0);
     row(kHitAutostart, L"Windows 시작 시 자동 실행", L"켜 두면 로그인할 때 더미가 그대로 돌아와요", S(kToggleW), false);
     row(kHitShown, L"카드와 오거나이저 보이기", L"끄면 '숨기기': 집중할 때 잠시 치워 둬요", S(kToggleW), false);
+    row(kHitMarks, L"창에 더미 색 표시", L"펼친 더미의 창마다 위쪽 끝에 더미 색 작은 탭", S(kToggleW), false);
     y += S(14);
     section(1);
     row(kHitOrganizer, L"오거나이저 사용", L"화면 끝 막대에 더미를 꽂아 두는 서랍", S(kToggleW), false);
@@ -192,6 +195,7 @@ void GuideWindow::Layout() {
     row(kHitFolder, L"메모 폴더", L"", fw, false);
     folderButton_ = rows_.back().control;
     folderRect_ = {pad, rows_.back().rect.top + S(26), folderButton_.left - S(12), rows_.back().rect.top + S(44)};
+    row(kHitBullets, L"목록을 동그란 불릿으로", L"'- ' 목록을 •로 보여 줘요 · Tab으로 들여쓰기", S(kToggleW), false);
     int settingsBottom = y;
 
     // 사용법
@@ -264,9 +268,10 @@ void GuideWindow::Paint(HDC dc) {
             if (!r.note.empty())
                 c.Text(r.note, {lr.left, lr.bottom, lr.right, lr.bottom + S(18)}, kMutedFg, S(12), false,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-            if (r.hit == kHitAutostart || r.hit == kHitShown || r.hit == kHitOrganizer || r.hit == kHitSlide) {
+            if (r.hit == kHitAutostart || r.hit == kHitShown || r.hit == kHitMarks || r.hit == kHitBullets || r.hit == kHitOrganizer ||
+                r.hit == kHitSlide) {
                 bool on = r.hit == kHitAutostart ? s_.autostart : r.hit == kHitShown ? s_.shown
-                          : r.hit == kHitOrganizer ? s_.organizer : s_.slide;
+                          : r.hit == kHitMarks ? s_.marks : r.hit == kHitBullets ? s_.roundBullets : r.hit == kHitOrganizer ? s_.organizer : s_.slide;
                 const RECT& t = r.control;
                 c.FillRoundRect(t, S(kToggleH / 2), on ? kPrimary : kBorder);
                 int k = S(kToggleH - 4);
@@ -384,6 +389,8 @@ void GuideWindow::Click(int hit) {
         AppSettings next = s_;
         if (hit == kHitAutostart) next.autostart = !next.autostart;
         else if (hit == kHitShown) next.shown = !next.shown;
+        else if (hit == kHitMarks) next.marks = !next.marks;
+        else if (hit == kHitBullets) next.roundBullets = !next.roundBullets;
         else if (hit == kHitOrganizer) next.organizer = !next.organizer;
         else if (hit == kHitSlide) next.slide = !next.slide;
         else if (hit == kHitSide || hit == kHitSide + 1) next.right = hit == kHitSide + 1;

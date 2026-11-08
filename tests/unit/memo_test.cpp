@@ -42,6 +42,25 @@ int main() {
     Check(!MemoOnEnter(L"# 제목").endList && MemoOnEnter(L"# 제목").nextPrefix.empty(), "heading: plain new line");
     Check(MemoOnEnter(L"그냥 글").nextPrefix.empty(), "body: plain new line");
 
+    // nested lists (a tab per level), round bullets, typing that turns into symbols
+    MemoLineInfo nb = ClassifyMemoLine(L"\t\t- 손자");
+    Check(nb.kind == MemoLine::Bullet && nb.indent == 2 && nb.markerLen == 4, "tabs before a bullet nest it");
+    Check(ClassifyMemoLine(L"\t3. 셋").number == 3 && ClassifyMemoLine(L"\t3. 셋").indent == 1, "nested number");
+    Check(ClassifyMemoLine(L"\t☐ 할 일").kind == MemoLine::Task, "nested to-do");
+    Check(ClassifyMemoLine(L"\t그냥").kind == MemoLine::Body && ClassifyMemoLine(L"\t그냥").markerLen == 0, "tab body");
+    Check(ClassifyMemoLine(L"• 둥근").kind == MemoLine::Bullet, "round bullet is a bullet");
+    Check(MemoOnEnter(L"\t- 사과").nextPrefix == L"\t- ", "nested bullet continues at its level");
+    Check(MemoOnEnter(L"\t2. 둘").nextPrefix == L"\t3. ", "nested number counts up");
+    Check(MemoOnEnter(L"\t- ").outdent && !MemoOnEnter(L"\t- ").endList, "empty nested item goes a level out");
+    Check(MemoBulletsShown(L"- a\r\n\t* b\r\n1. c\r\n-x", true) == L"• a\r\n\t• b\r\n1. c\r\n-x", "bullets shown round");
+    Check(MemoBulletsShown(L"• a\r\t• b\r* c", false) == L"- a\r\t- b\r* c", "round bullets saved as dashes");
+    std::wstring w;
+    Check(MemoPrettify(L"a ->", &w) == 2 && w == L"→", "-> is an arrow");
+    Check(MemoPrettify(L"x ←>", &w) == 2 && w == L"↔", "<-> is a two-way arrow");
+    Check(MemoPrettify(L"..", &w) == 0 && MemoPrettify(L"...", &w) == 3 && w == L"…", "... is an ellipsis");
+    Check(MemoPrettify(L"a >=", &w) == 2 && w == L"≥", ">= is greater-or-equal");
+    Check(MemoPrettify(L"- ", &w) == 0 && MemoPrettify(L">", &w) == 0, "nothing else changes");
+
     // titles
     Check(MemoTitle(L"\r\n# 장보기\r- 우유\r- 계란") == L"장보기", "title skips blanks and the marker");
     Check(MemoExcerpt(L"# 장보기\r- 우유\r- 계란") == L"우유", "excerpt is the next line");

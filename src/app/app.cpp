@@ -44,6 +44,10 @@ constexpr UINT_PTR kTimerAdopt = 10;  // an app started from a card showed no ne
 constexpr UINT WM_APP_RECLAIM = WM_APP + 4;
 constexpr UINT WM_APP_TITLE = WM_APP + 5;
 constexpr UINT WM_APP_FLUSH = WM_APP + 6;  // deferred redraws and journal write (one per burst)
+constexpr UINT WM_APP_HIDDEN_FRONT = WM_APP + 7;  // a folded window became the foreground window
+constexpr UINT_PTR kTimerHiddenFront = 11;      // ... checked a moment later (OnHiddenActivated)
+constexpr UINT_PTR kTimerDisplaySettle = 12;    // a few re-checks while displays come and go (DisplaySettleTick)
+constexpr int kDisplaySettleTicks = 8;          // ... one a second, for this many seconds after the last change
 // How long after start-up windows reopened by their apps are put back into their piles.
 constexpr double kReclaimWindowMs = 15 * 60 * 1000;
 constexpr UINT kTrayId = 1;
@@ -278,10 +282,12 @@ App::App() { instance_ = this; }
 
 App::~App() {
     if (objectHook_) UnhookWinEvent(objectHook_);
+    if (foregroundHook_) UnhookWinEvent(foregroundHook_);
     if (nameHook_) UnhookWinEvent(nameHook_);
     for (auto& [pid, hook] : titleHooks_) UnhookWinEvent(hook);
     if (main_) DeregisterShellHookWindow(main_);
     drag_.reset();
+    marks_.reset();
     frame_.reset();
     guide_.reset();
     stats_.reset();
@@ -318,6 +324,7 @@ int App::Run() {
             AppSettings s;
             s.autostart = AutostartEnabled();
             s.shown = !uiHidden_;
+            s.marks = marks_ != nullptr;
             s.organizer = organizer_ != nullptr;
             Organizer::Place p = organizer_ ? organizer_->place() : LoadOrganizerPlace();
             s.right = p.right;
@@ -325,6 +332,7 @@ int App::Run() {
             s.slide = p.slide;
             s.material = p.material;
             s.memoDir = MemoDir();
+            s.roundBullets = MemoRoundBullets();
             return s;
         },
         [this](const AppSettings& s) {
@@ -333,6 +341,14 @@ int App::Run() {
                 SetFlag(L"autostart.off", !s.autostart);  // remember the user's choice across launches
             }
             if (s.shown == uiHidden_) SetUiHidden(!s.shown);
+            if (s.marks != (marks_ != nullptr)) {
+                SetMarks(s.marks);
+                SetFlag(L"marks.off", !s.marks);
+            }
+            if (s.roundBullets != MemoRoundBullets()) {
+                SetMemoRoundBullets(s.roundBullets);
+                SetFlag(L"bullets.dash", !s.roundBullets);
+            }
             if (s.organizer != (organizer_ != nullptr)) {
                 SetOrganizer(s.organizer);
                 SetFlag(L"organizer.off", !s.organizer);
@@ -368,6 +384,8 @@ int App::Run() {
     int recovered = RestoreSavedPiles();
     Log("run: %zu piles restored, %d leftover windows recovered", piles_.size(), recovered);
     if (!FlagExists(L"organizer.off")) SetOrganizer(true);
+    if (!FlagExists(L"marks.off")) SetMarks(true);
+    SetMemoRoundBullets(!FlagExists(L"bullets.dash"));
     RegisterUrlProtocol();  // windowpiles:// for the unboxing page's hand-off
     if (int y = TakePendingArrive(); y >= 0) PostMessageW(main_, WM_APP_ARRIVE, (WPARAM)y, 0);
 
@@ -375,6 +393,9 @@ int App::Run() {
     // Member windows closing or showing themselves. Out-of-context: no injection.
     objectHook_ = SetWinEventHook(EVENT_OBJECT_DESTROY, EVENT_OBJECT_SHOW, nullptr, OnObjectEvent, 0, 0,
                                   WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    // A folded window made the foreground one by its app (OnHiddenActivated). Rare: one event per focus change.
+    foregroundHook_ = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, OnObjectEvent, 0, 0,
+                                      WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     SetTimer(main_, kTimerIdle, 10000, nullptr);
     // Resume from sleep / unlock: re-check the piles (event-driven, no polling).
     WTSRegisterSessionNotification(main_, NOTIFY_FOR_THIS_SESSION);
@@ -1121,6 +1142,29 @@ void App::Refresh(Pile& pile) {
     pile.view->Render();
     if (pile.active && frame_) UpdateFrame();
     if (pile.docked && organizer_) organizer_->Refresh();
+    UpdateMarks();  // its color may have changed, or which of its windows are out
+}
+
+void App::SetMarks(bool on) {
+    if (on == (marks_ != nullptr)) return;
+    if (on) {
+        marks_ = std::make_unique<WindowMarks>();
+        UpdateMarks();
+    } else {
+        marks_.reset();
+    }
+}
+
+void App::UpdateMarks() {
+    // Every window of a pile that is out on the screen (an open pile's, or one its app brought back itself),
+    // in that pile's color. Nothing while the app's surfaces are put away (숨기기).
+    if (!marks_) return;
+    std::vector<WindowMarks::Want> want;
+    if (!uiHidden_)
+        for (auto& p : piles_)
+            for (auto& m : p->members)
+                if (!m.hidden && IsWindow(m.hwnd)) want.push_back({m.hwnd, p->color});
+    marks_->Set(want);
 }
 
 void App::RefreshSoon(Pile& pile) {
@@ -1361,6 +1405,7 @@ void App::SaveJournalNow() {
     WriteJournal(j);
     PersistSoon();
     UpdateTitleHooks();  // the set of hidden windows may have changed
+    UpdateMarks();       // ... and so the set of windows out on the screen
     TrackActivity();     // which pile is being worked on may have changed
 }
 
@@ -1482,8 +1527,35 @@ void App::OnMemberShown(HWND hwnd) {
     SaveJournal();
 }
 
+void App::OnHiddenActivated(HWND hwnd) {
+    // A Chromium browser asked to open profile X (profile picker, profile menu, a profile's shortcut while its
+    // window is the last one used) brings that profile's window forward instead of opening one. When that
+    // window is folded away in a pile it stays hidden, and nothing seems to happen. Open a new window of the
+    // same profile instead: the folded one stays in its pile, the new one is free like any other window.
+    Pile* p = PileOf(hwnd);
+    if (!p) return;
+    Member* m = p->Find(hwnd);
+    // Shown meanwhile (a link opened in it: the browser shows it itself, OnMemberShown), or focus moved on.
+    if (!m || !m->hidden || IsWindowVisible(hwnd) || GetForegroundWindow() != hwnd) return;
+    if (!IsBrowser(m->exePath) || Lower(m->launch).find(L"--app") != std::wstring::npos) return;  // an installed web app: its only window
+    if (hwnd == newWindowFor_ && NowMs() - newWindowAt_ < 3000) return;  // never a chain of windows
+    newWindowFor_ = hwnd;
+    newWindowAt_ = NowMs();
+    Log("browser: a folded window was brought forward; opening a new window of its profile instead");
+    LaunchWindow(m->exePath, {m->launch, m->aumid});  // --new-window, same --profile-directory
+}
+
 void CALLBACK App::OnObjectEvent(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD, DWORD) {
     if (!instance_ || idObject != OBJID_WINDOW || idChild != CHILDID_SELF || !hwnd) return;
+    if (event == EVENT_SYSTEM_FOREGROUND) {
+        if (!IsWindowVisible(hwnd) && instance_->PileOf(hwnd))
+            PostMessageW(instance_->main_, WM_APP_HIDDEN_FRONT, (WPARAM)hwnd, 0);
+        else if (instance_->marks_ && instance_->marks_->Has(hwnd)) {
+            instance_->marks_->Place(hwnd);  // came to the front: its mark with it
+            instance_->marks_->PlaceAllSoon();  // ... and once more when the app is done raising it
+        }
+        return;
+    }
     // Cheap filters; the real work is deferred so it never runs in the middle of another operation.
     if (instance_->PileOf(hwnd)) {
         if (event == EVENT_OBJECT_NAMECHANGE) return;
@@ -1590,6 +1662,7 @@ void App::SetUiHidden(bool hide) {
         if (hide) p->view->SetVisible(false);
         else if (!p->active) ShowCard(*p);
     if (!hide && organizer_) organizer_->Raise();
+    UpdateMarks();
 }
 
 void App::SetOrganizer(bool on) {
@@ -1751,6 +1824,7 @@ void App::Revalidate() {
     for (HWND h : dead) OnMemberGone(h);
     for (auto& p : piles_) p->view->Render();
     if (frame_) UpdateFrame();
+    if (marks_) marks_->PlaceAllSoon();  // windows moved to other displays / DPI
     // A display plugged in, unplugged or rearranged: the organizer goes back to its own display when that
     // one is there, else to the primary (it keeps remembering its own).
     std::wstring key = DisplaysKey();
@@ -1761,6 +1835,21 @@ void App::Revalidate() {
         if (uiHidden_) organizer_->SetVisible(false);
         organizer_->Refresh();
     }
+}
+
+void App::DisplaysChanging() {
+    SetTimer(main_, kTimerRevalidate, 300, nullptr);  // pushed back by every change of a burst
+    settleTicks_ = kDisplaySettleTicks;
+    SetTimer(main_, kTimerDisplaySettle, 1000, nullptr);
+}
+
+// Displays come back one by one after sleep and Windows may still be moving them (and our windows) after its
+// last message: for a few seconds, look again. A cheap look (the display list and the open pile's frame,
+// nothing redrawn) unless the displays changed since the last full re-check.
+void App::DisplaySettleTick() {
+    if (--settleTicks_ <= 0) KillTimer(main_, kTimerDisplaySettle);
+    if (DisplaysKey() != displaysKey_) Revalidate();
+    else if (frame_) UpdateFrame();  // re-reads its displays; also puts back an edge Windows moved
 }
 
 void App::UpdateReclaim() {
@@ -1972,8 +2061,16 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
             }
             return 0;
         case WM_APP_MEMBER_GONE: OnMemberGone((HWND)wp); return 0;
-        case WM_APP_MEMBER_SHOWN: OnMemberShown((HWND)wp); return 0;
+        case WM_APP_MEMBER_SHOWN:
+            OnMemberShown((HWND)wp);
+            if (marks_) marks_->Place((HWND)wp);  // a window of an open pile done restoring: its mark comes up
+            return 0;
         case WM_APP_RECLAIM: TryReclaim((HWND)wp, lp != 0); return 0;
+        case WM_APP_HIDDEN_FRONT:
+            // A moment later: a browser opening a link in that window shows it right after activating it.
+            hiddenFront_ = (HWND)wp;
+            SetTimer(main_, kTimerHiddenFront, 200, nullptr);
+            return 0;
         case WM_APP_TITLE: OnTitleChanged((HWND)wp); return 0;
         case WM_APP_FLUSH: Flush(); return 0;
         case WM_TIMER:
@@ -2008,6 +2105,7 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
                     SetForegroundWindow(toFront_.back());
                 toFront_.clear();
                 if (frame_) UpdateFrame();  // monitors of the now-visible windows
+                if (marks_) marks_->PlaceAllSoon();  // restacked: each mark back right above its window
             } else if (wp == kTimerReclaimNote) {
                 KillTimer(main_, kTimerReclaimNote);
                 if (reclaimed_ > 0)
@@ -2015,10 +2113,16 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
                 reclaimed_ = 0;
             } else if (wp == kTimerReclaimFold) FoldReclaimed();
             else if (wp == kTimerAdopt) AdoptLaunched();
+            else if (wp == kTimerHiddenFront) {
+                KillTimer(main_, kTimerHiddenFront);
+                HWND h = hiddenFront_;
+                hiddenFront_ = nullptr;
+                if (h) OnHiddenActivated(h);
+            }
             else if (wp == kTimerRevalidate) {
                 KillTimer(main_, kTimerRevalidate);
                 Revalidate();
-            } else if (wp == kTimerActivity) CheckIdle();
+            } else if (wp == kTimerDisplaySettle) DisplaySettleTick(); else if (wp == kTimerActivity) CheckIdle();
             else if (wp == kTimerPersist) PersistNow(true);  // the disk write runs off the UI thread
             else if (wp == kTimerGoneRetry) {
                 KillTimer(main_, kTimerGoneRetry);
@@ -2029,12 +2133,15 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         // Resume, unlock and a display change often arrive together: re-check once, a moment later.
         case WM_DISPLAYCHANGE:
-            SetTimer(main_, kTimerRevalidate, 300, nullptr);
+            DisplaysChanging();
             return 0;
+        case WM_SETTINGCHANGE:
+            if (wp == SPI_SETWORKAREA) DisplaysChanging();  // the taskbar moved to a display that came back
+            break;
         case WM_POWERBROADCAST:
             if (wp == PBT_APMSUSPEND) PauseActivity(L"sleep");
             if (wp == PBT_APMRESUMESUSPEND && !sessionLocked_) ResumeActivity();  // a user woke it up
-            if (wp == PBT_APMRESUMEAUTOMATIC || wp == PBT_APMRESUMESUSPEND) SetTimer(main_, kTimerRevalidate, 300, nullptr);
+            if (wp == PBT_APMRESUMEAUTOMATIC || wp == PBT_APMRESUMESUSPEND) DisplaysChanging();
             return TRUE;
         case WM_WTSSESSION_CHANGE:
             if (wp == WTS_SESSION_LOCK) {
@@ -2044,8 +2151,7 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
                 sessionLocked_ = false;
                 ResumeActivity();
             }
-            if (wp == WTS_SESSION_UNLOCK || wp == WTS_REMOTE_CONNECT || wp == WTS_CONSOLE_CONNECT)
-                SetTimer(main_, kTimerRevalidate, 300, nullptr);
+            if (wp == WTS_SESSION_UNLOCK || wp == WTS_REMOTE_CONNECT || wp == WTS_CONSOLE_CONNECT) DisplaysChanging();
             return 0;
         case WM_QUERYENDSESSION:
             // Logoff, shutdown, restart, or an installer/updater closing us: save the piles as they

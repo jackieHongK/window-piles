@@ -12,7 +12,7 @@ namespace wp {
 
 namespace {
 
-constexpr int kEdge = 4;      // frame thickness (DIP)
+constexpr int kEdge = 2;      // frame thickness (DIP); was 4, too heavy (user feedback)
 constexpr int kTabH = 30;     // tab height (DIP)
 constexpr int kTabMargin = 10;  // shadow room around the tab (DIP)
 // While a window is dragged, the tab becomes an "add here" card this far down (DIP), this big; the drag
@@ -133,18 +133,29 @@ void WorkFrame::Build() {
 }
 
 void WorkFrame::Update() {
-    // Rebuild when the set of monitors changed (a window moved to another screen).
+    // Rebuild when the set of monitors changed (a window moved to another screen), or one of them moved.
     std::vector<HMONITOR> mons;
     for (auto& m : pile_.members)
         if (!m.hidden && IsWindowVisible(m.hwnd) && !IsIconic(m.hwnd)) {
             HMONITOR mon = MonitorFromWindow(m.hwnd, MONITOR_DEFAULTTONEAREST);
             if (std::find(mons.begin(), mons.end(), mon) == mons.end()) mons.push_back(mon);
         }
-    bool same = !mons.empty() && mons.size() == parts_.size();
+    bool same = mons.size() == parts_.size();
     for (auto& p : parts_)
         if (std::find(mons.begin(), mons.end(), p.monitor) == mons.end()) same = false;
-    if (!mons.empty() && !same) {
+    if (mons.empty()) same = true;  // every window minimized: keep the screens it was on
+    // A display can keep its handle while it moves, changes resolution or scale (displays coming back one by
+    // one after sleep): the rect and DPI are read afresh every time, never trusted from when it was built.
+    for (auto& p : parts_) {
+        MONITORINFO mi{sizeof(mi)};
+        if (!GetMonitorInfoW(p.monitor, &mi) || !EqualRect(&mi.rcMonitor, &p.monitorRect) ||
+            DpiForPoint({mi.rcMonitor.left + 1, mi.rcMonitor.top + 1}) != p.dpi)
+            same = false;
+    }
+    if (!same && !rebuilding_) {
+        rebuilding_ = true;  // one rebuild per update, even while the displays are still settling
         Build();
+        rebuilding_ = false;
         return;
     }
 

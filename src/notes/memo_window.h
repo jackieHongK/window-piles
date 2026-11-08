@@ -17,7 +17,10 @@ SIZE MemoWindowSize(UINT dpi);  // a new memo window's size
 int OpenMemoCount();
 // Called after a memo window saved its file (a title may have changed: its flag shows it right away).
 void OnMemoSaved(std::function<void()> handler);
-void RefreshMemoTabs();  // a memo's flag color changed: the open windows' color tabs follow
+void RefreshMemoTabs();
+// A list's "- " shown as a round bullet "• " (the file keeps "- " either way); the open memos follow.
+void SetMemoRoundBullets(bool round);
+bool MemoRoundBullets();  // a memo's flag color changed: the open windows' color tabs follow
 // Saves and closes every memo window (quitting).
 void CloseAllMemoWindows();
 // Shows the file selected in Explorer.

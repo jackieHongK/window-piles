@@ -14,22 +14,24 @@ MemoLineInfo ClassifyMemoLine(std::wstring_view line) {
         info.markerLen = (int)hashes + 1;
         return info;
     }
-    if (line.size() >= 2 && (line[0] == kMemoTodo || line[0] == kMemoDone) && line[1] == L' ') {
-        info.kind = line[0] == kMemoTodo ? MemoLine::Task : MemoLine::Done;
-        info.markerLen = 2;
+    size_t tabs = 0;
+    while (tabs < line.size() && line[tabs] == L'\t') ++tabs;
+    std::wstring_view rest = line.substr(tabs);
+    auto list = [&](MemoLine kind, size_t len) {
+        info.kind = kind;
+        info.markerLen = (int)(tabs + len);
+        info.indent = (int)tabs;
         return info;
-    }
-    if (line.size() >= 2 && (line[0] == L'-' || line[0] == L'*') && line[1] == L' ') {
-        info.kind = MemoLine::Bullet;
-        info.markerLen = 2;
-        return info;
-    }
+    };
+    if (rest.size() >= 2 && (rest[0] == kMemoTodo || rest[0] == kMemoDone) && rest[1] == L' ')
+        return list(rest[0] == kMemoTodo ? MemoLine::Task : MemoLine::Done, 2);
+    if (rest.size() >= 2 && (rest[0] == L'-' || rest[0] == L'*' || rest[0] == kMemoDot) && rest[1] == L' ')
+        return list(MemoLine::Bullet, 2);
     size_t digits = 0;
-    while (digits < line.size() && digits < 4 && iswdigit(line[digits])) ++digits;
-    if (digits > 0 && digits + 1 < line.size() && line[digits] == L'.' && line[digits + 1] == L' ') {
-        info.kind = MemoLine::Number;
-        info.markerLen = (int)digits + 2;
-        info.number = std::stoi(std::wstring(line.substr(0, digits)));
+    while (digits < rest.size() && digits < 4 && iswdigit(rest[digits])) ++digits;
+    if (digits > 0 && digits + 1 < rest.size() && rest[digits] == L'.' && rest[digits + 1] == L' ') {
+        info.number = std::stoi(std::wstring(rest.substr(0, digits)));
+        return list(MemoLine::Number, digits + 2);
     }
     return info;
 }
@@ -38,15 +40,16 @@ MemoEnter MemoOnEnter(std::wstring_view line) {
     MemoEnter e;
     MemoLineInfo info = ClassifyMemoLine(line);
     bool task = info.kind == MemoLine::Task || info.kind == MemoLine::Done;
-    if (info.kind != MemoLine::Bullet && info.kind != MemoLine::Number && !task) return e;
+    if (!IsMemoList(info.kind)) return e;
     bool onlyMarker = line.find_first_not_of(L' ', info.markerLen) == std::wstring_view::npos;
     if (onlyMarker) {
-        e.endList = true;
+        (info.indent > 0 ? e.outdent : e.endList) = true;
         return e;
     }
-    e.nextPrefix = task                           ? std::wstring{kMemoTodo, L' '}  // the next one is still to do
-                   : info.kind == MemoLine::Bullet ? std::wstring(line.substr(0, 2))
-                                                   : std::to_wstring(info.number + 1) + L". ";
+    e.nextPrefix = std::wstring((size_t)info.indent, L'\t') +
+                   (task                           ? std::wstring{kMemoTodo, L' '}  // the next one is still to do
+                    : info.kind == MemoLine::Bullet ? std::wstring(line.substr(info.indent, 2))
+                                                    : std::to_wstring(info.number + 1) + L". ");
     return e;
 }
 
@@ -56,11 +59,49 @@ size_t MemoTaskShortcut(std::wstring_view line, std::wstring* marker) {
         bool done;
     };
     static constexpr Form kForms[] = {{L"[] ", false},   {L"[ ] ", false},   {L"[x] ", true},   {L"[X] ", true},
-                                      {L"- [ ] ", false}, {L"- [x] ", true}, {L"- [X] ", true}};
+                                      {L"- [ ] ", false}, {L"- [x] ", true}, {L"- [X] ", true},
+                                      {L"• [ ] ", false}, {L"• [x] ", true}, {L"• [X] ", true}};
     for (const Form& f : kForms)
         if (line.substr(0, f.text.size()) == f.text) {
             if (marker) *marker = std::wstring{f.done ? kMemoDone : kMemoTodo, L' '};
             return f.text.size();
+        }
+    return 0;
+}
+
+std::wstring MemoBulletsShown(std::wstring text, bool round) {
+    for (size_t pos = 0; pos < text.size();) {
+        size_t end = std::min(text.find_first_of(L"\r\n\v", pos), text.size());
+        MemoLineInfo info = ClassifyMemoLine(std::wstring_view(text).substr(pos, end - pos));
+        wchar_t& c = text[pos + (size_t)info.indent];
+        if (info.kind == MemoLine::Bullet && (round || c == kMemoDot)) c = round ? kMemoDot : L'-';  // "* " stays, unless shown round
+        pos = end + 1;
+    }
+    return text;
+}
+
+size_t MemoPrettify(std::wstring_view before, std::wstring* with) {
+    struct Swap {
+        std::wstring_view from, to;
+    };
+    // Longer ones first: "<->" is "<-" made "←" with ">" typed after it, "<=>" likewise.
+    static constexpr Swap kSwaps[] = {
+        {L"←>", L"↔"},  // <-> ↔
+        {L"≤>", L"⇔"},  // <=> ⇔
+        {L"...", L"…"},      // …
+        {L"->", L"→"},       // →
+        {L"<-", L"←"},       // ←
+        {L"=>", L"⇒"},       // ⇒
+        {L"<=", L"≤"},       // ≤
+        {L">=", L"≥"},       // ≥
+        {L"!=", L"≠"},       // ≠
+        {L"+-", L"±"},       // ±
+        {L"~=", L"≈"},       // ≈
+    };
+    for (const Swap& s : kSwaps)
+        if (before.size() >= s.from.size() && before.substr(before.size() - s.from.size()) == s.from) {
+            if (with) *with = s.to;
+            return s.from.size();
         }
     return 0;
 }

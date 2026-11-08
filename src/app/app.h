@@ -15,6 +15,7 @@
 #include "preview/snapshot.h"
 #include "surface/organizer.h"
 #include "surface/pile_window.h"
+#include "surface/window_marks.h"
 #include "ui/guide_window.h"
 #include "ui/stats_window.h"
 #include "ui/work_frame.h"
@@ -105,7 +106,12 @@ private:
 
     void OnMemberGone(HWND hwnd);
     void OnMemberShown(HWND hwnd);
+    void OnHiddenActivated(HWND hwnd);  // a browser brought a folded window forward: a new window instead
     void Revalidate();                 // after resume/unlock/display change: drop dead members, redraw
+    // Displays are changing (plugged in one by one after sleep, unplugged, rearranged): re-check once they
+    // pause, then once a second for a few seconds while they settle.
+    void DisplaysChanging();
+    void DisplaySettleTick();
     void EndSessionNow();              // logoff/shutdown/update: state already saved; exit without blocking
     void ShowStillHidden();            // fallback when a restore is stuck on a frozen app
     // After a restart, windows that apps reopen with the same app + title go back into their pile.
@@ -152,6 +158,10 @@ private:
     NOTIFYICONDATAW nid_{};
     UINT taskbarCreatedMsg_ = 0;
     HWINEVENTHOOK objectHook_ = nullptr;
+    HWINEVENTHOOK foregroundHook_ = nullptr;
+    HWND hiddenFront_ = nullptr;   // folded window that just became the foreground one
+    HWND newWindowFor_ = nullptr;  // ... the last one a new window was opened for, and when
+    double newWindowAt_ = 0;
 
     std::vector<std::unique_ptr<Pile>> piles_;
     std::unique_ptr<WorkFrame> frame_;  // for the active pile
@@ -162,6 +172,10 @@ private:
     bool uiHidden_ = false;
     void SetUiHidden(bool hide);
     void UpdateFrame();  // frame_->Update(), then the organizer back above it
+    // A tab in its pile's color on each window of a pile that is out on the screen (설정: 창에 더미 색 표시).
+    std::unique_ptr<WindowMarks> marks_;
+    void SetMarks(bool on);
+    void UpdateMarks();
     // Keep a pile in the organizer (its card leaves the desktop; in the empty slot under `at` if there is one)
     // or take it out, its card landing at `at` (screen px) or next to the bookmark.
     void Dock(Pile& pile, bool on, const POINT* at = nullptr);
@@ -186,6 +200,7 @@ private:
     std::multimap<std::wstring, int> launchJoin_;  // lower-case exe → pile id, one per start: apps reopened from a card
     std::vector<std::pair<int, std::wstring>> adoptPending_;  // pile id, app key: started, waiting for a window
     std::wstring displaysKey_;  // the displays as last seen: the organizer is laid out again when they change
+    int settleTicks_ = 0;       // display re-checks still to come (DisplaySettleTick)
     double launchJoinUntil_ = 0;                // their windows join until then
     std::vector<HWND> untitledShown_;           // appeared without a title yet: their first title still counts as new
     UINT shellHookMsg_ = 0;                        // HSHELL_* notifications from Explorer

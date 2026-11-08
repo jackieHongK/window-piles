@@ -51,6 +51,7 @@ private:
     bool hot_ = false;
     bool hover_ = false;
     bool dropMode_ = false;
+    bool rebuilding_ = false;
     DWORD lastClickTick_ = 0;
 };
 

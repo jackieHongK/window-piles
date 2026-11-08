@@ -16,12 +16,14 @@ namespace wp {
 struct AppSettings {
     bool autostart = false;
     bool shown = true;       // cards, organizer and frame on screen ("항상 위로"), or put away ("숨기기")
+    bool marks = true;       // a tab in the pile's color on each window of an open pile
     bool organizer = true;   // the edge organizer is on
     bool right = true;       // ... on the right edge
     std::wstring monitor;    // ... of this display (device name, common/displays.h)
     bool slide = true;       // ... its drawer slides out
     std::string material = "walnut";
     std::wstring memoDir;
+    bool roundBullets = true;  // a memo's "- " list shown with round bullets
 };
 
 class GuideWindow {

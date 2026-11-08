@@ -37,10 +37,12 @@ add_executable(WindowPiles WIN32
     src/surface/organizer.cpp
     src/surface/messenger.cpp
     src/surface/clipboard_shelf.cpp
+    src/surface/window_marks.cpp
     src/notes/memo_format.cpp
     src/notes/memo_store.cpp
     src/notes/memo_window.cpp
     src/notes/memo_list_window.cpp
+    src/notes/memo_peek.cpp
     src/interaction/drag_watcher.cpp
     src/ui/popup_base.cpp
     src/ui/list_popup.cpp
