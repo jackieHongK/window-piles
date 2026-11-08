@@ -750,9 +750,6 @@ void Organizer::RenderTray(bool present) {
             c.FillRoundRect({sr.left, sr.bottom - S(1), sr.right, sr.bottom}, 0, RGB(255, 226, 196), 60);
             c.FillRoundRect({sr.right - S(1), sr.top, sr.right, sr.bottom}, 0, RGB(255, 226, 196), 35);
             if (target) c.FillRoundRect(sr, S(2), RGB(255, 255, 255), 45);
-            if (pileCount == 0 && s == 0)
-                c.Text(L"바탕화면의 더미 카드를 이 막대로 끌어 와 빈 칸에 놓으면 꽂혀요.", {sr.left + S(12), sr.top, sr.right - S(12), sr.bottom},
-                       Mix(Ink(), kMaterials[Mat()].base, 0.2), S(12), false, DT_LEFT | DT_VCENTER | DT_WORDBREAK);
         }
     }
     for (size_t i = 0; i < cardIds_.size(); ++i) {
