@@ -27,6 +27,7 @@ add_executable(WindowPiles WIN32
     src/common/win_util.cpp
     src/common/canvas.cpp
     src/common/displays.cpp
+    src/common/image_codec.cpp
     src/common/json.cpp
     src/recovery/journal.cpp
     src/groups/pile_store.cpp
@@ -69,7 +70,10 @@ add_custom_command(OUTPUT "${APP_ICO}"
     DEPENDS make_icon VERBATIM)
 target_sources(WindowPiles PRIVATE "${APP_ICO}")
 target_include_directories(WindowPiles PRIVATE "${CMAKE_BINARY_DIR}/gen")  # app.rc finds app.ico here
-set_source_files_properties(src/app/app.rc PROPERTIES OBJECT_DEPENDS "${APP_ICO}")
+# The material scans (scripts/gen_scans.py) are embedded from assets/materials, found through the repo root.
+file(GLOB MATERIAL_SCANS "${CMAKE_SOURCE_DIR}/assets/materials/*.jpg")
+target_include_directories(WindowPiles PRIVATE "${CMAKE_SOURCE_DIR}")
+set_source_files_properties(src/app/app.rc PROPERTIES OBJECT_DEPENDS "${APP_ICO};${MATERIAL_SCANS}")
 
 # ---------------------------------------------------------------------------
 # P0 PoC helpers (screen sampling, window lookup, timing, OS info)

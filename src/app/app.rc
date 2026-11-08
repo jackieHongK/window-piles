@@ -6,6 +6,29 @@
 // The first icon group is the one Explorer shows.
 1 ICON "app.ico"
 
+// The scanned materials (scripts/gen_scans.py): seamless tiles at 2 px per DIP, found through the repo root
+// on the resource compiler's include path.
+MAT_OAK       RCDATA "assets/materials/oak.jpg"
+MAT_BLACK_ASH RCDATA "assets/materials/black-ash.jpg"
+MAT_ALUMINUM  RCDATA "assets/materials/aluminum.jpg"
+MAT_ACRYLIC   RCDATA "assets/materials/acrylic.jpg"
+MAT_FELT_GRAY RCDATA "assets/materials/felt-gray.jpg"
+MAT_QUARTZ    RCDATA "assets/materials/quartz.jpg"
+MAT_EBONY     RCDATA "assets/materials/ebony.jpg"
+MAT_ONYX      RCDATA "assets/materials/onyx.jpg"
+MAT_ACRYLIC_COBALT RCDATA "assets/materials/acrylic-cobalt.jpg"
+MAT_ROSEWOOD  RCDATA "assets/materials/rosewood.jpg"
+MAT_NACRE     RCDATA "assets/materials/nacre.jpg"
+MAT_DAMASCUS  RCDATA "assets/materials/damascus.jpg"
+MAT_CLEAR_GLASS RCDATA "assets/materials/clear-glass.jpg"
+MAT_CHECKERBOARD RCDATA "assets/materials/checkerboard.jpg"
+MAT_TURF RCDATA "assets/materials/turf.jpg"
+MAT_LAVA RCDATA "assets/materials/lava.jpg"
+MAT_BRICK RCDATA "assets/materials/brick.jpg"
+MAT_RATTAN RCDATA "assets/materials/rattan.jpg"
+MAT_ITALY_TOWEL RCDATA "assets/materials/italy-towel.jpg"
+MAT_MONPE RCDATA "assets/materials/monpe.jpg"
+
 #define SN_VERSION     0,3,0,0
 #define SN_VERSION_STR "0.3.0"
 

@@ -3,8 +3,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <map>
+#include <string>
 
 #include "common/canvas.h"
+#include "common/image_codec.h"
 #include "common/win_util.h"
 
 namespace wp {
@@ -70,6 +73,54 @@ COLORREF Walnut(int x, int y, float k) {
     return RGB(mix(0), mix(8), mix(16));
 }
 
+// A scanned material (scripts/gen_scans.py): its seamless tile, embedded in the exe as RCDATA "MAT_<ID>" at
+// 2 px per DIP, scaled once for a screen's DPI (k = DPI / 96). nullptr for a material that has no scan.
+const Image* Scan(const char* id, float k) {
+    static std::map<std::string, Image> cache;  // ponytail: one tile per material and DPI, kept for the app's life
+    std::string key = std::string(id) + "@" + std::to_string((int)std::lround(k * 100));
+    if (auto it = cache.find(key); it != cache.end()) return it->second.empty() ? nullptr : &it->second;
+    Image& out = cache[key];
+    std::wstring name = L"MAT_";
+    for (const char* p = id; *p; ++p) name += *p == '-' ? L'_' : (wchar_t)toupper((unsigned char)*p);
+    HMODULE self = GetModuleHandleW(nullptr);
+    HRSRC res = FindResourceW(self, name.c_str(), RT_RCDATA);
+    HGLOBAL data = res ? LoadResource(self, res) : nullptr;
+    Image tile;
+    if (!data || !DecodeImage(LockResource(data), SizeofResource(self, res), tile)) return nullptr;
+    // From 2 px per DIP to this screen's: averaged over the tile pixels each one covers (or between the two
+    // nearest, when it is bigger), wrapping round, so the tile stays seamless.
+    double s = k / 2;
+    out.w = std::max(1, (int)std::lround(tile.w * s));
+    out.h = std::max(1, (int)std::lround(tile.h * s));
+    out.px.resize((size_t)out.w * out.h);
+    for (int y = 0; y < out.h; ++y)
+        for (int x = 0; x < out.w; ++x) {
+            double sx0 = x / s, sy0 = y / s, sx1 = (x + 1) / s, sy1 = (y + 1) / s;
+            double r = 0, g = 0, b = 0, al = 0, n = 0;
+            if (s < 1) {
+                for (int ty = (int)sy0; ty < std::max((int)sy0 + 1, (int)sy1); ++ty)
+                    for (int tx = (int)sx0; tx < std::max((int)sx0 + 1, (int)sx1); ++tx) {
+                        uint32_t p = tile.px[(size_t)(ty % tile.h) * tile.w + tx % tile.w];
+                        r += (p >> 16) & 255, g += (p >> 8) & 255, b += p & 255, al += p >> 24, ++n;
+                    }
+            } else {
+                double u = (x + 0.5) / s - 0.5, v = (y + 0.5) / s - 0.5;
+                int x0 = (int)std::floor(u), y0 = (int)std::floor(v);
+                double fx = u - x0, fy = v - y0;
+                for (int j = 0; j < 2; ++j)
+                    for (int i = 0; i < 2; ++i) {
+                        double wgt = (i ? fx : 1 - fx) * (j ? fy : 1 - fy);
+                        uint32_t p = tile.px[(size_t)((y0 + j + tile.h) % tile.h) * tile.w + (x0 + i + tile.w) % tile.w];
+                        r += ((p >> 16) & 255) * wgt, g += ((p >> 8) & 255) * wgt, b += (p & 255) * wgt, al += (p >> 24) * wgt;
+                        n += wgt;
+                    }
+            }
+            out.px[(size_t)y * out.w + x] = (uint32_t)(al / n + 0.5) << 24 | (uint32_t)(r / n + 0.5) << 16 |
+                                            (uint32_t)(g / n + 0.5) << 8 | (uint32_t)(b / n + 0.5);
+        }
+    return &out;
+}
+
 COLORREF Hue(float h) {  // h in [0, 1): a soft pastel rainbow
     float r = 0.5f + 0.5f * std::cos(6.2832f * (h + 0.00f)), g = 0.5f + 0.5f * std::cos(6.2832f * (h + 0.33f)),
           b = 0.5f + 0.5f * std::cos(6.2832f * (h + 0.67f));
@@ -83,15 +134,10 @@ float Pattern(const char* id, int x, int y, float k, COLORREF& tint, float& tint
     if (is("ivory")) return Generic({0.014f, 0.018f, 9, 9, 0, 0, 0.004f, 0.04f, 0}, x, y, k);
     if (is("kraft")) return Generic({0.045f, 0.055f, 7, 7, 0.022f, 0.20f, 0.010f, 0.10f, 0}, x, y, k);
     if (is("leather")) return Generic({0.030f, 0.120f, 3, 3, 0, 0, 0, 0, 0}, x, y, k);
-    if (is("aluminum")) return Generic({0.012f, 0.050f, 90, 1, 0, 0, 0, 0, 0}, x, y, k);
     if (is("titanium")) return Generic({0.035f, 0.012f, 6, 6, 0, 0, 0, 0, 0}, x, y, k);
     if (is("ceramic")) return Generic({0.002f, 0.004f, 24, 24, 0, 0, 0, 0, 0}, x, y, k);
-    if (is("felt") || is("felt-gray")) return Generic({0.070f, 0.040f, 4, 4, 0.01f, 0.10f, 0.01f, 0.10f, 0}, x, y, k);
-    if (is("acrylic")) return Generic({0.010f, 0.018f, 26, 26, 0, 0, 0.002f, 0.03f, 0}, x, y, k);  // a fine frost
+    if (is("felt")) return Generic({0.070f, 0.040f, 4, 4, 0.01f, 0.10f, 0.01f, 0.10f, 0}, x, y, k);
     if (is("acrylic-cobalt")) return Generic({0.004f, 0.010f, 40, 40, 0, 0, 0, 0, 0}, x, y, k);    // solid and glossy
-    // Quartz, mother-of-pearl, burl, ebony, onyx and Damascus are clean solids in their color (with the sheen
-    // below where it fits): no pattern to read the cards against.
-    if (is("quartz") || is("nacre") || is("burl") || is("ebony") || is("onyx") || is("damascus")) return 0;
     if (is("cork")) return Generic({0.050f, 0.140f, 2, 2, 0.06f, 0.30f, 0.03f, 0.12f, 0}, x, y, k);
     if (is("concrete")) return Generic({0.030f, 0.080f, 14, 14, 0.015f, 0.35f, 0.004f, 0.08f, 0}, x, y, k);
     if (is("brass")) return Generic({0.010f, 0.060f, 120, 1, 0, 0, 0, 0, 0}, x, y, k);
@@ -115,12 +161,6 @@ float Pattern(const char* id, int x, int y, float k, COLORREF& tint, float& tint
         float row = Hash(0, y / t, 11) - 0.5f, col = Hash(x / t, 0, 12) - 0.5f;
         bool over = ((x / t) + (y / t)) & 1;
         return (over ? row : col) * 0.10f + (ValueNoise(x, y, (int)(30 * k), (int)(3 * k), 13) - 0.5f) * 0.06f;
-    }
-    if (is("oak") || is("black-ash")) {
-        // Long grain lines along x, wavy, with darker latewood bands (ash: the stain gathers in them).
-        float g = std::sin(y / (2.2f * k) + 9.0f * Fbm(x / 6, y, (int)(40 * k), 21));
-        float bands = is("black-ash") ? 0.22f : 0.08f;
-        return 0.06f * g - bands * std::pow(std::max(0.0f, g), 8.0f) + (ValueNoise(x, y, (int)(80 * k), 1, 22) - 0.5f) * 0.05f;
     }
     if (is("hologram")) {
         // Iridescent foil: a diagonal rainbow, bent by noise, over brushed silver.
@@ -146,6 +186,7 @@ void Shade(Canvas& c, const RECT& area, const Material& mat, UINT dpi, const REC
         // clear glass is barely there, with a soft diagonal reflection. Scaling premultiplied pixels keeps
         // the rounded edges anti-aliased.
         bool clear = std::strcmp(mat.id, "clear-glass") == 0;
+        const Image* smudges = clear ? Scan(mat.id, k) : nullptr;  // real smudges and fine scratches on the pane
         for (int y = y0; y < y1; ++y) {
             float t = (y - ref.top) / h, keep = clear ? 0.38f : 0.62f + 0.18f * (1 - t);
             for (int x = x0; x < x1; ++x) {
@@ -155,6 +196,7 @@ void Shade(Canvas& c, const RECT& area, const Material& mat, UINT dpi, const REC
                 if (clear) {  // a band of light across the pane, from canvas position so pieces line up
                     float d = std::fmod((x + y * 0.55f) / (240.0f * k), 1.0f) - 0.3f;
                     shine = 0.22f * std::exp(-d * d / 0.004f);
+                    if (smudges) shine += 0.16f * (smudges->px[(size_t)(y % smudges->h) * smudges->w + x % smudges->w] & 255) / 255;
                 }
                 auto ch = [&](int shift) {
                     float v = ((p >> shift) & 255) * keep;
@@ -188,6 +230,21 @@ void Shade(Canvas& c, const RECT& area, const Material& mat, UINT dpi, const REC
                   : is("titanium") || is("ceramic") || is("acrylic") || is("nacre") ? 0.04f
                   : is("acrylic-cobalt")                                     ? 0.12f
                                                                              : 0.0f;
+    if (const Image* scan = Scan(mat.id, k)) {  // a scanned material: the scan itself, with its sheen over it
+        for (int y = y0; y < y1; ++y) {
+            float lit = 1 + sheen * (0.5f - (y - ref.top) / h) * 2;
+            const uint32_t* row = scan->px.data() + (size_t)(y % scan->h) * scan->w;
+            for (int x = x0; x < x1; ++x) {
+                uint32_t& p = px[(size_t)y * c.width() + x];
+                uint32_t a = p >> 24;
+                if (!a) continue;
+                uint32_t s = row[x % scan->w];
+                auto ch = [&](int shift) { return (uint32_t)std::min(255.0f, ((s >> shift) & 255) * lit) * a / 255; };
+                p = (a << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0);
+            }
+        }
+        return;
+    }
     for (int y = y0; y < y1; ++y) {
         float sh = sheen * (0.5f - (y - ref.top) / h) * 2;
         for (int x = x0; x < x1; ++x) {

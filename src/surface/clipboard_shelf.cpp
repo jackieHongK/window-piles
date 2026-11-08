@@ -3,13 +3,13 @@
 #include <ole2.h>
 #include <shlobj.h>
 #include <shobjidl.h>
-#include <wincodec.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <thread>
 
+#include "common/image_codec.h"
 #include "common/win_util.h"
 
 namespace wp {
@@ -36,15 +36,6 @@ bool Private() {
     return false;
 }
 
-IWICImagingFactory* Wic() {
-    static IWICImagingFactory* f = [] {
-        IWICImagingFactory* p = nullptr;
-        CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&p));
-        return p;
-    }();
-    return f;
-}
-
 // Scaled down (box filter) so neither side is over `side`.
 Image Shrink(Image img, int side) {
     if (img.w <= side && img.h <= side) return img;
@@ -66,33 +57,6 @@ Image Shrink(Image img, int side) {
             out.px[(size_t)y * out.w + x] = (uint32_t)(a / n) << 24 | (uint32_t)(r / n) << 16 | (uint32_t)(g / n) << 8 | (uint32_t)(b / n);
         }
     return out;
-}
-
-// A PNG on the clipboard (browsers, design tools): the one format that keeps transparency.
-bool DecodePng(const void* data, size_t size, Image& out) {
-    IWICImagingFactory* f = Wic();
-    if (!f) return false;
-    IWICStream* stream = nullptr;
-    IWICBitmapDecoder* dec = nullptr;
-    IWICBitmapFrameDecode* frame = nullptr;
-    IWICFormatConverter* conv = nullptr;
-    bool ok = SUCCEEDED(f->CreateStream(&stream)) &&
-              SUCCEEDED(stream->InitializeFromMemory((BYTE*)data, (DWORD)size)) &&
-              SUCCEEDED(f->CreateDecoderFromStream(stream, nullptr, WICDecodeMetadataCacheOnDemand, &dec)) &&
-              SUCCEEDED(dec->GetFrame(0, &frame)) && SUCCEEDED(f->CreateFormatConverter(&conv)) &&
-              SUCCEEDED(conv->Initialize(frame, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0,
-                                         WICBitmapPaletteTypeCustom));
-    UINT w = 0, h = 0;
-    if (ok) ok = SUCCEEDED(conv->GetSize(&w, &h)) && w && h && w * h < 64u * 1024 * 1024;
-    if (ok) {
-        out.w = (int)w;
-        out.h = (int)h;
-        out.px.resize((size_t)w * h);
-        ok = SUCCEEDED(conv->CopyPixels(nullptr, w * 4, (UINT)(out.px.size() * 4), (BYTE*)out.px.data()));
-    }
-    for (IUnknown* u : {(IUnknown*)conv, (IUnknown*)frame, (IUnknown*)dec, (IUnknown*)stream})
-        if (u) u->Release();
-    return ok;
 }
 
 // A device-independent bitmap (what most apps copy): 24- or 32-bit, either way up.
@@ -207,7 +171,7 @@ bool ReadClipboard(HWND owner, ClipItem& out) {
         UINT png = Format(L"PNG");
         if (HANDLE h = IsClipboardFormatAvailable(png) ? GetClipboardData(png) : nullptr) {
             if (const void* p = GlobalLock(h)) {
-                if (DecodePng(p, GlobalSize(h), out.image))
+                if (DecodeImage(p, GlobalSize(h), out.image))  // a PNG: the one format that keeps transparency
                     out.alpha = std::any_of(out.image.px.begin(), out.image.px.end(), [](uint32_t px) { return (px >> 24) < 255; });
                 GlobalUnlock(h);
             }

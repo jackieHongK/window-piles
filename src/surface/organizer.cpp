@@ -272,7 +272,12 @@ void Organizer::BeginMoveFromTray() {
 
 RECT Organizer::HandleRect() const { return handleRect_; }
 
-int Organizer::Mat() const { return MaterialFromId(place_.material.c_str()); }
+int Organizer::Mat() const {
+    // One that is no longer offered (a removed material, an unknown id) is the walnut.
+    for (const OrganizerMaterial& m : kOrganizerMaterials)
+        if (place_.material == m.id) return MaterialFromId(m.id);
+    return MaterialFromId("walnut");
+}
 
 COLORREF Organizer::Ink() const { return kMaterials[Mat()].dark ? kCream : RGB(58, 50, 42); }
 

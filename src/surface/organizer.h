@@ -34,7 +34,10 @@ inline constexpr OrganizerMaterial kOrganizerMaterials[] = {
     {L"월넛 원목", "walnut"},  {L"오크 원목", "oak"},     {L"블랙 애시", "black-ash"},
     {L"헤어라인 알루미늄", "aluminum"}, {L"무광 아크릴", "acrylic"}, {L"그레이 펠트", "felt-gray"},
     {L"투명 글래스", "clear-glass"}, {L"불투명 아크릴 · 코발트", "acrylic-cobalt"}, {L"글리터 석영", "quartz"},
-    {L"자개", "nacre"}, {L"버얼 월넛", "burl"}, {L"흑단", "ebony"}, {L"오닉스", "onyx"}, {L"다마스커스 강철", "damascus"},
+    {L"자개", "nacre"}, {L"로즈우드", "rosewood"}, {L"흑단", "ebony"}, {L"오닉스", "onyx"}, {L"다마스커스 강철", "damascus"},
+    // Everyday and playful.
+    {L"블랙앤화이트 체커보드", "checkerboard"}, {L"잔디", "turf"}, {L"용암", "lava"}, {L"붉은 벽돌", "brick"},
+    {L"라탄", "rattan"}, {L"타월", "italy-towel"}, {L"플로럴", "monpe"},
 };
 
 class OrganizerHost {
