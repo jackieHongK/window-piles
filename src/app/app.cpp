@@ -44,6 +44,7 @@ constexpr UINT_PTR kTimerAdopt = 10;  // an app started from a card showed no ne
 constexpr UINT WM_APP_RECLAIM = WM_APP + 4;
 constexpr UINT WM_APP_TITLE = WM_APP + 5;
 constexpr UINT WM_APP_FLUSH = WM_APP + 6;  // deferred redraws and journal write (one per burst)
+constexpr UINT WM_APP_BACKGROUND = WM_APP + 8;  // an app that stepped back came to the front
 constexpr UINT WM_APP_HIDDEN_FRONT = WM_APP + 7;  // a folded window became the foreground window
 constexpr UINT_PTR kTimerHiddenFront = 11;      // ... checked a moment later (OnHiddenActivated)
 constexpr UINT_PTR kTimerDisplaySettle = 12;    // a few re-checks while displays come and go (DisplaySettleTick)
@@ -325,6 +326,7 @@ int App::Run() {
             s.autostart = AutostartEnabled();
             s.shown = !uiHidden_;
             s.marks = marks_ != nullptr;
+            s.rest = restApps_;
             s.organizer = organizer_ != nullptr;
             Organizer::Place p = organizer_ ? organizer_->place() : LoadOrganizerPlace();
             s.right = p.right;
@@ -344,6 +346,11 @@ int App::Run() {
             if (s.marks != (marks_ != nullptr)) {
                 SetMarks(s.marks);
                 SetFlag(L"marks.off", !s.marks);
+            }
+            if (s.rest != restApps_) {
+                restApps_ = s.rest;
+                SetFlag(L"rest.off", !s.rest);
+                UpdateBackground();
             }
             if (s.roundBullets != MemoRoundBullets()) {
                 SetMemoRoundBullets(s.roundBullets);
@@ -381,6 +388,7 @@ int App::Run() {
     // A plain restart of this app is no reason to pull in a "홈" or "새 탭" window the user opens.
     afterBoot_ = GetTickCount64() < 30ull * 60 * 1000 || UsingTestDataDir();
     activity::Append(activity::Kind::Start);
+    restApps_ = !FlagExists(L"rest.off");  // before the restored piles put anything away
     int recovered = RestoreSavedPiles();
     Log("run: %zu piles restored, %d leftover windows recovered", piles_.size(), recovered);
     if (!FlagExists(L"organizer.off")) SetOrganizer(true);
@@ -429,6 +437,7 @@ int App::RestoreSavedPiles() {
     Journal lastRun;
     std::string journalErr;
     bool haveLastRun = ReadJournal(lastRun, journalErr);
+    if (haveLastRun && !lastRun.clean) ResetBackgroundApps(lastRun);  // before anything steps back again
     // Pile ids stay the same across restarts (the activity log refers to them).
     for (const SavedPile& sp : saved) nextId_ = std::max(nextId_, sp.id + 1);
     std::vector<uint64_t> claimed;
@@ -1405,6 +1414,7 @@ void App::SaveJournalNow() {
     WriteJournal(j);
     PersistSoon();
     UpdateTitleHooks();  // the set of hidden windows may have changed
+    UpdateBackground();
     UpdateMarks();       // ... and so the set of windows out on the screen
     TrackActivity();     // which pile is being worked on may have changed
 }
@@ -1422,6 +1432,15 @@ void App::Flush() {
     for (int id : ids)
         if (Pile* p = FindPile(id)) Refresh(*p);
     if (journalDirty_) SaveJournalNow();
+}
+
+void App::UpdateBackground() {
+    std::vector<DWORD> pids;
+    if (restApps_ && !quitting_ && !stateFrozen_)
+        for (auto& p : piles_)
+            for (auto& m : p->members)
+                if (m.hidden) pids.push_back(m.pid);
+    background_.Update(pids);
 }
 
 void App::UpdateTitleHooks() {
@@ -1548,6 +1567,9 @@ void App::OnHiddenActivated(HWND hwnd) {
 void CALLBACK App::OnObjectEvent(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD, DWORD) {
     if (!instance_ || idObject != OBJID_WINDOW || idChild != CHILDID_SELF || !hwnd) return;
     if (event == EVENT_SYSTEM_FOREGROUND) {
+        DWORD pid = 0;
+        GetWindowThreadProcessId(hwnd, &pid);
+        if (instance_->background_.Has(pid)) PostMessageW(instance_->main_, WM_APP_BACKGROUND, 0, 0);
         if (!IsWindowVisible(hwnd) && instance_->PileOf(hwnd))
             PostMessageW(instance_->main_, WM_APP_HIDDEN_FRONT, (WPARAM)hwnd, 0);
         else if (instance_->marks_ && instance_->marks_->Has(hwnd)) {
@@ -1772,6 +1794,7 @@ void App::Quit() {
     if (quitting_) return;
     PauseActivity(L"exit");
     quitting_ = true;
+    background_.ReleaseAll();
     CloseAllMemoWindows();  // writes what was typed since the last autosave
     // Remember the piles exactly as they are (folded stays folded) for the next start/update,
     // then bring every window back so nothing stays hidden while the app is not running.
@@ -1790,6 +1813,7 @@ void App::Quit() {
 
 void App::EndSessionNow() {
     Log("end session: frozen=%d", stateFrozen_);
+    background_.ReleaseAll();
     PauseActivity(L"exit");
     CloseAllMemoWindows();
     // Logoff, shutdown, restart or an installer closing us (Restart Manager). The piles were saved
@@ -2073,6 +2097,7 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case WM_APP_TITLE: OnTitleChanged((HWND)wp); return 0;
         case WM_APP_FLUSH: Flush(); return 0;
+        case WM_APP_BACKGROUND: UpdateBackground(); return 0;
         case WM_TIMER:
             if (wp == kTimerVerify) VerifyHidden();
             else if (wp == kTimerIdle) {
@@ -2083,6 +2108,7 @@ LRESULT App::HandleMain(UINT msg, WPARAM wp, LPARAM lp) {
                     for (auto& m : p->members)
                         if (!IsWindow(m.hwnd)) dead.push_back(m.hwnd);
                 for (HWND h : dead) OnMemberGone(h);
+                UpdateBackground();  // a window of theirs out again, sound started, an app exited
                 UpdateReclaim();  // ends the after-restart window when its time is up
             } else if (wp == kTimerToFront) {
                 // A window shown by a late restore would land on top: wait (briefly) until they're in.

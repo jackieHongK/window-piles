@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "app/background.h"
 #include "groups/pile.h"
 #include "interaction/drag_watcher.h"
 #include "preview/snapshot.h"
@@ -205,6 +206,9 @@ private:
     std::vector<HWND> untitledShown_;           // appeared without a title yet: their first title still counts as new
     UINT shellHookMsg_ = 0;                        // HSHELL_* notifications from Explorer
     std::map<DWORD, HWINEVENTHOOK> titleHooks_;    // pid → title-change hook scoped to that process
+    BackgroundApps background_;  // apps whose every window is put away step back (memory priority, EcoQoS)
+    bool restApps_ = true;  // 설정: 더미 속 앱 쉬게 하기
+    void UpdateBackground();
     bool journalDirty_ = false;
     bool flushPosted_ = false;
     std::vector<int> refreshIds_;  // piles to redraw at the next flush

@@ -17,6 +17,7 @@ struct AppSettings {
     bool autostart = false;
     bool shown = true;       // cards, organizer and frame on screen ("항상 위로"), or put away ("숨기기")
     bool marks = true;       // a tab in the pile's color on each window of an open pile
+    bool rest = true;        // apps whose every window is in a pile step back (app/background.h)
     bool organizer = true;   // the edge organizer is on
     bool right = true;       // ... on the right edge
     std::wstring monitor;    // ... of this display (device name, common/displays.h)

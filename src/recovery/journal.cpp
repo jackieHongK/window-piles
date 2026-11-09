@@ -6,6 +6,7 @@
 #include <deque>
 
 #include "activity/activity_log.h"
+#include "app/background.h"
 #include "common/win_util.h"
 
 namespace wp {
@@ -385,6 +386,7 @@ int RunWatchdog(DWORD managerPid) {
     // (a crash loop) or can't come up, fall back to showing every hidden window.
     if (LooksLikeCrash(code) && uptimeSec > 20 && RelaunchManager()) return 0;
 
+    ResetBackgroundApps(j);
     RecoverFromJournal(j, nullptr);
     j.entries.clear();
     j.clean = true;

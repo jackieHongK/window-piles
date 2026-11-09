@@ -23,6 +23,7 @@ add_executable(WindowPiles WIN32
     src/app/app.cpp
     src/app/app_icon.cpp
     src/app/arrival.cpp
+    src/app/background.cpp
     src/app/relaunch.cpp
     src/common/win_util.cpp
     src/common/canvas.cpp
@@ -157,3 +158,8 @@ target_link_libraries(poc_watchdog PRIVATE poc_common)
 # PoC-05: window drag detection via WinEvent hooks + drop bar prototype.
 add_executable(poc_drag poc/poc05_drag_probe.cpp)
 target_link_libraries(poc_drag PRIVATE poc_common)
+
+# Check: an app whose every window is put away steps back (memory priority, EcoQoS) and gets its settings back.
+add_executable(background_check tests/tools/background_check.cpp src/app/background.cpp src/common/win_util.cpp)
+target_include_directories(background_check PRIVATE src)
+target_link_libraries(background_check PRIVATE user32 dwmapi ole32 advapi32 shell32 shlwapi shcore)
