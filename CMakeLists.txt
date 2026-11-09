@@ -163,3 +163,7 @@ target_link_libraries(poc_drag PRIVATE poc_common)
 add_executable(background_check tests/tools/background_check.cpp src/app/background.cpp src/common/win_util.cpp)
 target_include_directories(background_check PRIVATE src)
 target_link_libraries(background_check PRIVATE user32 dwmapi ole32 advapi32 shell32 shlwapi shcore)
+
+add_executable(messenger_check tests/tools/messenger_check.cpp src/surface/messenger.cpp src/groups/unread.cpp src/common/win_util.cpp)
+target_include_directories(messenger_check PRIVATE src)
+target_link_libraries(messenger_check PRIVATE user32 dwmapi ole32 advapi32 shell32 shlwapi shcore comctl32 version propsys)

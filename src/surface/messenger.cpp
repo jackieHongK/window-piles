@@ -1,5 +1,6 @@
 #include "messenger.h"
 
+#include <appmodel.h>
 #include <commctrl.h>
 #include <commoncontrols.h>
 #include <propsys.h>
@@ -8,6 +9,8 @@
 #include <shobjidl.h>
 
 #include <algorithm>
+#include <fstream>
+#include <iterator>
 #include <map>
 
 #include "common/win_util.h"
@@ -62,6 +65,92 @@ std::wstring WindowAumid(HWND hwnd) {
     return id;
 }
 
+// A packaged app's program (new Outlook, Teams) lives in WindowsApps\<package full name>\...: that folder
+// name, and the path inside it. False for ordinary programs.
+bool PackagePart(const std::wstring& exe, std::wstring& fullName, std::wstring& rest) {
+    std::wstring lower = exe;
+    for (wchar_t& ch : lower) ch = towlower(ch);
+    size_t at = lower.find(L"\\windowsapps\\");
+    if (at == std::wstring::npos) return false;
+    at += 13;
+    size_t end = exe.find(L'\\', at);
+    if (end == std::wstring::npos) return false;
+    fullName = exe.substr(at, end - at);
+    rest = exe.substr(end);
+    return true;
+}
+
+std::wstring PackageFamily(const std::wstring& fullName) {
+    wchar_t family[PACKAGE_FAMILY_NAME_MAX_LENGTH + 1];
+    UINT32 n = ARRAYSIZE(family);
+    return PackageFamilyNameFromFullName(fullName.c_str(), &n, family) == ERROR_SUCCESS ? family : L"";
+}
+
+// What tells an app's processes apart: its program, or for a packaged app its family and the program in
+// it, which stay the same when an update moves it to a new folder.
+std::wstring AppKey(const std::wstring& exe) {
+    std::wstring full, rest, family;
+    if (PackagePart(exe, full, rest) && !(family = PackageFamily(full)).empty()) return family + rest;
+    return exe;
+}
+
+// The app in a package's manifest that runs `rest` (its program, "\olk.exe") and is in the Start menu: a
+// package may hold helpers running the same program (Teams), kept out of the Start menu.
+std::wstring ManifestAppId(const std::wstring& packagePath, const std::wstring& rest) {
+    std::ifstream f(packagePath + L"\\AppxManifest.xml", std::ios::binary);
+    std::string xml((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    std::string exe;  // the program as the manifest names it: relative, '\' separated (ASCII in practice)
+    for (wchar_t ch : rest.substr(1)) exe += (char)ch;
+    auto attr = [](const std::string& tag, const char* name) {
+        std::string key = std::string(" ") + name + "=\"";
+        size_t at = tag.find(key);
+        if (at == std::string::npos) return std::string();
+        at += key.size();
+        return tag.substr(at, tag.find('"', at) - at);
+    };
+    std::string fallback;
+    for (size_t at = xml.find("<Application "); at != std::string::npos; at = xml.find("<Application ", at + 1)) {
+        size_t end = xml.find("</Application>", at);
+        std::string block = xml.substr(at, end == std::string::npos ? std::string::npos : end - at);
+        std::string tag = block.substr(0, block.find('>'));
+        if (_stricmp(attr(tag, "Executable").c_str(), exe.c_str()) != 0) continue;
+        std::string id = attr(tag, "Id");
+        if (block.find("AppListEntry=\"none\"") == std::string::npos) return std::wstring(id.begin(), id.end());
+        if (fallback.empty()) fallback = id;
+    }
+    return std::wstring(fallback.begin(), fallback.end());
+}
+
+// A packaged app can't be started from its program file, and an update moves it: point at the installed
+// version and fill in the app id it is started by. True if anything changed.
+bool Repair(Messenger& m) {
+    std::wstring full, rest, family;
+    if (!PackagePart(m.exe, full, rest) || (family = PackageFamily(full)).empty()) return false;
+    UINT32 count = 0, len = 0;
+    if (GetPackagesByPackageFamily(family.c_str(), &count, nullptr, &len, nullptr) != ERROR_INSUFFICIENT_BUFFER || !count)
+        return false;  // uninstalled: left as it was
+    std::vector<PWSTR> names(count);
+    std::vector<wchar_t> buf(len);
+    if (GetPackagesByPackageFamily(family.c_str(), &count, names.data(), &len, buf.data()) != ERROR_SUCCESS || !count)
+        return false;
+    bool changed = false;
+    wchar_t path[MAX_PATH];
+    UINT32 plen = MAX_PATH;
+    if (GetPackagePathByFullName(names[0], &plen, path) != ERROR_SUCCESS) return false;
+    if (!Same(path + rest, m.exe)) {
+        m.exe = path + rest;
+        changed = true;
+    }
+    if (m.aumid.empty()) {
+        std::wstring id = ManifestAppId(path, rest);
+        if (!id.empty()) {
+            m.aumid = family + L"!" + id;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
 bool AppWindow(HWND h) {
     if (GetWindow(h, GW_OWNER) || (GetWindowLongW(h, GWL_EXSTYLE) & WS_EX_TOOLWINDOW)) return false;
     return IsWindowVisible(h) || IsIconic(h);
@@ -85,6 +174,9 @@ std::vector<Messenger> LoadMessengers() {
         }
         if (!part[0].empty()) out.push_back({part[0], part[1], part[2], part[3].empty() ? FileStem(part[0]) : part[3]});
     }
+    bool repaired = false;
+    for (Messenger& m : out) repaired |= Repair(m);
+    if (repaired) SaveMessengers(out);
     return out;
 }
 
@@ -104,6 +196,15 @@ bool MessengerFromWindow(HWND hwnd, Messenger& out) {
     std::wstring exe = ProcessExePath(pid);
     if (exe.empty()) return false;
     out = {exe, L"", WindowAumid(hwnd), ProgramName(exe)};
+    if (out.aumid.empty()) {  // a packaged program's windows don't say it; its process does
+        if (HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
+            wchar_t id[APPLICATION_USER_MODEL_ID_MAX_LENGTH];
+            UINT32 n = ARRAYSIZE(id);
+            if (GetApplicationUserModelId(p, &n, id) == ERROR_SUCCESS) out.aumid = id;
+            CloseHandle(p);
+        }
+    }
+    Repair(out);
     return true;
 }
 
@@ -111,6 +212,7 @@ bool MessengerFromFile(const std::wstring& path, Messenger& out) {
     std::wstring ext = path.size() > 4 ? path.substr(path.size() - 4) : L"";
     if (Same(ext, L".exe")) {
         out = {path, L"", L"", ProgramName(path)};
+        Repair(out);
         return true;
     }
     if (!Same(ext, L".lnk")) return false;
@@ -134,17 +236,17 @@ bool MessengerFromFile(const std::wstring& path, Messenger& out) {
 
 std::vector<HWND> MessengerWindows(const Messenger& m) {
     struct Ctx {
-        const Messenger* m;
+        std::wstring key;
         std::map<DWORD, bool> mine;  // per process: is it this app
         std::vector<HWND> out;
-    } ctx{&m, {}, {}};
+    } ctx{AppKey(m.exe), {}, {}};
     EnumWindows([](HWND h, LPARAM lp) -> BOOL {  // top to bottom: frontmost first
         auto* c = (Ctx*)lp;
         if (!AppWindow(h)) return TRUE;
         DWORD pid = 0;
         GetWindowThreadProcessId(h, &pid);
         auto it = c->mine.find(pid);
-        if (it == c->mine.end()) it = c->mine.emplace(pid, Same(ProcessExePath(pid), c->m->exe)).first;
+        if (it == c->mine.end()) it = c->mine.emplace(pid, Same(AppKey(ProcessExePath(pid)), c->key)).first;
         if (it->second) c->out.push_back(h);
         return TRUE;
     }, (LPARAM)&ctx);
@@ -167,15 +269,21 @@ HICON MessengerIcon(const Messenger& m) {
     if (it != cache.end() && it->second) return it->second;
     HICON icon = nullptr;
     SHFILEINFOW sfi{};
-    if (SHGetFileInfoW((m.link.empty() ? m.exe : m.link).c_str(), 0, &sfi, sizeof(sfi), SHGFI_SYSICONINDEX)) {
+    // An app with an id: its Start menu entry's icon (a packaged program file gives none).
+    PIDLIST_ABSOLUTE pidl = nullptr;
+    if (!m.aumid.empty()) SHParseDisplayName((L"shell:AppsFolder\\" + m.aumid).c_str(), nullptr, &pidl, 0, nullptr);
+    DWORD_PTR found = pidl ? SHGetFileInfoW((LPCWSTR)pidl, 0, &sfi, sizeof(sfi), SHGFI_PIDL | SHGFI_SYSICONINDEX)
+                           : SHGetFileInfoW((m.link.empty() ? m.exe : m.link).c_str(), 0, &sfi, sizeof(sfi), SHGFI_SYSICONINDEX);
+    CoTaskMemFree(pidl);
+    if (found) {
         IImageList* list = nullptr;
         if (SUCCEEDED(SHGetImageList(SHIL_EXTRALARGE, IID_PPV_ARGS(&list)))) {
             list->GetIcon(sfi.iIcon, ILD_TRANSPARENT, &icon);
             list->Release();
         }
     }
-    // Store apps' programs give no icon of their own: their window has it.
-    if (!icon || !m.aumid.empty())
+    // None found: an open window of it may have one.
+    if (!icon)
         for (HWND h : MessengerWindows(m)) {
             DWORD_PTR res = 0;
             if (SendMessageTimeoutW(h, WM_GETICON, ICON_BIG, 0, SMTO_ABORTIFHUNG, 100, &res) && res) {
