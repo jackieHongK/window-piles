@@ -213,8 +213,8 @@ int wmain(int argc, wchar_t** argv) {
 
     // 1) A lives in the organizer: only B's card on the desktop, and the bookmark
     HWND handle = FindWindowW(L"WindowPilesOrganizerHandle", nullptr);
-    Check(handle && IsWindowVisible(handle), "1) 화면 가장자리에 오거나이저 막대가 보임");
-    Check(Visible(L"WindowPilesPile") == 1, "1) 오거나이저에 꽂힌 더미 A는 바탕화면에 카드가 없음 (B만 보임)");
+    Check(handle && IsWindowVisible(handle), "1) 화면 가장자리에 Sideck 막대가 보임");
+    Check(Visible(L"WindowPilesPile") == 1, "1) Sideck에 꽂힌 더미 A는 바탕화면에 카드가 없음 (B만 보임)");
 
     // 2) a click on the bookmark opens the tray
     if (handle) Click(handle, MAKELPARAM(4, 40));
@@ -249,18 +249,18 @@ int wmain(int argc, wchar_t** argv) {
     bool folded = PumpUntil([&] { return !IsWindowVisible(w[0]) && !IsWindowVisible(w[1]); }, 4000);
     PumpFor(600);
     Check(folded, "4) 이름표를 누르면 다시 접힘");
-    Check(Visible(L"WindowPilesPile") == 1, "4) 접은 뒤에도 A는 오거나이저에 남음 (바탕화면 카드 없음)");
+    Check(Visible(L"WindowPilesPile") == 1, "4) 접은 뒤에도 A는 Sideck에 남음 (바탕화면 카드 없음)");
 
     // 5) restart: still in the organizer
     PostMessageW(FindWindowW(L"WindowPilesMain", nullptr), WM_ENDSESSION, TRUE, 0);
     WaitForSingleObject(app, 5000);
     CloseHandle(app);
-    Check(ReadState().find("\"docked\":true") != std::string::npos, "5) 오거나이저에 꽂힌 상태가 저장됨");
+    Check(ReadState().find("\"docked\":true") != std::string::npos, "5) Sideck에 꽂힌 상태가 저장됨");
     app = Launch(appExe, L"--autostart");
     PumpUntil([&] { return FindWindowW(L"WindowPilesMain", nullptr) && !IsWindowVisible(w[0]); }, 8000);
     PumpFor(1000);
     Check(Visible(L"WindowPilesPile") == 1 && FindWindowW(L"WindowPilesOrganizerHandle", nullptr),
-          "5) 다시 시작해도 A는 오거나이저에 있음");
+          "5) 다시 시작해도 A는 Sideck에 있음");
 
     // 6) memos
     for (const auto& m : Memos()) DeleteFileW(m.c_str());
@@ -348,7 +348,7 @@ int wmain(int argc, wchar_t** argv) {
                      state.substr(a, b > a ? b - a : std::string::npos).find("\"dockOrder\":1") != std::string::npos &&
                      state.find("\"dockOrder\":0", b) != std::string::npos;
     if (!reordered) Print("   state: %s\n", state.c_str());
-    Check(d != std::string::npos && reordered, "8) 오거나이저 안에서 더미 카드를 끌어 순서를 바꾸면 저장됨");
+    Check(d != std::string::npos && reordered, "8) Sideck 안에서 더미 카드를 끌어 순서를 바꾸면 저장됨");
     // For step 10: the test windows' program kept in the messenger dock (exe \t shortcut \t app id \t name).
     std::wstring ini = DataDir() + L"\\organizer.ini";
     WritePrivateProfileStringW(L"messengers", L"count", L"1", ini.c_str());

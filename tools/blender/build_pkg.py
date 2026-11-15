@@ -1,6 +1,6 @@
 # Packaging product shots: sleeve, rigid shoulder box, perforated seal, 3 mm charcoal velvet wrap, postcard.
 # Runs on the studio scene (cyclorama + light rig + tray) saved by studio_shots.py.
-# Run: blender -b studio/olive_deck_tray_walnut_studio.blend -P build_pkg.py -- <out_dir> [--quick] [--spp N] [--only a,b]
+# Run: blender -b studio/sideck_tray_walnut_studio.blend -P build_pkg.py -- <out_dir> [--quick] [--spp N] [--only a,b]
 import bpy, bmesh, math, os, sys
 from mathutils import Vector
 

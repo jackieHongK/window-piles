@@ -24,13 +24,13 @@ cp tools/blender/out/tray_ao.png marketing/unboxing/
 
 `build_tray.py` mills the tray from one block (profile prism minus an R3-cornered pocket, ribs left standing,
 one R0.5 bevel pass), cuts the engraving 0.2 mm deep, writes `tray_body.glb` (box-projected UVs that match the page,
-plus a lightmap UV), bakes `tray_ao.png`, renders `cycles_*.png` and saves `olive_deck_tray_walnut.blend`.
+plus a lightmap UV), bakes `tray_ao.png`, renders `cycles_*.png` and saves `sideck_tray_walnut.blend`.
 Add `--quick` for a 64-sample test, `--no-render` to skip the stills.
 
 ## 3. Studio product shots
 
 ```
-blender -b tools/blender/out/olive_deck_tray_walnut.blend -P tools/blender/studio_shots.py -- tools/blender/studio --spp 256
+blender -b tools/blender/out/sideck_tray_walnut.blend -P tools/blender/studio_shots.py -- tools/blender/studio --spp 256
 ```
 
 Seamless cyclorama, large top light, rear strip lights light-linked to the product; six shots (`studio_*.png`).
@@ -39,7 +39,7 @@ Seamless cyclorama, large top light, rear strip lights light-linked to the produ
 ## 4. Packaging shots
 
 ```
-blender -b tools/blender/studio/olive_deck_tray_walnut_studio.blend -P tools/blender/build_pkg.py -- tools/blender/pkg --spp 256
+blender -b tools/blender/studio/sideck_tray_walnut_studio.blend -P tools/blender/build_pkg.py -- tools/blender/pkg --spp 256
 ```
 
 Sleeve, shoulder box, perforated seal, 3 mm charcoal velvet wrap and postcard, using the page's own artwork in `art/`.

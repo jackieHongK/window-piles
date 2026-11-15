@@ -118,11 +118,11 @@ void TearOffMemo(const std::wstring& path, POINT pt, UINT dpi) {
 }  // namespace
 
 Organizer::Organizer(OrganizerHost& host, const Place& place) : host_(host), place_(place) {
-    handle_ = MakeWindow(kHandleClass, &Organizer::HandleProc, this, L"Olive Deck 오거나이저");
-    tray_ = MakeWindow(kTrayClass, &Organizer::TrayProc, this, L"Olive Deck 오거나이저 트레이");
-    flags_ = MakeWindow(kFlagsClass, &Organizer::FlagsProc, this, L"Olive Deck 메모 플래그");
-    peek_ = MakeWindow(kPeekClass, &Organizer::PeekProc, this, L"Olive Deck 메모 미리보기");
-    landing_ = MakeWindow(kLandingClass, DefWindowProcW, this, L"Olive Deck 오거나이저 놓을 자리");
+    handle_ = MakeWindow(kHandleClass, &Organizer::HandleProc, this, L"Sideck");
+    tray_ = MakeWindow(kTrayClass, &Organizer::TrayProc, this, L"Sideck 트레이");
+    flags_ = MakeWindow(kFlagsClass, &Organizer::FlagsProc, this, L"Sideck 메모 플래그");
+    peek_ = MakeWindow(kPeekClass, &Organizer::PeekProc, this, L"Sideck 메모 미리보기");
+    landing_ = MakeWindow(kLandingClass, DefWindowProcW, this, L"Sideck 놓을 자리");
     SetWindowLongPtrW(landing_, GWL_EXSTYLE, GetWindowLongPtrW(landing_, GWL_EXSTYLE) | WS_EX_TRANSPARENT);
     standIn_ = MakeWindow(kStandInClass, DefWindowProcW, this, L"");
     SetWindowLongPtrW(standIn_, GWL_EXSTYLE, GetWindowLongPtrW(standIn_, GWL_EXSTYLE) | WS_EX_TRANSPARENT);
@@ -693,7 +693,7 @@ void Organizer::RenderTray(bool present) {
     FillMaterialShape(c, {{joint, 0}}, body, Mat(), dpi_);
     DrawBookmark(c, g.handle, false, false);
 
-    // The wordmark carved into the wood; while something is carried over it, what a drop would do.
+    // The "sideck" wordmark carved into the wood; while something is carried over it, what a drop would do.
     bool full = pileCount >= Capacity();
     if (dropMode_) {
         std::wstring label = dropAdd_ ? L"더미 카드 위에 놓으면 그 더미에 들어가요"
@@ -708,8 +708,8 @@ void Organizer::RenderTray(bool present) {
         // warm off-white (the labels' cream with a fifth of the material in it, so it sits in rather than
         // glares), its lower edge in shadow.
         bool dark = kMaterials[Mat()].dark;
-        DrawWordmark(c, g.logo.left, ly + 1, lh, dark ? Mix(base, RGB(0, 0, 0), 0.5) : Mix(base, RGB(255, 255, 255), 0.35));
-        DrawWordmark(c, g.logo.left, ly, lh, dark ? Mix(Ink(), base, 0.2) : Mix(base, RGB(0, 0, 0), 0.5));
+        DrawWordmark(c, g.logo.left, ly + 1, lh, dark ? Mix(base, RGB(0, 0, 0), 0.5) : Mix(base, RGB(255, 255, 255), 0.35), Mark::Sideck);
+        DrawWordmark(c, g.logo.left, ly, lh, dark ? Mix(Ink(), base, 0.2) : Mix(base, RGB(0, 0, 0), 0.5), Mark::Sideck);
     }
     // The pin, at the end of the logo row: pinned, the drawer stays out; unpinned, it folds away by itself.
     {
@@ -940,7 +940,7 @@ void Organizer::Launch() {
     if (!f) {  // a window for it to fly in, kept for the next ones
         flights_.push_back({});
         f = &flights_.back();
-        f->hwnd = MakeWindow(kFlyClass, &Organizer::PeekProc, this, L"Olive Deck 새 메모");
+        f->hwnd = MakeWindow(kFlyClass, &Organizer::PeekProc, this, L"Sideck 새 메모");
         SetWindowLongPtrW(f->hwnd, GWL_EXSTYLE, GetWindowLongPtrW(f->hwnd, GWL_EXSTYLE) | WS_EX_TRANSPARENT);
     }
     f->to = {at.x - z.cx / 2, at.y - z.cy / 2, at.x - z.cx / 2 + z.cx, at.y - z.cy / 2 + z.cy};

@@ -25,7 +25,7 @@ constexpr int kSwatchesPerRow = 7;
 const wchar_t kCaption[] = L"Olive Deck 설정 · 사용법";  // taskbar / Alt+Tab
 const wchar_t kSlogan[] = L"Tasks stack up, but never overflow.";
 const wchar_t* const kTabs[] = {L"설정", L"사용법"};
-const wchar_t* const kSections[] = {L"기본", L"가장자리 오거나이저", L"메모"};
+const wchar_t* const kSections[] = {L"기본", L"가장자리 Sideck", L"메모"};
 const wchar_t kTipTitle[] = L"알아두면 좋아요";
 const wchar_t kTip[] =
     L"컴퓨터를 다시 켜거나 프로그램을 업데이트해도 더미는 그대로 남아요. 그사이 닫힌 앱은 더미 안 '다시 열어야 할 "
@@ -98,8 +98,8 @@ void GuideWindow::Show(Tab tab) {
         {L"접기",
          L"맨 위 이름표를 누르면 창들이 다시 더미 자리로 모여요. 다른 더미를 펼치면 지금 펼친 더미는 자동으로 "
          L"접혀요."},
-        {L"오거나이저와 메모",
-         L"더미 카드를 화면 끝 손잡이로 끌어다 빈 칸에 놓으면 오거나이저에 꽂혀요. 손잡이나 그 높이의 화면 끝에 "
+        {L"Sideck과 메모",
+         L"더미 카드를 화면 끝 손잡이로 끌어다 빈 칸에 놓으면 Sideck에 꽂혀요. 손잡이나 그 높이의 화면 끝에 "
          L"마우스를 대면 서랍이 열리고, 포스트잇 디스펜서의 PUSH를 누르면 새 메모가 날아와 열려요. 손잡이나 열린 "
          L"서랍의 맨 윗줄을 잡고 끌면 다른 모니터의 원하는 끝으로 옮겨져요."},
         {L"이름·색 바꾸기", L"더미를 오른쪽 버튼으로 누르고 '이름·색 바꾸기'를 고르세요."},
@@ -151,12 +151,12 @@ void GuideWindow::Layout() {
     };
     section(0);
     row(kHitAutostart, L"Windows 시작 시 자동 실행", L"켜 두면 로그인할 때 더미가 그대로 돌아와요", S(kToggleW), false);
-    row(kHitShown, L"카드와 오거나이저 보이기", L"끄면 '숨기기': 집중할 때 잠시 치워 둬요", S(kToggleW), false);
+    row(kHitShown, L"카드와 Sideck 보이기", L"끄면 '숨기기': 집중할 때 잠시 치워 둬요", S(kToggleW), false);
     row(kHitMarks, L"창에 더미 색 표시", L"펼친 더미의 창마다 위쪽 끝에 더미 색 작은 탭", S(kToggleW), false);
     row(kHitRest, L"더미 속 앱 쉬게 하기", L"메모리는 먼저 내주고 전력은 아껴요 · 바쁜 앱은 그대로", S(kToggleW), false);
     y += S(14);
     section(1);
-    row(kHitOrganizer, L"오거나이저 사용", L"화면 끝 막대에 더미를 꽂아 두는 서랍", S(kToggleW), false);
+    row(kHitOrganizer, L"Sideck 사용", L"화면 끝 막대에 더미를 꽂아 두는 서랍", S(kToggleW), false);
     // Which display, then which edge of it. Grabbing the bookmark or the open drawer and dropping it on
     // another screen does the same.
     displays_ = ListDisplays();
