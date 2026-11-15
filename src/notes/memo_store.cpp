@@ -43,7 +43,7 @@ std::wstring DefaultDir() {
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, 0, nullptr, &docs))) dir = docs;
     CoTaskMemFree(docs);
     if (dir.empty()) dir = AppDataDir();
-    return dir + L"\\Stack Neverflow 메모";
+    return dir + L"\\Olive Deck 메모";
 }
 
 }  // namespace

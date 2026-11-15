@@ -221,7 +221,7 @@ void DragClipOut(const ClipItem& item) {
         SYSTEMTIME t;
         GetLocalTime(&t);
         wchar_t name[64];
-        swprintf_s(name, L"Neverflow %04u%02u%02u-%02u%02u%02u.png", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+        swprintf_s(name, L"Olive Deck %04u%02u%02u-%02u%02u%02u.png", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
         file = std::wstring(dir) + name;
         if (png.empty() || !WriteFileReplacing(file, png, false)) file.clear();
     }

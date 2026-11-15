@@ -22,7 +22,7 @@ constexpr int kWidth = 520, kPad = 28, kBadge = 26, kGapStep = 18, kMark = 40;
 constexpr int kTabsH = 36, kRowH = 52, kToggleW = 40, kToggleH = 22, kSideW = 64, kSwatchH = 34, kSwatchGap = 8;
 constexpr int kDisplayW = 40;
 constexpr int kSwatchesPerRow = 7;
-const wchar_t kCaption[] = L"Stack Neverflow 설정 · 사용법";  // taskbar / Alt+Tab
+const wchar_t kCaption[] = L"Olive Deck 설정 · 사용법";  // taskbar / Alt+Tab
 const wchar_t kSlogan[] = L"Tasks stack up, but never overflow.";
 const wchar_t* const kTabs[] = {L"설정", L"사용법"};
 const wchar_t* const kSections[] = {L"기본", L"가장자리 오거나이저", L"메모"};
@@ -30,7 +30,7 @@ const wchar_t kTipTitle[] = L"알아두면 좋아요";
 const wchar_t kTip[] =
     L"컴퓨터를 다시 켜거나 프로그램을 업데이트해도 더미는 그대로 남아요. 그사이 닫힌 앱은 더미 안 '다시 열어야 할 "
     L"창' 목록에 보이고, 누르면 그 앱이 열려요. 그 앱 창을 다시 더미에 넣으면 목록에서 사라져요.\n"
-    L"'모든 창 꺼내기'와 'Neverflow 종료'는 더미 오른쪽 버튼 메뉴나 화면 오른쪽 아래 트레이 아이콘에 있어요. 프로그램이 "
+    L"'모든 창 꺼내기'와 'Olive Deck 종료'는 더미 오른쪽 버튼 메뉴나 화면 오른쪽 아래 트레이 아이콘에 있어요. 프로그램이 "
     L"갑자기 꺼져도 숨겨 둔 창은 자동으로 다시 나타나요.";
 
 // What can be clicked.

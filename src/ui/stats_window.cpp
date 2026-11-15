@@ -16,7 +16,7 @@ namespace {
 
 constexpr int kWidth = 600, kPad = 28, kRowH = 40, kMaxRows = 8, kBarH = 28, kWeekH = 112;
 const wchar_t kTitle[] = L"작업 기록";
-const wchar_t kCaption[] = L"작업 기록 · Stack Neverflow";  // taskbar / Alt+Tab
+const wchar_t kCaption[] = L"작업 기록 · Olive Deck";  // taskbar / Alt+Tab
 const wchar_t kNote[] = L"더미를 펼쳐 둔 시간 · 화면 잠금, 절전, 5분 넘게 자리를 비운 시간은 빼요";
 const wchar_t kHint[] = L"막대에 마우스를 올리면 자세히 보여요";
 const wchar_t* const kWeekdays[] = {L"일", L"월", L"화", L"수", L"목", L"금", L"토"};

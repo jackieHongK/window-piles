@@ -1,5 +1,5 @@
 // Memos are plain .txt files (UTF-8) in a folder the user can see, by default
-// Documents\Stack Neverflow 메모. The app keeps no copy and no index: it lists that folder, so the notes
+// Documents\Olive Deck 메모. The app keeps no copy and no index: it lists that folder, so the notes
 // stay safe and readable in any editor even if the app breaks or its data is deleted. The folder is
 // remembered in organizer.ini (key memoDir) and can be pointed elsewhere there.
 #pragma once

@@ -307,7 +307,7 @@ int App::Run() {
     wc.lpszClassName = kMainWindowClass;
     RegisterClassW(&wc);
     // A hidden (never shown) top-level window: tray callbacks, menus, deferred work.
-    main_ = CreateWindowExW(WS_EX_TOOLWINDOW, wc.lpszClassName, L"Stack Neverflow", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr,
+    main_ = CreateWindowExW(WS_EX_TOOLWINDOW, wc.lpszClassName, L"Olive Deck", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr,
                             wc.hInstance, nullptr);
     taskbarCreatedMsg_ = RegisterWindowMessageW(L"TaskbarCreated");
     // Explorer tells shell-hook windows when an app flashes its taskbar button (new message…).
@@ -987,7 +987,7 @@ void App::OnPileMenu(Pile& pile, POINT pt) {
     items.push_back({kMenuStats, L"작업 기록", L"오늘 쓴 시간"});
     items.push_back({kMenuHelp, L"사용법"});
     items.push_back({});
-    items.push_back({kMenuQuit, L"Neverflow 종료", L"창을 모두 꺼내요"});
+    items.push_back({kMenuQuit, L"Olive Deck 종료", L"창을 모두 꺼내요"});
 
     int pileId = pile.id;  // the pile may be gone after the menu closes
     UINT id = ShowMenu(items, pt);
@@ -1622,7 +1622,7 @@ void App::AddTrayIcon() {
     nid_.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
     nid_.uCallbackMessage = WM_APP_TRAY;
     nid_.hIcon = trayIcon_ ? trayIcon_ : icon_;
-    CopyTrunc(nid_.szTip, ARRAYSIZE(nid_.szTip), L"Stack Neverflow · 누르면 사용법");
+    CopyTrunc(nid_.szTip, ARRAYSIZE(nid_.szTip), L"Olive Deck · 누르면 사용법");
     Shell_NotifyIconW(NIM_ADD, &nid_);
     nid_.uVersion = NOTIFYICON_VERSION_4;
     Shell_NotifyIconW(NIM_SETVERSION, &nid_);
@@ -1655,7 +1655,7 @@ void App::ShowTrayMenu() {
         {kMenuStats, L"작업 기록", L"오늘 쓴 시간"},
         {kMenuHelp, L"설정 · 사용법"},
         {},
-        {kMenuQuit, L"Neverflow 종료", L"창을 모두 꺼내요"},
+        {kMenuQuit, L"Olive Deck 종료", L"창을 모두 꺼내요"},
     };
     UINT id = ShowMenu(items, pt);
     if (id == kMenuOnTop || id == kMenuHideUi) SetUiHidden(id == kMenuHideUi);

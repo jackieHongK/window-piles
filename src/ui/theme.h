@@ -1,5 +1,5 @@
-// Design tokens — Stack Neverflow, "Deskterior": the screen is a desk, piles are paper stacks.
-// Warm "ink" neutrals on white paper, walnut as the brand accent (mark and focus only).
+// Design tokens — Olive Deck, "Deskterior": the screen is a desk, piles are paper stacks.
+// Warm "ink" neutrals on white paper, Nocellara Green as the key color (mark and focus only).
 // Other color appears only where the user chose it (pile title bars).
 #pragma once
 
@@ -19,8 +19,10 @@ constexpr COLORREF kPrimaryFg = RGB(250, 249, 246);
 constexpr COLORREF kPrimaryHover = RGB(56, 47, 39);
 constexpr COLORREF kPrimarySubtleFg = RGB(214, 209, 200);  // secondary text on kPrimary
 constexpr COLORREF kHover = RGB(250, 249, 246);            // faint hover on white
-constexpr COLORREF kRing = RGB(123, 75, 42);           // walnut
-constexpr COLORREF kBrand = RGB(123, 75, 42);          // walnut: logo/mark and focus, never on pile cards
+// Nocellara Green (#5C7A20), after the Sicilian Nocellara olive: deepened from the fruit's bright green to
+// 4.9:1 on white, so it reads as text (a checked memo box) and as a focus ring.
+constexpr COLORREF kRing = RGB(92, 122, 32);           // Nocellara Green
+constexpr COLORREF kBrand = RGB(92, 122, 32);          // Nocellara Green: logo/mark and focus, never on pile cards
 
 constexpr wchar_t kFont[] = L"Malgun Gothic";
 

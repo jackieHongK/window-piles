@@ -139,7 +139,7 @@ def seamless(img, size, blend):
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE = os.path.join(ROOT, 'build', 'scan-src')
 OUT = os.path.join(ROOT, 'assets', 'materials')
-UA = {'User-Agent': 'stack-neverflow-gen-scans'}
+UA = {'User-Agent': 'olive-deck-gen-scans'}
 
 
 def fetch(url):
