@@ -69,7 +69,6 @@ constexpr wchar_t kPeekClass[] = L"WindowPilesOrganizerPeek";
 constexpr wchar_t kFlyClass[] = L"WindowPilesOrganizerFlight";
 constexpr wchar_t kLandingClass[] = L"WindowPilesOrganizerLanding";
 constexpr wchar_t kStandInClass[] = L"WindowPilesOrganizerStandIn";
-const COLORREF kWalnut = RGB(123, 75, 42);  // the brand walnut: where a moved organizer will land
 const COLORREF kCream = RGB(246, 238, 228);
 const COLORREF kFlagPaper = RGB(252, 250, 244);
 constexpr const MemoColor* kFlagColors = kMemoColors;  // notes/memo_store.h
@@ -119,11 +118,11 @@ void TearOffMemo(const std::wstring& path, POINT pt, UINT dpi) {
 }  // namespace
 
 Organizer::Organizer(OrganizerHost& host, const Place& place) : host_(host), place_(place) {
-    handle_ = MakeWindow(kHandleClass, &Organizer::HandleProc, this, L"Neverflow 오거나이저");
-    tray_ = MakeWindow(kTrayClass, &Organizer::TrayProc, this, L"Neverflow 오거나이저 트레이");
-    flags_ = MakeWindow(kFlagsClass, &Organizer::FlagsProc, this, L"Neverflow 메모 플래그");
-    peek_ = MakeWindow(kPeekClass, &Organizer::PeekProc, this, L"Neverflow 메모 미리보기");
-    landing_ = MakeWindow(kLandingClass, DefWindowProcW, this, L"Neverflow 오거나이저 놓을 자리");
+    handle_ = MakeWindow(kHandleClass, &Organizer::HandleProc, this, L"Olive Deck 오거나이저");
+    tray_ = MakeWindow(kTrayClass, &Organizer::TrayProc, this, L"Olive Deck 오거나이저 트레이");
+    flags_ = MakeWindow(kFlagsClass, &Organizer::FlagsProc, this, L"Olive Deck 메모 플래그");
+    peek_ = MakeWindow(kPeekClass, &Organizer::PeekProc, this, L"Olive Deck 메모 미리보기");
+    landing_ = MakeWindow(kLandingClass, DefWindowProcW, this, L"Olive Deck 오거나이저 놓을 자리");
     SetWindowLongPtrW(landing_, GWL_EXSTYLE, GetWindowLongPtrW(landing_, GWL_EXSTYLE) | WS_EX_TRANSPARENT);
     standIn_ = MakeWindow(kStandInClass, DefWindowProcW, this, L"");
     SetWindowLongPtrW(standIn_, GWL_EXSTYLE, GetWindowLongPtrW(standIn_, GWL_EXSTYLE) | WS_EX_TRANSPARENT);
@@ -229,11 +228,11 @@ void Organizer::ShowLanding(POINT c) {
     // A line along that whole edge says which screen and side; a dashed bookmark says where on it.
     Canvas canvas(w, workH);
     int line = S(3);
-    canvas.FillRoundRect(p.right ? RECT{w - line, 0, w, workH} : RECT{0, 0, line, workH}, 0, kWalnut, 110);
+    canvas.FillRoundRect(p.right ? RECT{w - line, 0, w, workH} : RECT{0, 0, line, workH}, 0, theme::kBrand, 110);
     int r = S(7);
     RECT b = p.right ? RECT{0, cy - h / 2, w + r, cy + h / 2} : RECT{-r, cy - h / 2, w, cy + h / 2};
-    canvas.FillRoundRect(b, r, kWalnut, 120);
-    canvas.DashedRoundRect(b, r, S(2), S(6), S(4), kWalnut, 255);
+    canvas.FillRoundRect(b, r, theme::kBrand, 120);
+    canvas.DashedRoundRect(b, r, S(2), S(6), S(4), theme::kBrand, 255);
     int x = p.right ? work.right - w : work.left;
     canvas.Present(landing_, {x, work.top});
     SetWindowPos(landing_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
@@ -941,7 +940,7 @@ void Organizer::Launch() {
     if (!f) {  // a window for it to fly in, kept for the next ones
         flights_.push_back({});
         f = &flights_.back();
-        f->hwnd = MakeWindow(kFlyClass, &Organizer::PeekProc, this, L"Neverflow 새 메모");
+        f->hwnd = MakeWindow(kFlyClass, &Organizer::PeekProc, this, L"Olive Deck 새 메모");
         SetWindowLongPtrW(f->hwnd, GWL_EXSTYLE, GetWindowLongPtrW(f->hwnd, GWL_EXSTYLE) | WS_EX_TRANSPARENT);
     }
     f->to = {at.x - z.cx / 2, at.y - z.cy / 2, at.x - z.cx / 2 + z.cx, at.y - z.cy / 2 + z.cy};

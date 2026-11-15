@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(WindowPiles LANGUAGES CXX RC)  # product name: Stack Neverflow (file names stay WindowPiles)
+project(WindowPiles LANGUAGES CXX RC)  # product name: Olive Deck (file names stay WindowPiles)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

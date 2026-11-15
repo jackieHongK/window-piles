@@ -87,13 +87,17 @@ void RegisterUrlProtocol() {
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
     const std::wstring base = L"Software\\Classes\\windowpiles";
     std::wstring cmd = L"\"" + std::wstring(exe) + L"\" \"%1\"";
-    // Only write when it isn't already pointing at us (a copy elsewhere, a rebuilt path).
-    wchar_t cur[MAX_PATH * 2] = {};
-    DWORD size = sizeof(cur);
+    // Only write when it isn't already ours: pointing at this exe (not a copy elsewhere, a rebuilt path) and
+    // named after the product as it is now.
+    const std::wstring name = L"URL:Olive Deck";
+    wchar_t cur[MAX_PATH * 2] = {}, curName[64] = {};
+    DWORD size = sizeof(cur), nameSize = sizeof(curName);
     if (RegGetValueW(HKEY_CURRENT_USER, (base + L"\\shell\\open\\command").c_str(), nullptr, RRF_RT_REG_SZ, nullptr, cur, &size) == ERROR_SUCCESS &&
-        cmd == cur)
+        cmd == cur &&
+        RegGetValueW(HKEY_CURRENT_USER, base.c_str(), nullptr, RRF_RT_REG_SZ, nullptr, curName, &nameSize) == ERROR_SUCCESS &&
+        name == curName)
         return;
-    bool ok = SetKey(HKEY_CURRENT_USER, base, nullptr, L"URL:Stack Neverflow") && SetKey(HKEY_CURRENT_USER, base, L"URL Protocol", L"") &&
+    bool ok = SetKey(HKEY_CURRENT_USER, base, nullptr, name) && SetKey(HKEY_CURRENT_USER, base, L"URL Protocol", L"") &&
               SetKey(HKEY_CURRENT_USER, base + L"\\DefaultIcon", nullptr, L"\"" + std::wstring(exe) + L"\",0") &&
               SetKey(HKEY_CURRENT_USER, base + L"\\shell\\open\\command", nullptr, cmd);
     Log("url protocol: windowpiles:// %s", ok ? "registered" : "could not be registered");

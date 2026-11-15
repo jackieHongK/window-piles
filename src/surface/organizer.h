@@ -1,4 +1,4 @@
-// The edge organizer (Neverflow Tray; a paid organizer, open to everyone during the beta): a walnut
+// The edge organizer (Olive Deck organizer; a paid organizer, open to everyone during the beta): a walnut
 // bookmark in the middle of a screen's left or right edge. Hovering it pulls out a tray (the bookmark
 // comes along on its edge) with the piles kept in it; their cards are off the desktop, so the screen
 // stays clear. Like a real tray it has a fixed number of slots, and a pile sits in whichever one it was

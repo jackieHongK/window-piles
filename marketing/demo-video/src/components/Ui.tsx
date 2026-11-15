@@ -184,17 +184,17 @@ export const Toast: React.FC<{ icon: string; from: string; text: string; at: num
   );
 };
 
-/** Stack Neverflow mark (same as the app icon, src/app/app_icon.cpp): a walnut tile, a cream U-shaped
+/** Olive Deck mark (same as the app icon, src/app/app_icon.cpp): a walnut tile, a cream U-shaped
  *  tray, and three cards stacked inside it — all below the rim, "never overflow". 64-unit grid. */
 export const Logo: React.FC<{ size?: number }> = ({ size = 72 }) => (
   <svg width={size} height={size} viewBox="0 0 64 64">
     <defs>
-      <linearGradient id="sn-walnut" x1="0" y1="0" x2="0" y2="1">
+      <linearGradient id="od-walnut" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0" stopColor="#7E5536" />
         <stop offset="1" stopColor="#4A2E1D" />
       </linearGradient>
     </defs>
-    <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#sn-walnut)" />
+    <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#od-walnut)" />
     <rect x="20" y="40" width="24" height="6" rx="2" fill="#FFFFFF" />
     <rect x="20" y="32.5" width="24" height="6" rx="2" fill="#BFE3CF" />
     <rect x="20" y="25" width="24" height="6" rx="2" fill="#5B9AC4" />
@@ -204,7 +204,7 @@ export const Logo: React.FC<{ size?: number }> = ({ size = 72 }) => (
 );
 
 export const BRAND = {
-  name: 'Stack Neverflow',
+  name: 'Olive Deck',
   slogan: 'Tasks stack up, but never overflow.',
   tagline: 'Your windows. Your tasks. One organized desktop.',
 };

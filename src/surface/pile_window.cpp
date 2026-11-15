@@ -87,7 +87,7 @@ SIZE PileWindow::WindowSize(UINT dpi) {
 
 PileWindow::PileWindow(Pile& pile, PileHost& host) : pile_(pile), host_(host) {
     RegisterOnce();
-    hwnd_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kClass, L"Stack Neverflow 더미",
+    hwnd_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kClass, L"Olive Deck 더미",
                             WS_POPUP, pile.pos.x, pile.pos.y, 1, 1, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     SetWindowLongPtrW(hwnd_, GWLP_USERDATA, (LONG_PTR)this);
     SetWindowLongPtrW(hwnd_, GWLP_WNDPROC, (LONG_PTR)&PileWindow::WndProc);
