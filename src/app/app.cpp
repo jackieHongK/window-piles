@@ -967,7 +967,7 @@ void App::OnPileMenu(Pile& pile, POINT pt) {
     items.push_back({kMenuStyle, L"이름·색 바꾸기…"});
     if (organizer_) {
         bool full = !pile.docked && organizer_->Full();
-        items.push_back({kMenuDock, pile.docked ? L"오거나이저에서 빼기" : L"오거나이저에 꽂기",
+        items.push_back({kMenuDock, pile.docked ? L"Sideck에서 빼기" : L"Sideck에 꽂기",
                          full ? std::to_wstring(organizer_->Capacity()) + L"칸이 다 찼어요" : L"", full});
     }
     if (!pile.members.empty()) items.push_back({kMenuDissolve, L"더미 풀기", L"창은 그대로"});
@@ -1627,7 +1627,7 @@ void App::ShowTrayMenu() {
     for (auto& p : piles_) hidden += p->HiddenCount();
     std::vector<MenuItem> items = {
         {kMenuOnTop, L"항상 위로", uiHidden_ ? L"기본값" : L"✓"},
-        {kMenuHideUi, L"숨기기", uiHidden_ ? L"✓" : L"카드·오거나이저 잠시 치우기"},
+        {kMenuHideUi, L"숨기기", uiHidden_ ? L"✓" : L"카드·Sideck 잠시 치우기"},
         {},
         {kMenuRestoreAll, L"모든 창 꺼내기", hidden ? std::to_wstring(hidden) + L"개" : L"", hidden == 0},
         {kMenuStats, L"작업 기록", L"오늘 쓴 시간"},
@@ -1755,9 +1755,9 @@ void App::OnOrganizerMenu(Pile* pile, POINT pt) {
     // Quick things here; side, slide, material and the rest are in 설정 · 사용법.
     std::vector<MenuItem> items = {
         {kMenuMemoFolder, L"메모 폴더 열기", L".txt 파일"},
-        {kMenuHelp, L"오거나이저 설정…", L"위치 · 재질 · 서랍"},
+        {kMenuHelp, L"Sideck 설정…", L"위치 · 재질 · 서랍"},
         {},
-        {kMenuOrganizer, L"가장자리 오거나이저 끄기", L"카드는 바탕화면으로"},
+        {kMenuOrganizer, L"가장자리 Sideck 끄기", L"카드는 바탕화면으로"},
     };
     UINT id = ShowMenu(items, pt);
     if (id == kMenuMemoFolder) ShellExecuteW(nullptr, L"open", MemoDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL);

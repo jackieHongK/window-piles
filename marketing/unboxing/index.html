@@ -1,5 +1,5 @@
 <meta charset="utf-8">
-<title>Olive Deck Tray 언박싱</title>
+<title>Sideck Tray 언박싱</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -106,10 +106,10 @@ button{font:inherit;color:inherit}
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="mk-od" viewBox="0 0 40 40"><path d="M5 12v17a6 6 0 0 0 6 6h18a6 6 0 0 0 6-6V12" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><rect x="10" y="26" width="20" height="5" rx="1.8" fill="currentColor"/><rect x="10" y="19.5" width="20" height="5" rx="1.8" fill="currentColor" opacity=".72"/><rect x="10" y="13" width="20" height="5" rx="1.8" fill="currentColor" opacity=".45"/></symbol></svg>
 
-<div id="stage" aria-label="Olive Deck Tray Walnut 언박싱 3D 장면"></div>
+<div id="stage" aria-label="Sideck Tray Walnut 언박싱 3D 장면"></div>
 
 <header class="hud-top">
-  <div class="brand"><svg aria-hidden="true"><use href="#mk-od"/></svg><b>Olive Deck Tray · Walnut</b><span>OD-TR-WN · 언박싱 PoC</span></div>
+  <div class="brand"><svg aria-hidden="true"><use href="#mk-od"/></svg><b>Sideck Tray · Walnut</b><span>SD-TR-WN · 언박싱 PoC</span></div>
   <div class="tools">
     <button class="tb" id="bSound" aria-pressed="true" type="button">소리</button>
     <button class="tb" id="bStill" aria-pressed="false" type="button" title="동작 줄이기: 단계별 정지 컷">정지 컷</button>
@@ -163,7 +163,7 @@ button{font:inherit;color:inherit}
     <figure><img src="pkg_open.jpg" alt="뚜껑을 연 상자 안, 차콜 벨벳 덮개 위에 놓인 감사 엽서" loading="lazy"><figcaption>벨벳 덮개와 엽서</figcaption></figure>
     <figure><img src="pkg_reveal.jpg" alt="벨벳 덮개를 넘기자 드러난 월넛 트레이" loading="lazy"><figcaption>덮개를 넘기면</figcaption></figure>
     <figure><img src="pkg_dark.jpg" alt="어두운 배경의 패키지, 모서리를 따라 흐르는 빛" loading="lazy"><figcaption>패키지 · 다크</figcaption></figure>
-    <figure><img src="cycles_engraving.jpg" alt="옆판에 0.2 mm 파인 OD-TR-WN · No.0042 각인과 로고" loading="lazy"><figcaption>각인 0.2 mm · 낮은 조명</figcaption></figure>
+    <figure><img src="cycles_engraving.jpg" alt="옆판에 0.2 mm 파인 SD-TR-WN · No.0042 각인과 로고" loading="lazy"><figcaption>각인 0.2 mm · 낮은 조명</figcaption></figure>
   </div>
   <h3>실제 치수 (mm)</h3>
   <table>
@@ -501,7 +501,7 @@ function bandMat(isUpper) {
       const yEdge = isUpper ? STK.band * s : 0;
       for (let x = STK.pitch / 2; x < STK.len; x += STK.pitch) { g.beginPath(); g.arc(x * s, yEdge, 0.32 * s, 0, 7); g.fill(); }
       g.fillStyle = 'rgba(241,236,227,.75)'; g.font = FONT.mono(2 * s); g.textBaseline = 'middle';
-      if (isUpper) g.fillText('OD-TR-WN  ·  SEALED FOR YOU', 6 * s, STK.band * s * 0.42); }
+      if (isUpper) g.fillText('SD-TR-WN  ·  SEALED FOR YOU', 6 * s, STK.band * s * 0.42); }
     if (kind === 'orm') { g.fillStyle = 'rgb(255,110,0)'; g.fillRect(0, 0, STK.len * s, STK.band * s); }
   }, { base: WAL, rough: 0.45, sheen: 0.1 });
 }
@@ -546,23 +546,23 @@ const sleeveTop = printed(SL.w, SL.d, 4, (g, kind, s) => {
   const W = SL.w * s, H = SL.d * s, bx = 22 * s, bw = 16 * s;
   if (kind === 'color') {
     g.fillStyle = BAND; g.fillRect(bx, 0, bw, H);
-    g.fillStyle = '#8A857C'; g.font = FONT.mono(3 * s); g.fillText('OLIVE DECK OBJECT No.01', 50 * s, H - 12 * s);
-    g.fillStyle = '#C9C9CC'; g.font = FONT.mono(3.4 * s); g.textAlign = 'right'; g.fillText('OD-TR-WN', W - 14 * s, H - 12 * s);
+    g.fillStyle = '#8A857C'; g.font = FONT.mono(3 * s); g.fillText('SIDECK OBJECT No.01', 50 * s, H - 12 * s);
+    g.fillStyle = '#C9C9CC'; g.font = FONT.mono(3.4 * s); g.textAlign = 'right'; g.fillText('SD-TR-WN', W - 14 * s, H - 12 * s);
   }
   if (kind === 'height') { drawMark(g, W / 2 + 10 * s - 22 * s, H / 2 - 26 * s, 44 * s, '#8c8c8c'); g.fillStyle = '#9a9a9a'; g.font = FONT.disp(700, 10 * s); g.textAlign = 'center'; g.fillText('Olive Deck', W / 2 + 10 * s, H / 2 + 34 * s); }
-  if (kind === 'orm') { g.fillStyle = 'rgb(255,60,255)'; g.font = FONT.mono(3.4 * s); g.textAlign = 'right'; g.fillText('OD-TR-WN', W - 14 * s, H - 12 * s); g.fillStyle = 'rgb(255,200,0)'; g.fillRect(bx, 0, bw, H); }
+  if (kind === 'orm') { g.fillStyle = 'rgb(255,60,255)'; g.font = FONT.mono(3.4 * s); g.textAlign = 'right'; g.fillText('SD-TR-WN', W - 14 * s, H - 12 * s); g.fillStyle = 'rgb(255,200,0)'; g.fillRect(bx, 0, bw, H); }
 }, { base: '#F5F3EE', rough: 0.95, deboss: true });
 const sleeveFront = printed(SL.w, SL.h, 4, (g, kind, s) => {
   const W = SL.w * s, H = SL.h * s, bx = 22 * s, bw = 16 * s;
   if (kind === 'color') {
     g.fillStyle = BAND; g.fillRect(bx, 0, bw, H);
-    g.fillStyle = '#2B2925'; g.font = FONT.disp(700, 11 * s); g.fillText('Olive Deck Tray', 50 * s, 40 * s);
+    g.fillStyle = '#2B2925'; g.font = FONT.disp(700, 11 * s); g.fillText('Sideck Tray', 50 * s, 40 * s);
     g.fillStyle = '#6E6A62'; g.font = FONT.disp(400, 7 * s); g.fillText('Walnut', 50 * s, 52 * s);
     g.font = FONT.ko(500, 3.6 * s); g.fillStyle = '#8A857C'; g.fillText('올리브 덱 트레이 · 월넛 무늬목 · 240 × 116 × 66 mm', 50 * s, 74 * s);
-    g.fillStyle = '#C9C9CC'; g.font = FONT.mono(3.4 * s); g.textAlign = 'right'; g.fillText('OD-TR-WN', W - 14 * s, H - 12 * s);
+    g.fillStyle = '#C9C9CC'; g.font = FONT.mono(3.4 * s); g.textAlign = 'right'; g.fillText('SD-TR-WN', W - 14 * s, H - 12 * s);
   }
-  if (kind === 'height') { g.fillStyle = '#b0b0b0'; g.font = FONT.disp(700, 11 * s); g.fillText('Olive Deck Tray', 50 * s, 40 * s); }
-  if (kind === 'orm') { g.fillStyle = 'rgb(255,60,255)'; g.font = FONT.mono(3.4 * s); g.textAlign = 'right'; g.fillText('OD-TR-WN', W - 14 * s, H - 12 * s); g.fillStyle = 'rgb(255,200,0)'; g.fillRect(bx, 0, bw, H); }
+  if (kind === 'height') { g.fillStyle = '#b0b0b0'; g.font = FONT.disp(700, 11 * s); g.fillText('Sideck Tray', 50 * s, 40 * s); }
+  if (kind === 'orm') { g.fillStyle = 'rgb(255,60,255)'; g.font = FONT.mono(3.4 * s); g.textAlign = 'right'; g.fillText('SD-TR-WN', W - 14 * s, H - 12 * s); g.fillStyle = 'rgb(255,200,0)'; g.fillRect(bx, 0, bw, H); }
 }, { base: '#F5F3EE', rough: 0.95, deboss: true });
 const sleeveBack = printed(SL.w, SL.h, 2, (g, kind, s) => { if (kind === 'color') { g.fillStyle = BAND; g.fillRect((SL.w - 38) * s, 0, 16 * s, SL.h * s); } }, { base: '#F5F3EE', rough: 0.95 });
 const SW = new THREE.MeshPhysicalMaterial({ color: '#F5F3EE', roughness: 0.95, normalMap: paperN, normalScale: new THREE.Vector2(0.3, 0.3), sheen: 0.3, sheenRoughness: 0.75, sheenColor: '#fff' });
@@ -589,7 +589,7 @@ function engravingMaterial() {
   // upper wall (in its own shadow) and catches a thin highlight on the lower lip, which is what reads as "cut in"
   const s = 32, Wmm = 52, Hmm = 8, W = Wmm * s, H = Hmm * s;
   const draw = (g, dy) => { g.fillStyle = '#000'; g.fillRect(0, 0, W, H); g.save(); g.translate(0, dy); drawMark(g, 0.4 * s, 0.6 * s, 6.6 * s, '#fff');
-    g.fillStyle = '#fff'; g.font = FONT.mono(3.9 * s); g.textBaseline = 'middle'; g.fillText('OD-TR-WN · No.0042', 8 * s, H / 2 + 0.2 * s); g.restore(); };
+    g.fillStyle = '#fff'; g.font = FONT.mono(3.9 * s); g.textBaseline = 'middle'; g.fillText('SD-TR-WN · No.0042', 8 * s, H / 2 + 0.2 * s); g.restore(); };
   const mk = canvas(W, H); draw(mk.getContext('2d'), 0);
   const up = canvas(W, H); draw(up.getContext('2d'), 0.09 * s);          // mask shifted down: where the upper wall overhangs
   const bl = canvas(W, H), gb = bl.getContext('2d'); gb.filter = `blur(${0.1 * s}px)`; gb.drawImage(mk, 0, 0);
@@ -740,7 +740,7 @@ const sealMat = (() => { const c = canvas(512, 512), g = c.getContext('2d');
   g.strokeStyle = 'rgba(241,236,227,.5)'; g.lineWidth = 3; g.beginPath(); g.arc(256, 256, 226, 0, 7); g.stroke();
   drawMark(g, 256 - 95, 256 - 110, 190, '#F1ECE3');
   g.fillStyle = 'rgba(241,236,227,.8)'; g.font = FONT.mono(30); g.textAlign = 'center';
-  const txt = 'OLIVE DECK · WALNUT · ';
+  const txt = 'SIDECK · WALNUT · ';
   for (let i = 0; i < txt.length; i++) { const ang = -Math.PI / 2 + (i / txt.length) * Math.PI * 2; g.save(); g.translate(256 + Math.cos(ang) * 196, 256 + Math.sin(ang) * 196); g.rotate(ang + Math.PI / 2); g.fillText(txt[i], 0, 10); g.restore(); }
   return new THREE.MeshPhysicalMaterial({ map: tex(c), roughness: 0.42, clearcoat: 0.4, clearcoatRoughness: 0.25 }); })();
 const seal = new THREE.Mesh(new THREE.CircleGeometry(16, 48).rotateX(-Math.PI / 2), sealMat);
@@ -759,7 +759,7 @@ placeSeal();
 function cardArt(wmm, hmm, s, draw, base) { const c = canvas(wmm * s, hmm * s), g = c.getContext('2d'); g.fillStyle = base; g.fillRect(0, 0, c.width, c.height); draw(g, s, c.width, c.height); return c; }
 const manualArt = cardArt(90, 130, 8, (g, s, W) => {
   drawMark(g, 9 * s, 9 * s, 12 * s, WAL);
-  g.fillStyle = '#1A1917'; g.font = FONT.disp(700, 8 * s); g.fillText('Olive Deck Tray', 9 * s, 34 * s);
+  g.fillStyle = '#1A1917'; g.font = FONT.disp(700, 8 * s); g.fillText('Sideck Tray', 9 * s, 34 * s);
   g.fillStyle = '#6E6A62'; g.font = FONT.ko(500, 3.6 * s); g.fillText('올리브 덱 트레이 · 월넛', 9 * s, 41 * s);
   g.fillStyle = '#1A1917'; g.font = FONT.ko(700, 4.4 * s); g.fillText('책상에 놓는 법', 9 * s, 60 * s);
   const steps = ['앱에서 정리대 쇼룸을 열고', '"책상에 놓기"를 누릅니다.', '화면 가장자리로 끌면', '착 붙습니다.', '더미 카드가 일정한', '간격으로 꽂힙니다.'];
@@ -768,7 +768,7 @@ const manualArt = cardArt(90, 130, 8, (g, s, W) => {
     g.fillStyle = '#3A3833'; g.font = FONT.ko(500, 3.6 * s); g.fillText(steps[i * 2], 16 * s, y); g.fillText(steps[i * 2 + 1], 16 * s, y + 5 * s);
   }
   g.strokeStyle = '#D8D3C8'; g.lineWidth = 2; g.beginPath(); g.moveTo(9 * s, 118 * s); g.lineTo(W - 9 * s, 118 * s); g.stroke();
-  g.fillStyle = '#8A857C'; g.font = FONT.mono(3 * s); g.fillText('OLIVE DECK · OD-TR-WN', 9 * s, 124 * s);
+  g.fillStyle = '#8A857C'; g.font = FONT.mono(3 * s); g.fillText('OLIVE DECK · SD-TR-WN', 9 * s, 124 * s);
 }, '#F4F1EA');
 const labelArt = cardArt(90, 130, 8, (g, s) => {
   g.fillStyle = '#1A1917'; g.font = FONT.ko(700, 4.4 * s); g.fillText('이름표 스티커', 8 * s, 14 * s);
@@ -806,7 +806,7 @@ function holoMaterials() {
   gt.putImageData(ti, 0, 0);
   const ink = (fn) => { fn(gc, false); go.save(); fn(go, true); go.restore(); };
   ink((g, isO) => { g.fillStyle = isO ? 'rgb(0,140,0)' : '#F1ECE3'; g.beginPath(); g.roundRect(34, 34, W - 68, 92, 10); g.fill(); });
-  gc.fillStyle = '#1A1917'; gc.font = FONT.disp(700, 46); gc.fillText('Olive Deck Tray', 58, 92);
+  gc.fillStyle = '#1A1917'; gc.font = FONT.disp(700, 46); gc.fillText('Sideck Tray', 58, 92);
   gc.fillStyle = '#7B4B2A'; gc.font = FONT.mono(20); gc.textAlign = 'right'; gc.fillText('OBJECT No.01', W - 58, 92); gc.textAlign = 'left';
   const tx = W / 2, ty = 400;
   const poly = (g, pts, fill) => { g.fillStyle = fill; g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (const p of pts.slice(1)) g.lineTo(p[0], p[1]); g.closePath(); g.fill(); };
@@ -825,14 +825,14 @@ function holoMaterials() {
   foilText('FOUNDERS EDITION', 62, 666, FONT.mono(22));
   foilText('No. 0042', 58, 770, FONT.disp(700, 92));
   foilText('/ 500', W - 62, 770, FONT.disp(400, 44), 'right');
-  gc.fillStyle = '#8A857C'; gc.font = FONT.mono(18); gc.textAlign = 'left'; gc.fillText('OD-TR-WN · WALNUT · 2026', 62, 818);
+  gc.fillStyle = '#8A857C'; gc.font = FONT.mono(18); gc.textAlign = 'left'; gc.fillText('SD-TR-WN · WALNUT · 2026', 62, 818);
   gc.textAlign = 'right'; gc.fillText('OLIVE DECK', W - 62, 818); gc.textAlign = 'left';
   gc.strokeStyle = 'rgba(25,24,22,.6)'; gc.lineWidth = 3; gc.beginPath(); gc.roundRect(22, 22, W - 44, H - 44, 16); gc.stroke();
   const ormT = tex(orm, { srgb: false });
   const front = new THREE.MeshPhysicalMaterial({ map: tex(col), roughnessMap: ormT, metalnessMap: ormT, iridescenceMap: ormT, roughness: 1, metalness: 1,
     iridescence: 1, iridescenceIOR: 1.75, iridescenceThicknessRange: [160, 900], iridescenceThicknessMap: tex(thk, { srgb: false }), clearcoat: 1, clearcoatRoughness: 0.05 });
   const bc = canvas(315, 440), gb = bc.getContext('2d'); gb.fillStyle = '#6A4126'; gb.fillRect(0, 0, 315, 440); drawMark(gb, 157 - 50, 200 - 60, 100, '#E9DCCB');
-  gb.fillStyle = 'rgba(233,220,203,.7)'; gb.font = FONT.mono(13); gb.textAlign = 'center'; gb.fillText('OLIVE DECK OBJECT No.01', 157, 300);
+  gb.fillStyle = 'rgba(233,220,203,.7)'; gb.font = FONT.mono(13); gb.textAlign = 'center'; gb.fillText('SIDECK OBJECT No.01', 157, 300);
   return { front, back: new THREE.MeshPhysicalMaterial({ map: tex(bc), roughness: 0.5, clearcoat: 0.8, clearcoatRoughness: 0.1 }) };
 }
 const holoM = holoMaterials();
@@ -879,7 +879,7 @@ cut.position.set(0, PC.h + PC.t + 0.3, 0); cut.scale.x = 0.001; parcel.add(cut);
 const labelTex = cardArt(100, 64, 6, (g, s) => {
   g.fillStyle = '#1A1917'; g.font = FONT.mono(3.2 * s); g.fillText('OLIVE DECK · SHIP TO', 6 * s, 9 * s);
   g.font = FONT.ko(700, 6 * s); g.fillText('받는 곳: 당신의 책상 위', 6 * s, 22 * s);
-  g.font = FONT.mono(3 * s); g.fillStyle = '#5A5650'; g.fillText('OD-TR-WN · 1 / 1 · 2026-10-24', 6 * s, 30 * s);
+  g.font = FONT.mono(3 * s); g.fillStyle = '#5A5650'; g.fillText('SD-TR-WN · 1 / 1 · 2026-10-24', 6 * s, 30 * s);
   for (let i = 0; i < 64; i++) { const w = hash(i, 7) > 0.6 ? 2.2 : 1; g.fillStyle = '#111'; g.fillRect((6 + i * 1.35) * s, 38 * s, w * 0.5 * s, 18 * s); }
 }, '#F7F6F2');
 const label = new THREE.Mesh(new THREE.PlaneGeometry(100, 64).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: tex(labelTex), roughness: 0.55 }));
@@ -1373,7 +1373,7 @@ ENTER[7] = async () => {
 const HOTSPOTS = [
   { p: V(120, PAD + 28, 58), n: V(0.6, 0.3, 0.75), cam: [40, 24, 62], spec: 'R 0.5 mm', title: '모서리 라운드', body: '모든 모서리를 0.5 mm로 굴렸습니다. 빛이 모서리를 따라 가늘게 한 줄로 흐릅니다.', who: '손끝에 걸리지 않고, 카드를 빼고 넣을 때 종이 모서리가 긁히지 않아요.' },
   { p: V(40, PAD + 17, 58), n: V(0, 0.1, 1), cam: [16, 10, 64], spec: '월넛 무늬목 0.6 t · 오일 반광', title: '나뭇결과 물관', body: '곧은 결의 월넛 무늬목입니다. 가까이 보면 결을 따라 길쭉한 물관 자국이 보입니다.', who: '오일 마감이라 지문이 덜 남고, 손에 닿는 감촉이 따뜻합니다.' },
-  { p: V(120, PAD + 12, 6), n: V(1, 0, 0), cam: [88, 10, 6], spec: '레이저 각인 · 깊이 0.2 mm', title: '품번과 일련번호', body: '오른쪽 옆판에 OD-TR-WN과 에디션 번호를 새겨 넣었습니다. 낮은 조명에서 홈의 벽이 그림자를 만듭니다.', who: '상자, 에디션 카드와 같은 번호라 내 물건이라는 표시가 남습니다.' },
+  { p: V(120, PAD + 12, 6), n: V(1, 0, 0), cam: [88, 10, 6], spec: '레이저 각인 · 깊이 0.2 mm', title: '품번과 일련번호', body: '오른쪽 옆판에 SD-TR-WN과 에디션 번호를 새겨 넣었습니다. 낮은 조명에서 홈의 벽이 그림자를 만듭니다.', who: '상자, 에디션 카드와 같은 번호라 내 물건이라는 표시가 남습니다.' },
   { p: V(80, PAD + 104, 22), n: V(0, 0.25, 1), cam: [150, 40, 210], spec: '기울기 10.5°', title: '꽂은 메모의 각도', body: '카드가 10.5° 뒤로 기대어 서도록 칸과 뒤판 높이를 맞췄습니다. 맨 뒤 카드는 뒤판 위 모서리에 닿습니다.', who: '앞에서 봤을 때 카드 앞면이 화면 쪽을 향해 이름이 읽히고, 위로 쏙 뽑힙니다.', needsCards: true },
   { p: V(-80, PAD + 11, 13.75), n: V(0, 1, 0.3), cam: [-30, 120, 120], spec: '칸 간격 27.5 mm · 4칸', title: '일정한 칸', body: '칸막이 높이 11 mm, 칸 간격 27.5 mm로 카드 네 장이 같은 간격으로 섭니다.', who: '카드가 서로 기대어 쓰러지지 않고, 몇 장이 꽂혔는지 한눈에 보여요.' },
   { p: V(-60, PAD + 28, 58), n: V(0, 0.7, 0.7), cam: [-24, 40, 100], spec: '앞턱 높이 28 mm', title: '낮은 앞턱', body: '앞쪽은 28 mm로 낮추고 옆판을 뒤로 갈수록 높게 잘랐습니다.', who: '카드 아래쪽을 손가락으로 바로 집을 수 있어요.' },

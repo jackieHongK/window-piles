@@ -1,6 +1,6 @@
 # Product-photography pass on the built tray: seamless cyclorama, large soft top light, thin rear strip lights that
 # draw a line along every R0.5 edge, satin walnut, and a fixed shot list (hero, profile, top, float, edge, dark).
-# Run: blender -b out/olive_deck_tray_walnut.blend -P studio_shots.py -- <out_dir> [--quick] [--only name,name]
+# Run: blender -b out/sideck_tray_walnut.blend -P studio_shots.py -- <out_dir> [--quick] [--only name,name]
 import bpy, bmesh, math, os, sys
 from mathutils import Vector
 
@@ -120,5 +120,5 @@ shot('studio_float', loc=(0.5, -0.62, 0.075), look=(0.0, 0.0, 0.05), lens=85, fs
 shot('studio_edge', loc=lambda: tp(205, 75, 150), look=lambda: tp(112, 27, 50), lens=105, fstop=8, rot=-28, cards_on=False, rims=40)
 # dark hero: product alone, rims only
 shot('studio_dark', loc=(0.48, -0.56, 0.16), look=(0.0, 0.0, 0.04), lens=85, fstop=11, rot=-28, cards_on=False, dark=True, rims=38, topw=22, fillw=1, exposure=0.1)
-bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, 'olive_deck_tray_walnut_studio.blend'))
+bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, 'sideck_tray_walnut_studio.blend'))
 print('[studio] done')

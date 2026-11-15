@@ -1,4 +1,4 @@
-# Olive Deck Tray · Walnut — Cycles stills + baked AO lightmap + glb for the realtime page.
+# Sideck Tray · Walnut — Cycles stills + baked AO lightmap + glb for the realtime page.
 # Run: blender -b -P build_tray.py -- <out_dir> [--quick]
 # Geometry is authored in the realtime page's frame (mm, y up, +z = front) and mapped to Blender (m, z up)
 # so the exported glb lands back in the page unchanged.
@@ -132,7 +132,7 @@ def evaluated_mesh(ob):
 def engraving_cutter():
     font = bpy.data.fonts.load('C:/Windows/Fonts/consola.ttf')
     cu = bpy.data.curves.new('EngraveText', 'FONT'); cu.font = font
-    cu.body = 'OD-TR-WN \u00b7 No.0042'; cu.size = 4.4 * MM; cu.extrude = 0.2 * MM
+    cu.body = 'SD-TR-WN \u00b7 No.0042'; cu.size = 4.4 * MM; cu.extrude = 0.2 * MM
     cu.align_x = 'CENTER'; cu.align_y = 'CENTER'
     t = link('EngraveText', cu)
     # text x -> page -z (reads left-to-right seen from +x), text y -> page +y, text normal -> page +x
@@ -350,5 +350,5 @@ tray.select_set(True)
 bpy.ops.export_scene.gltf(filepath=os.path.join(OUT, 'tray_body.glb'), export_format='GLB', use_selection=True,
                           export_texcoords=True, export_normals=True, export_materials='PLACEHOLDER', export_apply=True)
 tray.rotation_euler.z = rot; tray.location = loc
-bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, 'olive_deck_tray_walnut.blend'))
+bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, 'sideck_tray_walnut.blend'))
 print('[build] done', len(me.polygons), 'faces', sum(1 for f in me.polygons if f.material_index == 1), 'engraved')

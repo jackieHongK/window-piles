@@ -119,7 +119,7 @@ void ShowMemoList(POINT anchor) {
     spec.windowClass = L"WindowPilesMemoList";
     spec.title = L"메모";
     spec.button = L"폴더 열기";
-    spec.empty = L"아직 메모가 없어요. 오거나이저의 디스펜서에서 한 장 뽑아 시작해 보세요.";
+    spec.empty = L"아직 메모가 없어요. Sideck의 디스펜서에서 한 장 뽑아 시작해 보세요.";
     spec.rows = [] {
         std::vector<ListRow> rows;
         g_shown = ListMemos();

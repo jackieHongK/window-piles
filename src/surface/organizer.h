@@ -2,7 +2,7 @@
 // bookmark in the middle of a screen's left or right edge. Hovering it pulls out a tray (the bookmark
 // comes along on its edge) with the piles kept in it; their cards are off the desktop, so the screen
 // stays clear. Like a real tray it has a fixed number of slots, and a pile sits in whichever one it was
-// put in. Cards go in by dragging them onto the bookmark (or "오거나이저에 꽂기") and out by dragging them
+// put in. Cards go in by dragging them onto the bookmark (or "Sideck에 꽂기") and out by dragging them
 // off the tray (the card follows the pointer, as it does going in); windows and files dragged onto a
 // card in the tray join that pile. The bookmark itself can be dragged along the edge, to the other
 // side or monitor. Below the piles, memos are Post-it flags whose colored tips stick out of the screen
